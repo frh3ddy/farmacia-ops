@@ -20,7 +20,12 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npm run build --workspace=packages/shared && npm run build --workspace=apps/worker && npm run build --workspace=apps/api",
+    "build:shared": "npm run build --workspace=packages/shared",
+    "build:worker": "npm run build:shared && npm run build --workspace=apps/worker",
+    "build:api": "npm run build:shared && npm run build --workspace=apps/api",
+    "postinstall": "npm run build:shared"
   },
   "dependencies": {
     "@nestjs/config": "^4.0.2",
