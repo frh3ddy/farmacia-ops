@@ -2,7 +2,7 @@
   "name": "@farmacia-ops/api",
   "version": "1.0.0",
   "scripts": {
-    "build": "npm exec -- tsc",
+    "build": "node ../../node_modules/typescript/bin/tsc || node node_modules/typescript/bin/tsc || node_modules/.bin/tsc || tsc",
     "start": "node dist/index.js"
   },
   "dependencies": {
