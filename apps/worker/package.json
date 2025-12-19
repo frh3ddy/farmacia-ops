@@ -2,7 +2,7 @@
   "name": "@farmacia-ops/worker",
   "version": "1.0.0",
   "scripts": {
-    "build": "node ../../node_modules/typescript/bin/tsc || node node_modules/typescript/bin/tsc || node_modules/.bin/tsc || tsc",
+    "build": "node ../../scripts/run-tsc.js",
     "start": "node dist/worker.js",
     "test:connection": "ts-node src/test-connection.ts"
   },
