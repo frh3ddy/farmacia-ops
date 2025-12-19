@@ -27,7 +27,6 @@
     "build:api": "npm run build:shared && npm run build --workspace=apps/api",
     "start:worker": "npm run start --workspace=apps/worker",
     "start:api": "npm run start --workspace=apps/api",
-    "postinstall": "npm run build:shared",
     "railway:build:worker": "npm run build:worker",
     "railway:build:api": "npm run build:api",
     "railway:start:worker": "npm run start:worker",
@@ -39,6 +38,7 @@
     "prisma": "^7.2.0"
   },
   "devDependencies": {
-    "@types/node": "^25.0.3"
+    "@types/node": "^25.0.3",
+    "typescript": "^5.0.0"
   }
 }
