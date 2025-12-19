@@ -25,6 +25,8 @@
     "build:shared": "npm run build --workspace=packages/shared",
     "build:worker": "npm run build:shared && npm run build --workspace=apps/worker",
     "build:api": "npm run build:shared && npm run build --workspace=apps/api",
+    "start:worker": "npm run start --workspace=apps/worker",
+    "start:api": "npm run start --workspace=apps/api",
     "postinstall": "npm run build:shared"
   },
   "dependencies": {
