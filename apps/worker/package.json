@@ -2,7 +2,7 @@
   "name": "@farmacia-ops/worker",
   "version": "1.0.0",
   "scripts": {
-    "build": "node -e \"const {execSync}=require('child_process');const path=require('path');const fs=require('fs');const tsc=require.resolve('typescript/bin/tsc');const pkgDir=path.dirname(require.resolve('./package.json'));execSync('node '+tsc+' -p '+path.join(pkgDir,'tsconfig.json'),{stdio:'inherit'})\"",
+    "build": "node -e \"const {execSync}=require('child_process');const path=require('path');const tsc=require.resolve('typescript/bin/tsc');const pkgDir=path.dirname(require.resolve('./package.json'));process.chdir(pkgDir);execSync('node '+tsc,{stdio:'inherit'})\"",
     "start": "node dist/worker.js",
     "test:connection": "ts-node src/test-connection.ts"
   },
