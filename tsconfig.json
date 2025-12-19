@@ -13,11 +13,11 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@farmacia-ops/shared": ["packages/shared/src"],
-      "@farmacia-ops/shared/*": ["packages/shared/src/*"]
+      "@farmacia-ops/shared": ["apps/shared/src"],
+      "@farmacia-ops/shared/*": ["apps/shared/src/*"]
     }
   },
-  "include": ["apps/**/*", "packages/**/*"],
+  "include": ["apps/**/*"],
   "exclude": ["node_modules", "dist"]
 }
 
