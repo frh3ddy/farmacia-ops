@@ -2,7 +2,7 @@
   "name": "@farmacia-ops/worker",
   "version": "1.0.0",
   "scripts": {
-    "build": "node -e \"const {execSync}=require('child_process');const tsc=require.resolve('typescript/bin/tsc');execSync('node '+tsc,{stdio:'inherit'})\"",
+    "build": "node -e \"require('child_process').execSync('node ' + require.resolve('typescript/bin/tsc'), {stdio:'inherit'})\"",
     "start": "node dist/worker.js",
     "test:connection": "ts-node src/test-connection.ts"
   },
