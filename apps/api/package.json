@@ -2,7 +2,7 @@
   "name": "@farmacia-ops/api",
   "version": "1.0.0",
   "scripts": {
-    "build": "node ../../scripts/run-tsc.js",
+    "build": "node -e \"const {execSync}=require('child_process');const tsc=require.resolve('typescript/bin/tsc');execSync('node '+tsc,{stdio:'inherit'})\"",
     "start": "node dist/index.js"
   },
   "dependencies": {
