@@ -2,8 +2,8 @@
 nixPkgs = ["nodejs_20", "npm"]
 
 [phases.install]
-cmds = ["npm install --omit=dev"]
+cmds = ["NODE_ENV= npm install --omit=dev"]
 
 [phases.build]
-cmds = ["npm install --include=dev"]
+cmds = ["NODE_ENV= npm install --include=dev"]
 
