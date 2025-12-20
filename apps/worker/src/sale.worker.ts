@@ -14,7 +14,8 @@ const prisma = new PrismaClient({ adapter });
 
 export async function processSaleJob(job: Job) {
   const { payload } = job.data;
-
+  console.log('Processing payment:', Job);
+  
   // Square webhook events have the object in data.object
   // For payment.created events, payload.object contains the Payment object
   const payment = payload?.object;
