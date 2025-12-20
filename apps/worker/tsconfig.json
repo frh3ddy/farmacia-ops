@@ -13,7 +13,8 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@farmacia-ops/shared": ["../shared/dist"]
+      "@farmacia-ops/shared": ["../shared/src"],
+      "@farmacia-ops/shared/*": ["../shared/src/*"]
     }
   },
   "include": ["src/**/*"],
