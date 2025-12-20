@@ -29,8 +29,8 @@ import {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    // Get signature from headers (handle both string and array formats)
-    const signatureHeader = req.headers['x-square-signature'];
+    // Get signature from headers - Square uses x-square-hmacsha256-signature or x-square-signature
+    const signatureHeader = req.headers['x-square-hmacsha256-signature'] || req.headers['x-square-signature'];
     const signature = Array.isArray(signatureHeader) 
       ? signatureHeader[0] 
       : signatureHeader;
@@ -47,13 +47,12 @@ import {
       return res.status(HttpStatus.BAD_REQUEST).send('Invalid request body');
     }
     
-    const bodyString = rawBody.toString('utf8');
-    
     // Check if signature header exists
     if (!signature) {
-      console.error('Missing x-square-signature header', {
+      console.error('Missing signature header', {
         headers: Object.keys(req.headers),
-        allHeaders: req.headers,
+        squareSignature: req.headers['x-square-signature'],
+        squareHmacSignature: req.headers['x-square-hmacsha256-signature'],
       });
       return res.status(HttpStatus.UNAUTHORIZED).send('Missing signature');
     }
@@ -65,16 +64,20 @@ import {
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).send('Server configuration error');
     }
   
-    if (!this.verifySignature(bodyString, signature, webhookSecret)) {
+    // Verify signature using raw body bytes directly (not string conversion)
+    if (!this.verifySignature(rawBody, signature, webhookSecret)) {
+      const bodyString = rawBody.toString('utf8');
       console.error('Signature verification failed', {
         signatureReceived: signature,
-        bodyLength: bodyString.length,
+        signatureLength: signature.length,
+        bodyLength: rawBody.length,
         bodyPreview: bodyString.substring(0, 100),
       });
       return res.status(HttpStatus.UNAUTHORIZED).send('Invalid signature');
     }
   
     // Parse the body for processing
+    const bodyString = rawBody.toString('utf8');
     let event: any;
     try {
       event = JSON.parse(bodyString);
@@ -93,23 +96,29 @@ import {
     return res.status(HttpStatus.OK).send('Accepted');
   }
   
-    private verifySignature(body: string, signature: string, secret: string): boolean {
+    private verifySignature(body: Buffer, signature: string, secret: string): boolean {
       try {
+        // Compute HMAC using raw body bytes directly
         const hmac = crypto
           .createHmac('sha256', secret)
           .update(body)
           .digest('base64');
         
-        // Use constant-time comparison to prevent timing attacks
-        // Both buffers must be the same length for timingSafeEqual
+        // Log for debugging (remove in production)
+        console.log('Signature verification', {
+          computedHmac: hmac,
+          receivedSignature: signature,
+          computedLength: hmac.length,
+          receivedLength: signature.length,
+          match: hmac === signature,
+        });
+        
+        // Both are base64 strings, compare directly using constant-time comparison
         const hmacBuffer = Buffer.from(hmac);
         const signatureBuffer = Buffer.from(signature);
         
+        // Use constant-time comparison to prevent timing attacks
         if (hmacBuffer.length !== signatureBuffer.length) {
-          console.error('Signature length mismatch', {
-            hmacLength: hmacBuffer.length,
-            signatureLength: signatureBuffer.length,
-          });
           return false;
         }
         
