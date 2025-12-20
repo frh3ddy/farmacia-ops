@@ -20,7 +20,11 @@ export interface WorkerConfig {
 export const WORKERS: WorkerConfig[] = [
   {
     queueName: 'sales',
-    processor: processSaleJob,
+    processor: (job: Job) => {
+      console.log('[DEBUG] [WORKER_CONFIG] Sales worker processor called for job:', job.id);
+      console.log('[DEBUG] [WORKER_CONFIG] Job data keys:', Object.keys(job.data || {}));
+      return processSaleJob(job);
+    },
     concurrency: 5,
     options: {
       attempts: 3,
