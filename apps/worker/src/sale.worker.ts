@@ -22,7 +22,7 @@ new Worker(
     const payment = payload.payment;
     const squareId = payment.id;
     const locationId = payment.location_id;
-
+    console.log('payment', payment);
     // Prevent double write (extra safety)
     const existing = await prisma.sale.findUnique({
       where: { squareId },
