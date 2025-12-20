@@ -1,4 +1,5 @@
 import 'dotenv/config';
+// @ts-ignore - PrismaClient is exported but TypeScript may not resolve it immediately after generation
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
