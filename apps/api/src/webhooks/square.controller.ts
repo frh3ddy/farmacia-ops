@@ -83,36 +83,14 @@ import {
       secretLength: webhookSecret.length,
       secretFirst5: webhookSecret.substring(0, 5),
       secretLast5: webhookSecret.substring(webhookSecret.length - 5),
-      isBase64Like: /^[A-Za-z0-9+/=]+$/.test(webhookSecret),
     });
     
-    // Square's webhook signature key - try both decoded and as-is
-    // Some Square implementations use base64-decoded key, others use it as-is
-    let verificationPassed = false;
-    
-    // Try with base64-decoded secret first
-    try {
-      const decodedSecret = Buffer.from(webhookSecret, 'base64');
-      console.log('Trying signature verification with decoded secret', {
-        originalLength: webhookSecret.length,
-        decodedLength: decodedSecret.length,
-      });
-      verificationPassed = this.verifySignature(rawBody, signature, decodedSecret, 'decoded');
-    } catch (error) {
-      console.log('Failed to decode secret, trying as-is', error);
-    }
-    
-    // If decoded didn't work, try with secret as-is
-    if (!verificationPassed) {
-      console.log('Trying signature verification with secret as-is', {
-        secretLength: webhookSecret.length,
-      });
-      verificationPassed = this.verifySignature(rawBody, signature, webhookSecret, 'as-is');
-    }
+    // Square's webhook signature key - use as-is (Square provides it in this format)
+    // Verify signature using raw body bytes directly
+    const verificationPassed = this.verifySignature(rawBody, signature, webhookSecret);
   
-    // Verify signature using raw body bytes directly (not string conversion)
     if (!verificationPassed) {
-      console.error('Signature verification failed', {
+      console.error('❌ Signature verification failed', {
         signatureReceived: signature,
         signatureLength: signature.length,
         bodyLength: rawBody.length,
@@ -120,6 +98,15 @@ import {
         secretLength: webhookSecret.length,
         secretPreview: webhookSecret.substring(0, 10) + '...',
       });
+      console.error('');
+      console.error('🔍 TROUBLESHOOTING:');
+      console.error('1. Verify you are using the Webhook Signature Key (not Application Secret)');
+      console.error('   - Go to: Square Developer Dashboard → Your App → Webhooks');
+      console.error('   - Copy the "Signature Key" (should be a long base64 string)');
+      console.error('   - Make sure you are using the key for the correct environment (Sandbox vs Production)');
+      console.error('2. The secret should be base64-encoded (only A-Z, a-z, 0-9, +, /, = characters)');
+      console.error('3. Verify the SQUARE_WEBHOOK_SECRET environment variable is set correctly in Railway');
+      console.error('');
       return res.status(HttpStatus.UNAUTHORIZED).send('Invalid signature');
     }
   
@@ -142,22 +129,22 @@ import {
     return res.status(HttpStatus.OK).send('Accepted');
   }
   
-    private verifySignature(body: Buffer, signature: string, secret: string | Buffer, method: string = 'unknown'): boolean {
+    private verifySignature(body: Buffer, signature: string, secret: string): boolean {
       try {
-        // Compute HMAC using raw body bytes directly
-        // Secret can be either a string or Buffer (decoded from base64)
+        // Compute HMAC using raw body bytes directly with secret as-is
         const hmac = crypto
           .createHmac('sha256', secret)
           .update(body)
           .digest('base64');
         
-        // Log for debugging (remove in production)
-        console.log(`Signature verification (${method})`, {
+        // Log for debugging
+        console.log('Signature verification', {
           computedHmac: hmac,
           receivedSignature: signature,
           computedLength: hmac.length,
           receivedLength: signature.length,
           match: hmac === signature,
+          bodyLength: body.length,
         });
         
         // Both are base64 strings, compare directly using constant-time comparison
@@ -166,16 +153,22 @@ import {
         
         // Use constant-time comparison to prevent timing attacks
         if (hmacBuffer.length !== signatureBuffer.length) {
+          console.error('Signature length mismatch', {
+            computedLength: hmacBuffer.length,
+            receivedLength: signatureBuffer.length,
+          });
           return false;
         }
         
         const matches = crypto.timingSafeEqual(hmacBuffer, signatureBuffer);
         if (matches) {
-          console.log(`✅ Signature verification PASSED using ${method} method`);
+          console.log('✅ Signature verification PASSED');
+        } else {
+          console.error('❌ Signature mismatch - computed and received signatures do not match');
         }
         return matches;
       } catch (error) {
-        console.error(`Error during signature verification (${method}):`, error);
+        console.error('Error during signature verification:', error);
         return false;
       }
     }
