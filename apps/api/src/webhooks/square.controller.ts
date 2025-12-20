@@ -43,9 +43,20 @@ import {
       console.error('Raw body is missing or not a Buffer', {
         bodyType: typeof req.body,
         isBuffer: Buffer.isBuffer(req.body),
+        bodyValue: req.body,
       });
       return res.status(HttpStatus.BAD_REQUEST).send('Invalid request body');
     }
+    
+    // Log body details for debugging
+    const bodyString = rawBody.toString('utf8');
+    console.log('Raw body details', {
+      bodyLength: rawBody.length,
+      bodyStringLength: bodyString.length,
+      bodyFirst100Chars: bodyString.substring(0, 100),
+      bodyLast100Chars: bodyString.substring(bodyString.length - 100),
+      bodyHash: crypto.createHash('sha256').update(rawBody).digest('hex'),
+    });
     
     // Check if signature header exists
     if (!signature) {
@@ -66,6 +77,14 @@ import {
     
     // Trim whitespace from secret (common issue)
     webhookSecret = webhookSecret.trim();
+    
+    // Log secret details (first/last few chars only for security)
+    console.log('Webhook secret details', {
+      secretLength: webhookSecret.length,
+      secretFirst5: webhookSecret.substring(0, 5),
+      secretLast5: webhookSecret.substring(webhookSecret.length - 5),
+      isBase64Like: /^[A-Za-z0-9+/=]+$/.test(webhookSecret),
+    });
     
     // Square's webhook signature key - try both decoded and as-is
     // Some Square implementations use base64-decoded key, others use it as-is
@@ -93,7 +112,6 @@ import {
   
     // Verify signature using raw body bytes directly (not string conversion)
     if (!verificationPassed) {
-      const bodyString = rawBody.toString('utf8');
       console.error('Signature verification failed', {
         signatureReceived: signature,
         signatureLength: signature.length,
@@ -106,7 +124,6 @@ import {
     }
   
     // Parse the body for processing
-    const bodyString = rawBody.toString('utf8');
     let event: any;
     try {
       event = JSON.parse(bodyString);
