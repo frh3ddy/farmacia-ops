@@ -28,7 +28,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "prisma:migrate:create": "./scripts/create-migration.sh"
   },
   "dependencies": {
     "@nestjs/config": "^4.0.2",
