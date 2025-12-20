@@ -15,6 +15,7 @@ export class SaleQueue {
         attempts: 5,
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: true,
+        removeOnFail: true, // Remove failed jobs so they don't block retries with same jobId
       },
     });
   }
