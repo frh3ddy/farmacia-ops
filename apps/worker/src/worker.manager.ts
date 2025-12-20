@@ -72,6 +72,22 @@ export class WorkerManager {
         if (waiting > 0) {
           console.log(`[DEBUG] [WORKER_MANAGER] ⚠️ Found ${waiting} waiting jobs in queue ${config.queueName}`);
         }
+        
+        if (failed > 0) {
+          console.log(`[DEBUG] [WORKER_MANAGER] ⚠️ Found ${failed} failed jobs in queue ${config.queueName}`);
+          // Get failed jobs to show details
+          const failedJobs = await managedWorker.queue.getFailed(0, failed);
+          for (const failedJob of failedJobs) {
+            console.error(`[DEBUG] [WORKER_MANAGER] Failed job details:`, {
+              id: failedJob.id,
+              name: failedJob.name,
+              attemptsMade: failedJob.attemptsMade,
+              failedReason: failedJob.failedReason,
+              stacktrace: failedJob.stacktrace,
+              data: JSON.stringify(failedJob.data, null, 2),
+            });
+          }
+        }
       } catch (error) {
         console.error(`[DEBUG] [WORKER_MANAGER] Error checking queue status:`, error);
       }
@@ -154,14 +170,21 @@ export class WorkerManager {
     });
 
     worker.on('failed', (job, err) => {
-      console.error(`[DEBUG] [WORKER_MANAGER] ❌ [${config.queueName}] Job ${job?.id} failed`);
+      console.error(`[DEBUG] [WORKER_MANAGER] ========================================`);
+      console.error(`[DEBUG] [WORKER_MANAGER] ❌ [${config.queueName}] Job ${job?.id} FAILED`);
+      console.error(`[DEBUG] [WORKER_MANAGER] Error name:`, err.name);
       console.error(`[DEBUG] [WORKER_MANAGER] Error message:`, err.message);
       console.error(`[DEBUG] [WORKER_MANAGER] Error stack:`, err.stack);
       if (job) {
+        console.error(`[DEBUG] [WORKER_MANAGER] Failed job ID:`, job.id);
+        console.error(`[DEBUG] [WORKER_MANAGER] Failed job name:`, job.name);
         console.error(`[DEBUG] [WORKER_MANAGER] Failed job data:`, JSON.stringify(job.data, null, 2));
         console.error(`[DEBUG] [WORKER_MANAGER] Failed job attemptsMade:`, job.attemptsMade);
         console.error(`[DEBUG] [WORKER_MANAGER] Failed job opts.attempts:`, job.opts.attempts);
+        console.error(`[DEBUG] [WORKER_MANAGER] Failed job returnvalue:`, job.returnvalue);
+        console.error(`[DEBUG] [WORKER_MANAGER] Failed job failedReason:`, job.failedReason);
       }
+      console.error(`[DEBUG] [WORKER_MANAGER] ========================================`);
     });
 
     worker.on('error', (err) => {
