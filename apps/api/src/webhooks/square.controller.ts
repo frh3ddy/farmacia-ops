@@ -58,20 +58,42 @@ import {
     }
     
     // Check if webhook secret is configured
-    const webhookSecret = process.env.SQUARE_WEBHOOK_SECRET;
+    let webhookSecret = process.env.SQUARE_WEBHOOK_SECRET;
     if (!webhookSecret) {
       console.error('SQUARE_WEBHOOK_SECRET is not configured');
       return res.status(HttpStatus.INTERNAL_SERVER_ERROR).send('Server configuration error');
     }
+    
+    // Trim whitespace from secret (common issue)
+    webhookSecret = webhookSecret.trim();
+    
+    // Square's webhook signature key is base64-encoded, decode it
+    let decodedSecret: string | Buffer;
+    try {
+      // Try to decode as base64 first (Square's format)
+      decodedSecret = Buffer.from(webhookSecret, 'base64');
+      console.log('Decoded webhook secret from base64', {
+        originalLength: webhookSecret.length,
+        decodedLength: decodedSecret.length,
+      });
+    } catch (error) {
+      // If decoding fails, use the secret as-is (might already be decoded or in different format)
+      console.log('Using webhook secret as-is (not base64)', {
+        secretLength: webhookSecret.length,
+      });
+      decodedSecret = webhookSecret;
+    }
   
     // Verify signature using raw body bytes directly (not string conversion)
-    if (!this.verifySignature(rawBody, signature, webhookSecret)) {
+    if (!this.verifySignature(rawBody, signature, decodedSecret)) {
       const bodyString = rawBody.toString('utf8');
       console.error('Signature verification failed', {
         signatureReceived: signature,
         signatureLength: signature.length,
         bodyLength: rawBody.length,
         bodyPreview: bodyString.substring(0, 100),
+        secretLength: webhookSecret.length,
+        secretPreview: webhookSecret.substring(0, 10) + '...',
       });
       return res.status(HttpStatus.UNAUTHORIZED).send('Invalid signature');
     }
@@ -96,9 +118,10 @@ import {
     return res.status(HttpStatus.OK).send('Accepted');
   }
   
-    private verifySignature(body: Buffer, signature: string, secret: string): boolean {
+    private verifySignature(body: Buffer, signature: string, secret: string | Buffer): boolean {
       try {
         // Compute HMAC using raw body bytes directly
+        // Secret can be either a string or Buffer (decoded from base64)
         const hmac = crypto
           .createHmac('sha256', secret)
           .update(body)
@@ -111,6 +134,8 @@ import {
           computedLength: hmac.length,
           receivedLength: signature.length,
           match: hmac === signature,
+          bodyFirstBytes: body.slice(0, 50).toString('hex'),
+          bodyLastBytes: body.slice(-50).toString('hex'),
         });
         
         // Both are base64 strings, compare directly using constant-time comparison
