@@ -79,11 +79,11 @@ import {
         console.error('Failed to parse webhook body as JSON:', error);
         return res.status(HttpStatus.BAD_REQUEST).send('Invalid JSON');
       }
-    
+    console.log('event', event);
       // Only process relevant events
-      if (event.type !== 'payment.created') {
-        return res.status(HttpStatus.OK).send('Ignored');
-      }
+      // if (event.type !== 'payment.created') {
+      //   return res.status(HttpStatus.OK).send('Ignored');
+      // }
     
       await this.saleQueue.enqueue(event);
     
