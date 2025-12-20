@@ -4,7 +4,6 @@
     "module": "commonjs",
     "lib": ["ES2020"],
     "outDir": "./dist",
-    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -13,11 +12,10 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@farmacia-ops/shared": ["../shared/src"],
-      "@farmacia-ops/shared/*": ["../shared/src/*"]
+      "@farmacia-ops/shared": ["../shared/src"]
     }
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "../shared/src"]
+  "exclude": ["node_modules", "dist"]
 }
 
