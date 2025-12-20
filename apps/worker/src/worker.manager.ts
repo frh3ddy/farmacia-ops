@@ -55,6 +55,26 @@ export class WorkerManager {
       this.workers.push(managedWorker);
       this.setupWorkerEvents(managedWorker);
       console.log(`[DEBUG] [WORKER_MANAGER] ✅ Registered worker: ${config.queueName}`);
+      
+      // Check queue status
+      try {
+        const waiting = await managedWorker.queue.getWaitingCount();
+        const active = await managedWorker.queue.getActiveCount();
+        const completed = await managedWorker.queue.getCompletedCount();
+        const failed = await managedWorker.queue.getFailedCount();
+        console.log(`[DEBUG] [WORKER_MANAGER] Queue ${config.queueName} status:`, {
+          waiting,
+          active,
+          completed,
+          failed,
+        });
+        
+        if (waiting > 0) {
+          console.log(`[DEBUG] [WORKER_MANAGER] ⚠️ Found ${waiting} waiting jobs in queue ${config.queueName}`);
+        }
+      } catch (error) {
+        console.error(`[DEBUG] [WORKER_MANAGER] Error checking queue status:`, error);
+      }
     }
 
     console.log(`[DEBUG] [WORKER_MANAGER] 👂 All workers are listening for jobs...\n`);
@@ -96,6 +116,21 @@ export class WorkerManager {
       }
     );
     console.log(`[DEBUG] [WORKER_MANAGER] Worker created: ${config.queueName}`);
+
+    // Add 'ready' event to confirm worker is listening
+    worker.on('ready', () => {
+      console.log(`[DEBUG] [WORKER_MANAGER] ✅ Worker ${config.queueName} is ready and listening for jobs`);
+    });
+
+    // Add 'closing' event
+    worker.on('closing', () => {
+      console.log(`[DEBUG] [WORKER_MANAGER] Worker ${config.queueName} is closing`);
+    });
+
+    // Add 'closed' event
+    worker.on('closed', () => {
+      console.log(`[DEBUG] [WORKER_MANAGER] Worker ${config.queueName} is closed`);
+    });
 
     return { config, queue, worker };
   }

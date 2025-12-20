@@ -20,7 +20,13 @@ export class SaleQueue {
   }
 
   async enqueue(event: any) {
-    await this.queue.add(
+    console.log('[DEBUG] [SALE_QUEUE] Enqueueing event:', {
+      event_id: event.event_id,
+      type: event.type,
+      hasData: !!event.data,
+    });
+    
+    const job = await this.queue.add(
       'process-sale',
       {
         squareEventId: event.event_id,
@@ -30,5 +36,13 @@ export class SaleQueue {
         jobId: event.event_id, // ⬅️ idempotency
       },
     );
+    
+    console.log('[DEBUG] [SALE_QUEUE] ✅ Job enqueued:', {
+      jobId: job.id,
+      name: job.name,
+      queueName: 'sales',
+    });
+    
+    return job;
   }
 }
