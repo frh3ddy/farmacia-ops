@@ -63,6 +63,8 @@ codecov.*
 .env
 !.env.test
 !.env.example
+.env
+.env.local
 
 # DATA
 .mongo_data/*
