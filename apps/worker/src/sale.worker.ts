@@ -29,15 +29,32 @@ function getSquareClient(): SquareClient {
     console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN length:', process.env.SQUARE_ACCESS_TOKEN?.length || 0);
     console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set (will use Production)');
     
-    const squareAccessToken = process.env.SQUARE_ACCESS_TOKEN;
+    let squareAccessToken = process.env.SQUARE_ACCESS_TOKEN;
+    
+    // Trim whitespace in case there are spaces in the token value
+    if (squareAccessToken) {
+      squareAccessToken = squareAccessToken.trim();
+      console.log('[DEBUG] [SQUARE_CLIENT] Token after trim length:', squareAccessToken.length);
+      
+      // Check for spaces in the token (common issue)
+      if (squareAccessToken.includes(' ')) {
+        console.warn('[DEBUG] [SQUARE_CLIENT] ⚠️ WARNING: Token contains spaces! This might cause issues.');
+        console.warn('[DEBUG] [SQUARE_CLIENT] Token preview (first 10 chars):', squareAccessToken.substring(0, 10) + '...');
+      }
+    }
+    
     if (!squareAccessToken) {
       console.error('[DEBUG] [SQUARE_CLIENT] ERROR: SQUARE_ACCESS_TOKEN is not set');
       console.error('[DEBUG] [SQUARE_CLIENT] All environment variables starting with SQUARE_:');
-      Object.keys(process.env)
-        .filter(key => key.startsWith('SQUARE_'))
-        .forEach(key => {
-          console.error(`[DEBUG] [SQUARE_CLIENT]   ${key}: ${process.env[key] ? '***' + process.env[key]!.slice(-4) : 'not set'}`);
+      const squareVars = Object.keys(process.env).filter(key => key.startsWith('SQUARE_'));
+      if (squareVars.length === 0) {
+        console.error('[DEBUG] [SQUARE_CLIENT]   No SQUARE_* variables found in process.env');
+      } else {
+        squareVars.forEach(key => {
+          const value = process.env[key];
+          console.error(`[DEBUG] [SQUARE_CLIENT]   ${key}: ${value ? '***' + value.slice(-4) + ` (length: ${value.length})` : 'not set'}`);
         });
+      }
       throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
     }
 

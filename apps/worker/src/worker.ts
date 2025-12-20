@@ -1,5 +1,17 @@
+import { config } from 'dotenv';
+import { resolve } from 'path';
 import { runConnectionTests } from './test-connection';
 import { WorkerManager } from './worker.manager';
+
+// Load .env file from project root (for local development)
+// In Railway, environment variables are automatically available via process.env
+// This is just a fallback for local development
+const envPath = resolve(__dirname, '../../../.env');
+const result = config({ path: envPath });
+if (result.error && !process.env.DATABASE_URL) {
+  // Silently fail if .env doesn't exist (expected in Railway)
+  // Only warn if we're missing critical vars
+}
 
 /**
  * Main worker entry point
@@ -10,6 +22,18 @@ async function main() {
   console.log('[DEBUG] [WORKER_MAIN] Node version:', process.version);
   console.log('[DEBUG] [WORKER_MAIN] Process PID:', process.pid);
   console.log('[DEBUG] [WORKER_MAIN] Environment:', process.env.NODE_ENV || 'development');
+  
+  // Debug: Check for Square environment variables
+  console.log('[DEBUG] [WORKER_MAIN] Checking Square environment variables...');
+  console.log('[DEBUG] [WORKER_MAIN] SQUARE_ACCESS_TOKEN exists:', !!process.env.SQUARE_ACCESS_TOKEN);
+  console.log('[DEBUG] [WORKER_MAIN] SQUARE_ACCESS_TOKEN length:', process.env.SQUARE_ACCESS_TOKEN?.length || 0);
+  console.log('[DEBUG] [WORKER_MAIN] SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set');
+  console.log('[DEBUG] [WORKER_MAIN] All SQUARE_* variables:', 
+    Object.keys(process.env)
+      .filter(key => key.startsWith('SQUARE_'))
+      .map(key => `${key}: ${process.env[key] ? '***' + process.env[key]!.slice(-4) : 'not set'}`)
+      .join(', ') || 'none found'
+  );
 
   // Run connection tests on startup
   console.log('[DEBUG] [WORKER_MAIN] Running connection tests...\n');
