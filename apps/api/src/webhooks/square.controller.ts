@@ -67,25 +67,32 @@ import {
     // Trim whitespace from secret (common issue)
     webhookSecret = webhookSecret.trim();
     
-    // Square's webhook signature key is base64-encoded, decode it
-    let decodedSecret: string | Buffer;
+    // Square's webhook signature key - try both decoded and as-is
+    // Some Square implementations use base64-decoded key, others use it as-is
+    let verificationPassed = false;
+    
+    // Try with base64-decoded secret first
     try {
-      // Try to decode as base64 first (Square's format)
-      decodedSecret = Buffer.from(webhookSecret, 'base64');
-      console.log('Decoded webhook secret from base64', {
+      const decodedSecret = Buffer.from(webhookSecret, 'base64');
+      console.log('Trying signature verification with decoded secret', {
         originalLength: webhookSecret.length,
         decodedLength: decodedSecret.length,
       });
+      verificationPassed = this.verifySignature(rawBody, signature, decodedSecret, 'decoded');
     } catch (error) {
-      // If decoding fails, use the secret as-is (might already be decoded or in different format)
-      console.log('Using webhook secret as-is (not base64)', {
+      console.log('Failed to decode secret, trying as-is', error);
+    }
+    
+    // If decoded didn't work, try with secret as-is
+    if (!verificationPassed) {
+      console.log('Trying signature verification with secret as-is', {
         secretLength: webhookSecret.length,
       });
-      decodedSecret = webhookSecret;
+      verificationPassed = this.verifySignature(rawBody, signature, webhookSecret, 'as-is');
     }
   
     // Verify signature using raw body bytes directly (not string conversion)
-    if (!this.verifySignature(rawBody, signature, decodedSecret)) {
+    if (!verificationPassed) {
       const bodyString = rawBody.toString('utf8');
       console.error('Signature verification failed', {
         signatureReceived: signature,
@@ -118,7 +125,7 @@ import {
     return res.status(HttpStatus.OK).send('Accepted');
   }
   
-    private verifySignature(body: Buffer, signature: string, secret: string | Buffer): boolean {
+    private verifySignature(body: Buffer, signature: string, secret: string | Buffer, method: string = 'unknown'): boolean {
       try {
         // Compute HMAC using raw body bytes directly
         // Secret can be either a string or Buffer (decoded from base64)
@@ -128,14 +135,12 @@ import {
           .digest('base64');
         
         // Log for debugging (remove in production)
-        console.log('Signature verification', {
+        console.log(`Signature verification (${method})`, {
           computedHmac: hmac,
           receivedSignature: signature,
           computedLength: hmac.length,
           receivedLength: signature.length,
           match: hmac === signature,
-          bodyFirstBytes: body.slice(0, 50).toString('hex'),
-          bodyLastBytes: body.slice(-50).toString('hex'),
         });
         
         // Both are base64 strings, compare directly using constant-time comparison
@@ -147,9 +152,13 @@ import {
           return false;
         }
         
-        return crypto.timingSafeEqual(hmacBuffer, signatureBuffer);
+        const matches = crypto.timingSafeEqual(hmacBuffer, signatureBuffer);
+        if (matches) {
+          console.log(`✅ Signature verification PASSED using ${method} method`);
+        }
+        return matches;
       } catch (error) {
-        console.error('Error during signature verification:', error);
+        console.error(`Error during signature verification (${method}):`, error);
         return false;
       }
     }
