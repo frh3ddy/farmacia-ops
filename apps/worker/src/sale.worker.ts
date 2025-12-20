@@ -266,8 +266,23 @@ export async function processSaleJob(job: Job): Promise<void> {
   console.log('[DEBUG] Job ID:', job.id);
   console.log('[DEBUG] Job data:', JSON.stringify(job.data, null, 2));
   
+  // Extract payload from job data
+  if (!job.data) {
+    console.error('[DEBUG] ERROR: job.data is missing');
+    throw new SaleValidationError('Job data is missing', { jobId: job.id });
+  }
+  
   const { payload } = job.data;
   console.log('[DEBUG] Extracted payload:', JSON.stringify(payload, null, 2));
+
+  if (!payload) {
+    console.error('[DEBUG] ERROR: payload is missing from job.data');
+    console.error('[DEBUG] Full job.data:', JSON.stringify(job.data, null, 2));
+    throw new SaleValidationError(
+      'Missing payload in job data',
+      { jobData: JSON.stringify(job.data) },
+    );
+  }
 
   // Phase 1: Validation & Idempotency
   // Extract payment from job.data.payload.object
@@ -279,23 +294,47 @@ export async function processSaleJob(job: Job): Promise<void> {
   
   // Try payload.object.payment first (Square webhook structure)
   // This handles: event.data.object.payment (Square webhook) -> payload.object.payment (after queue)
-  let payment = payload?.object?.payment || payload?.object;
+  // Also handle case where payload itself might be the payment object
+  let payment: any = null;
+  
+  if (payload?.object?.payment) {
+    payment = payload.object.payment;
+    console.log('[DEBUG] Found payment at payload.object.payment');
+  } else if (payload?.object && typeof payload.object === 'object' && 'id' in payload.object) {
+    // payload.object might be the payment directly
+    payment = payload.object;
+    console.log('[DEBUG] Found payment at payload.object');
+  } else if (payload && typeof payload === 'object' && 'id' in payload && 'location_id' in payload) {
+    // payload itself might be the payment
+    payment = payload;
+    console.log('[DEBUG] Found payment at payload (direct)');
+  }
   
   console.log('[DEBUG] Final extracted payment:', JSON.stringify(payment, null, 2));
 
   if (!payment) {
     console.error('[DEBUG] ERROR: Payment object is missing');
     console.error('[DEBUG] Full payload structure:', JSON.stringify(payload, null, 2));
+    console.error('[DEBUG] Full job.data structure:', JSON.stringify(job.data, null, 2));
     throw new SaleValidationError(
       'Missing payment object in payload',
-      { payload: JSON.stringify(payload) },
+      { payload: JSON.stringify(payload), jobData: JSON.stringify(job.data) },
     );
   }
 
   console.log('[DEBUG] Validating payment object fields...');
   
+  if (!payment || typeof payment !== 'object') {
+    console.error('[DEBUG] ERROR: Payment is not a valid object');
+    throw new SaleValidationError(
+      'Payment is not a valid object',
+      { payment: JSON.stringify(payment) },
+    );
+  }
+  
   if (!payment.id) {
     console.error('[DEBUG] ERROR: Payment object missing id');
+    console.error('[DEBUG] Payment object:', JSON.stringify(payment, null, 2));
     throw new SaleValidationError(
       'Payment object missing id',
       { payment: JSON.stringify(payment) },
