@@ -23,8 +23,21 @@ let squareClient: SquareClient | null = null;
 
 function getSquareClient(): SquareClient {
   if (!squareClient) {
+    console.log('[DEBUG] [SQUARE_CLIENT] Initializing Square client...');
+    console.log('[DEBUG] [SQUARE_CLIENT] Checking for SQUARE_ACCESS_TOKEN...');
+    console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN exists:', !!process.env.SQUARE_ACCESS_TOKEN);
+    console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN length:', process.env.SQUARE_ACCESS_TOKEN?.length || 0);
+    console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set (will use Production)');
+    
     const squareAccessToken = process.env.SQUARE_ACCESS_TOKEN;
     if (!squareAccessToken) {
+      console.error('[DEBUG] [SQUARE_CLIENT] ERROR: SQUARE_ACCESS_TOKEN is not set');
+      console.error('[DEBUG] [SQUARE_CLIENT] All environment variables starting with SQUARE_:');
+      Object.keys(process.env)
+        .filter(key => key.startsWith('SQUARE_'))
+        .forEach(key => {
+          console.error(`[DEBUG] [SQUARE_CLIENT]   ${key}: ${process.env[key] ? '***' + process.env[key]!.slice(-4) : 'not set'}`);
+        });
       throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
     }
 
@@ -32,10 +45,12 @@ function getSquareClient(): SquareClient {
       (process.env.SQUARE_ENVIRONMENT as SquareEnvironment) ||
       SquareEnvironment.Production;
 
+    console.log('[DEBUG] [SQUARE_CLIENT] Creating Square client with environment:', squareEnvironment);
     squareClient = new SquareClient({
       token: squareAccessToken,
       environment: squareEnvironment,
     });
+    console.log('[DEBUG] [SQUARE_CLIENT] ✅ Square client initialized');
   }
   return squareClient;
 }
