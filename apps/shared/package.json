@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "node -e \"const {execSync}=require('child_process');const path=require('path');const tsc=require.resolve('typescript/bin/tsc');const pkgDir=path.dirname(require.resolve('./package.json'));process.chdir(pkgDir);execSync('node '+tsc,{stdio:'inherit'})\"",
+    "build": "node -e \"const {execSync}=require('child_process');const fs=require('fs');const path=require('path');const tsc=require.resolve('typescript/bin/tsc');const pkgDir=path.dirname(require.resolve('./package.json'));const distDir=path.join(pkgDir,'dist');if(!fs.existsSync(distDir)){fs.mkdirSync(distDir,{recursive:true});}process.chdir(pkgDir);try{execSync('node '+tsc,{stdio:'inherit'});const output=path.join(distDir,'index.js');if(!fs.existsSync(output)){console.error('Build failed: dist/index.js was not created');process.exit(1);}}catch(e){console.error('TypeScript compilation failed');process.exit(1);}\"",
     "clean": "rm -rf dist"
   },
   "dependencies": {
