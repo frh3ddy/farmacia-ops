@@ -29,8 +29,18 @@ import {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    // Get signature from headers - Square uses x-square-hmacsha256-signature or x-square-signature
-    const signatureHeader = req.headers['x-square-hmacsha256-signature'] || req.headers['x-square-signature'];
+    // Get signature from headers - Square uses x-square-hmacsha256-signature
+    // Check both possible header names
+    const hmacSignatureHeader = req.headers['x-square-hmacsha256-signature'];
+    const squareSignatureHeader = req.headers['x-square-signature'];
+    const signatureHeader = hmacSignatureHeader || squareSignatureHeader;
+    
+    console.log('Signature headers', {
+      hasXSquareHmacsha256Signature: !!hmacSignatureHeader,
+      hasXSquareSignature: !!squareSignatureHeader,
+      allHeaders: Object.keys(req.headers).filter(h => h.toLowerCase().includes('square') || h.toLowerCase().includes('signature')),
+    });
+    
     const signature = Array.isArray(signatureHeader) 
       ? signatureHeader[0] 
       : signatureHeader;
@@ -131,41 +141,71 @@ import {
   
     private verifySignature(body: Buffer, signature: string, secret: string): boolean {
       try {
-        // Compute HMAC using raw body bytes directly with secret as-is
-        const hmac = crypto
+        // Try multiple approaches to see which one works
+        // Approach 1: Use raw body bytes (current)
+        const hmac1 = crypto
           .createHmac('sha256', secret)
           .update(body)
           .digest('base64');
         
+        // Approach 2: Use body as UTF-8 string (in case Square uses string)
+        const bodyString = body.toString('utf8');
+        const hmac2 = crypto
+          .createHmac('sha256', secret)
+          .update(bodyString, 'utf8')
+          .digest('base64');
+        
         // Log for debugging
-        console.log('Signature verification', {
-          computedHmac: hmac,
+        const match1 = hmac1 === signature;
+        const match2 = hmac2 === signature;
+        
+        console.log('Signature verification attempts', {
+          approach1_rawBytes: {
+            computedHmac: hmac1,
+            match: match1,
+          },
+          approach2_utf8String: {
+            computedHmac: hmac2,
+            match: match2,
+          },
           receivedSignature: signature,
-          computedLength: hmac.length,
-          receivedLength: signature.length,
-          match: hmac === signature,
           bodyLength: body.length,
+          bodyStringLength: bodyString.length,
         });
         
-        // Both are base64 strings, compare directly using constant-time comparison
-        const hmacBuffer = Buffer.from(hmac);
-        const signatureBuffer = Buffer.from(signature);
+        // Try both approaches and use whichever matches
+        let hmac: string;
+        let matches: boolean;
         
-        // Use constant-time comparison to prevent timing attacks
-        if (hmacBuffer.length !== signatureBuffer.length) {
-          console.error('Signature length mismatch', {
-            computedLength: hmacBuffer.length,
-            receivedLength: signatureBuffer.length,
-          });
-          return false;
-        }
-        
-        const matches = crypto.timingSafeEqual(hmacBuffer, signatureBuffer);
-        if (matches) {
-          console.log('✅ Signature verification PASSED');
+        if (match1) {
+          hmac = hmac1;
+          matches = true;
+          console.log('✅ Signature verification PASSED using raw bytes approach');
+        } else if (match2) {
+          hmac = hmac2;
+          matches = true;
+          console.log('✅ Signature verification PASSED using UTF-8 string approach');
         } else {
-          console.error('❌ Signature mismatch - computed and received signatures do not match');
+          // Use raw bytes approach for comparison (standard)
+          hmac = hmac1;
+          const hmacBuffer = Buffer.from(hmac);
+          const signatureBuffer = Buffer.from(signature);
+          
+          // Use constant-time comparison to prevent timing attacks
+          if (hmacBuffer.length !== signatureBuffer.length) {
+            console.error('Signature length mismatch', {
+              computedLength: hmacBuffer.length,
+              receivedLength: signatureBuffer.length,
+            });
+            return false;
+          }
+          
+          matches = crypto.timingSafeEqual(hmacBuffer, signatureBuffer);
+          if (!matches) {
+            console.error('❌ Signature mismatch - computed and received signatures do not match');
+          }
         }
+        
         return matches;
       } catch (error) {
         console.error('Error during signature verification:', error);
