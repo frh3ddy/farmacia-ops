@@ -36,24 +36,9 @@ async function bootstrap() {
     rawBody: true, 
   });
 
-  // await app.listen(3000);
-
-  // app = await NestFactory.create<NestExpressApplication>(AppModule, {
-  //   bodyParser: false, // Disable default JSON parser to handle raw body
-  // });
-
-  // // Apply raw body parser for webhook route (must be before JSON parser)
-  // // Use a more specific middleware that preserves raw body
-  // app.use('/webhooks/square', (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  //   if (req.method === 'POST') {
-  //     express.raw({ type: 'application/json' })(req, res, next);
-  //   } else {
-  //     next();
-  //   }
-  // });
   
   // Apply JSON parser for all other routes
-  app.use(express.json());
+  // app.use(express.json());
 
   // Configure CORS
   app.enableCors({
