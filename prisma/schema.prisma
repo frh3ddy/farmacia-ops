@@ -5,3 +5,176 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model Location {
+  id          String   @id @default(uuid())
+  name        String
+  address     String?
+  isActive    Boolean  @default(true)
+
+  inventories Inventory[]
+  expenses    Expense[]
+  sales       Sale[]
+  racks       Rack[]
+
+  createdAt   DateTime @default(now())
+}
+
+model User {
+  id        String   @id @default(uuid())
+  role      UserRole @default(OWNER)
+
+  createdAt DateTime @default(now())
+}
+
+enum UserRole {
+  OWNER
+}
+
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  sku         String?  @unique
+  categoryId String?
+
+  category    Category? @relation(fields: [categoryId], references: [id])
+  suppliers   SupplierProduct[]
+  inventories Inventory[]
+  placements  Placement[]
+  saleItems   SaleItem[]
+
+  createdAt   DateTime @default(now())
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+
+  products  Product[]
+}
+
+model Supplier {
+  id        String   @id @default(uuid())
+  name      String
+
+  products  SupplierProduct[]
+}
+
+model SupplierProduct {
+  id          String   @id @default(uuid())
+  supplierId String
+  productId  String
+
+  cost        Decimal
+  isPreferred Boolean @default(false)
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@unique([supplierId, productId])
+}
+
+model Inventory {
+  id          String   @id @default(uuid())
+  locationId String
+  productId  String
+
+  quantity    Int
+  receivedAt DateTime
+  unitCost   Decimal
+
+  location Location @relation(fields: [locationId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model Sale {
+  id          String   @id @default(uuid())
+  squareId   String   @unique
+  locationId String
+
+  totalRevenue Decimal
+  totalCost    Decimal
+  grossProfit  Decimal
+
+  createdAt DateTime
+
+  items SaleItem[]
+
+  location Location @relation(fields: [locationId], references: [id])
+}
+
+model SaleItem {
+  id        String   @id @default(uuid())
+  saleId   String
+  productId String
+
+  quantity  Int
+  price     Decimal
+  cost      Decimal
+
+  sale    Sale    @relation(fields: [saleId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Expense {
+  id          String   @id @default(uuid())
+  locationId String
+
+  type       ExpenseType
+  amount     Decimal
+  date       DateTime
+
+  location Location @relation(fields: [locationId], references: [id])
+}
+
+enum ExpenseType {
+  RENT
+  UTILITIES
+  PAYROLL
+  OTHER
+}
+
+model Rack {
+  id          String   @id @default(uuid())
+  locationId String
+  name        String
+
+  sections RackSection[]
+
+  location Location @relation(fields: [locationId], references: [id])
+}
+
+model RackSection {
+  id       String   @id @default(uuid())
+  rackId  String
+  label   String
+  size    String
+
+  placements Placement[]
+
+  rack Rack @relation(fields: [rackId], references: [id])
+}
+
+model Placement {
+  id            String   @id @default(uuid())
+  productId    String
+  rackSectionId String
+
+  product Product @relation(fields: [productId], references: [id])
+  section RackSection @relation(fields: [rackSectionId], references: [id])
+}
+
+
+model DemandSignal {
+  id         String   @id @default(uuid())
+  query      String
+  locationId String
+
+  count      Int      @default(1)
+
+  createdAt  DateTime @default(now())
+}
+
