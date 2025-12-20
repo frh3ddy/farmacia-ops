@@ -7,22 +7,22 @@ datasource db {
 }
 
 model Location {
-  id          String   @id @default(uuid())
-  name        String
-  address     String?
-  isActive    Boolean  @default(true)
+  id       String  @id @default(uuid())
+  name     String
+  address  String?
+  isActive Boolean @default(true)
 
   inventories Inventory[]
   expenses    Expense[]
   sales       Sale[]
   racks       Rack[]
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 model User {
-  id        String   @id @default(uuid())
-  role      UserRole @default(OWNER)
+  id   String   @id @default(uuid())
+  role UserRole @default(OWNER)
 
   createdAt DateTime @default(now())
 }
@@ -31,38 +31,37 @@ enum UserRole {
   OWNER
 }
 
-
 model Product {
-  id          String   @id @default(uuid())
-  name        String
-  sku         String?  @unique
+  id         String  @id @default(uuid())
+  name       String
+  sku        String? @unique
   categoryId String?
 
-  category    Category? @relation(fields: [categoryId], references: [id])
+  category    Category?         @relation(fields: [categoryId], references: [id])
   suppliers   SupplierProduct[]
   inventories Inventory[]
   placements  Placement[]
   saleItems   SaleItem[]
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 model Category {
-  id        String   @id @default(uuid())
-  name      String
+  id   String @id @default(uuid())
+  name String
 
-  products  Product[]
+  products Product[]
 }
 
 model Supplier {
-  id        String   @id @default(uuid())
-  name      String
+  id   String @id @default(uuid())
+  name String
 
-  products  SupplierProduct[]
+  products SupplierProduct[]
 }
 
 model SupplierProduct {
-  id          String   @id @default(uuid())
+  id         String @id @default(uuid())
   supplierId String
   productId  String
 
@@ -76,11 +75,11 @@ model SupplierProduct {
 }
 
 model Inventory {
-  id          String   @id @default(uuid())
+  id         String @id @default(uuid())
   locationId String
   productId  String
 
-  quantity    Int
+  quantity   Int
   receivedAt DateTime
   unitCost   Decimal
 
@@ -91,8 +90,8 @@ model Inventory {
 }
 
 model Sale {
-  id          String   @id @default(uuid())
-  squareId   String   @unique
+  id         String @id @default(uuid())
+  squareId   String @unique
   locationId String
 
   totalRevenue Decimal
@@ -107,25 +106,25 @@ model Sale {
 }
 
 model SaleItem {
-  id        String   @id @default(uuid())
-  saleId   String
+  id        String @id @default(uuid())
+  saleId    String
   productId String
 
-  quantity  Int
-  price     Decimal
-  cost      Decimal
+  quantity Int
+  price    Decimal
+  cost     Decimal
 
   sale    Sale    @relation(fields: [saleId], references: [id])
   product Product @relation(fields: [productId], references: [id])
 }
 
 model Expense {
-  id          String   @id @default(uuid())
+  id         String @id @default(uuid())
   locationId String
 
-  type       ExpenseType
-  amount     Decimal
-  date       DateTime
+  type   ExpenseType
+  amount Decimal
+  date   DateTime
 
   location Location @relation(fields: [locationId], references: [id])
 }
@@ -138,9 +137,9 @@ enum ExpenseType {
 }
 
 model Rack {
-  id          String   @id @default(uuid())
+  id         String @id @default(uuid())
   locationId String
-  name        String
+  name       String
 
   sections RackSection[]
 
@@ -148,10 +147,10 @@ model Rack {
 }
 
 model RackSection {
-  id       String   @id @default(uuid())
-  rackId  String
-  label   String
-  size    String
+  id     String @id @default(uuid())
+  rackId String
+  label  String
+  size   String
 
   placements Placement[]
 
@@ -159,22 +158,20 @@ model RackSection {
 }
 
 model Placement {
-  id            String   @id @default(uuid())
-  productId    String
+  id            String @id @default(uuid())
+  productId     String
   rackSectionId String
 
-  product Product @relation(fields: [productId], references: [id])
+  product Product     @relation(fields: [productId], references: [id])
   section RackSection @relation(fields: [rackSectionId], references: [id])
 }
 
-
 model DemandSignal {
-  id         String   @id @default(uuid())
+  id         String @id @default(uuid())
   query      String
   locationId String
 
-  count      Int      @default(1)
+  count Int @default(1)
 
-  createdAt  DateTime @default(now())
+  createdAt DateTime @default(now())
 }
-
