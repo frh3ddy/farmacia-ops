@@ -1,9 +1,80 @@
-import {
-  testRedisConnection,
-  testBullMQConnection,
-  ConnectionTestResult,
-  measureTime,
-} from '@farmacia-ops/shared';
+import Redis from 'ioredis';
+import { Queue } from 'bullmq';
+
+interface ConnectionTestResult {
+  service: string;
+  success: boolean;
+  message: string;
+  duration?: number;
+  error?: string;
+}
+
+async function measureTime<T>(
+  fn: () => Promise<T>
+): Promise<{ result: T; duration: number }> {
+  const start = Date.now();
+  const result = await fn();
+  const duration = Date.now() - start;
+  return { result, duration };
+}
+
+function getRedisConfig() {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    throw new Error('REDIS_URL environment variable is not set');
+  }
+  const url = new URL(redisUrl);
+  return {
+    host: url.hostname,
+    port: parseInt(url.port || '6379', 10),
+    password: url.password || undefined,
+    db: url.pathname ? parseInt(url.pathname.slice(1), 10) : 0,
+  };
+}
+
+async function testRedisConnection(): Promise<boolean> {
+  const config = getRedisConfig();
+  const client = new Redis(config);
+  try {
+    const result = await client.ping();
+    await client.quit();
+    return result === 'PONG';
+  } catch (error) {
+    await client.quit().catch(() => {});
+    throw error;
+  }
+}
+
+async function testBullMQConnection(queueName: string = 'test-queue'): Promise<boolean> {
+  const config = getRedisConfig();
+  let queue: Queue | null = null;
+  try {
+    queue = new Queue(queueName, {
+      connection: {
+        host: config.host,
+        port: config.port,
+        password: config.password,
+        db: config.db,
+      },
+    });
+    const job = await queue.add('test-job', { test: true });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const jobState = await job.getState();
+    await queue.obliterate({ force: true });
+    await queue.close();
+    return jobState !== undefined;
+  } catch (error) {
+    if (queue) {
+      try {
+        await queue.obliterate({ force: true });
+        await queue.close();
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
+    }
+    throw error;
+  }
+}
 
 /**
  * Test Redis connection

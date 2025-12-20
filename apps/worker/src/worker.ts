@@ -1,6 +1,59 @@
 import { runConnectionTests } from './test-connection';
-import { createWorker, createQueue } from '@farmacia-ops/shared';
-import { Job } from 'bullmq';
+import { Worker, Queue, Job } from 'bullmq';
+import Redis from 'ioredis';
+
+function getRedisConfig() {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    throw new Error('REDIS_URL environment variable is not set');
+  }
+  const url = new URL(redisUrl);
+  return {
+    host: url.hostname,
+    port: parseInt(url.port || '6379', 10),
+    password: url.password || undefined,
+    db: url.pathname ? parseInt(url.pathname.slice(1), 10) : 0,
+  };
+}
+
+function createQueue<T = any>(name: string): Queue<T> {
+  const config = getRedisConfig();
+  return new Queue<T>(name, {
+    connection: {
+      host: config.host,
+      port: config.port,
+      password: config.password,
+      db: config.db,
+    },
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2000,
+      },
+    },
+  });
+}
+
+function createWorker<T = any>(
+  queueName: string,
+  processor: (job: Job<T>) => Promise<any>
+): Worker<T> {
+  const config = getRedisConfig();
+  return new Worker<T>(
+    queueName,
+    processor,
+    {
+      connection: {
+        host: config.host,
+        port: config.port,
+        password: config.password,
+        db: config.db,
+      },
+      concurrency: 5,
+    }
+  );
+}
 
 /**
  * Main worker entry point

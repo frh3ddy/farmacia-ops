@@ -7,7 +7,6 @@
     "test:connection": "ts-node src/test-connection.ts"
   },
   "dependencies": {
-    "@farmacia-ops/shared": "file:../shared",
     "bullmq": "^5.0.0",
     "ioredis": "^5.3.2"
   },

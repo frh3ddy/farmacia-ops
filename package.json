@@ -22,7 +22,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "npm run build --workspace=apps/shared && npm run build --workspace=apps/worker && npm run build --workspace=apps/api",
     "build:shared": "npm run build --workspace=apps/shared",
-    "build:worker": "npm run build:shared && npm run build --workspace=apps/worker",
+    "build:worker": "npm run build --workspace=apps/worker",
     "build:api": "npm run build:shared && npm run build --workspace=apps/api",
     "start": "npm run start --workspace=apps/worker",
     "start:worker": "npm run start --workspace=apps/worker",
