@@ -6,6 +6,5 @@
     "skipLibCheck": true
   },
   "include": ["src/**/*"],
-  "exclude": ["../shared/src"]
 }
 
