@@ -2,10 +2,9 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
     "skipLibCheck": true
   },
   "include": ["src/**/*"],
-  "exclude": ["../shared/src"]
+  "exclude": ["../shared/src", "../shared/dist", "node_modules"]
 }
 
