@@ -35,7 +35,14 @@ async function bootstrap() {
   });
 
   // Apply raw body parser for webhook route (must be before JSON parser)
-  app.use('/webhooks/square', express.raw({ type: 'application/json' }));
+  // Use a more specific middleware that preserves raw body
+  app.use('/webhooks/square', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.method === 'POST') {
+      express.raw({ type: 'application/json' })(req, res, next);
+    } else {
+      next();
+    }
+  });
   
   // Apply JSON parser for all other routes
   app.use(express.json());
