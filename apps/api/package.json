@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "build": "node -e \"const {execSync}=require('child_process');const path=require('path');const tsc=require.resolve('typescript/bin/tsc');const pkgDir=path.dirname(require.resolve('./package.json'));process.chdir(pkgDir);execSync('node '+tsc,{stdio:'inherit'})\"",
-    "start": "node dist/index.js"
+    "start": "node -e \"const fs=require('fs');const path=require('path');const pkgDir=path.dirname(require.resolve('./package.json'));const dist1=path.join(pkgDir,'dist/index.js');const dist2=path.join(pkgDir,'dist/src/index.js');const file=fs.existsSync(dist1)?dist1:fs.existsSync(dist2)?dist2:null;if(!file){console.error('Error: dist/index.js not found. Build may have failed.');process.exit(1);}require(file);\""
   },
   "dependencies": {
     "@farmacia-ops/shared": "file:../shared"
