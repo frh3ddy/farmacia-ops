@@ -1,10 +1,22 @@
 {
-  "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
     "outDir": "./dist",
-    "skipLibCheck": true
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@farmacia-ops/shared": ["../shared/dist"]
+    }
   },
   "include": ["src/**/*"],
-  "exclude": ["../shared/src", "../shared/dist", "node_modules"]
+  "exclude": ["node_modules", "dist"]
 }
 
