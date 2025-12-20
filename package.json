@@ -25,6 +25,7 @@
     "build:api": "npm run build --workspace=apps/api",
     "start:worker": "npm run start --workspace=apps/worker",
     "start:api": "npm run start --workspace=apps/api",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",

@@ -2,11 +2,10 @@
 nixPkgs = ["nodejs_20", "npm"]
 
 [phases.install]
-cmds = ["NODE_ENV= npm install --omit=dev"]
+cmds = ["NODE_ENV= npm install"]
 
 [phases.build]
 cmds = [
-  "NODE_ENV= npm install --include=dev",
   "npm run prisma:generate",
   "npm run build",
   "npm run prisma:migrate:deploy"
