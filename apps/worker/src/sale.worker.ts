@@ -18,20 +18,27 @@ const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-// Initialize Square client
-const squareAccessToken = process.env.SQUARE_ACCESS_TOKEN;
-if (!squareAccessToken) {
-  throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
+// Lazy initialization of Square client (only when needed)
+let squareClient: SquareClient | null = null;
+
+function getSquareClient(): SquareClient {
+  if (!squareClient) {
+    const squareAccessToken = process.env.SQUARE_ACCESS_TOKEN;
+    if (!squareAccessToken) {
+      throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
+    }
+
+    const squareEnvironment =
+      (process.env.SQUARE_ENVIRONMENT as SquareEnvironment) ||
+      SquareEnvironment.Production;
+
+    squareClient = new SquareClient({
+      token: squareAccessToken,
+      environment: squareEnvironment,
+    });
+  }
+  return squareClient;
 }
-
-const squareEnvironment =
-  (process.env.SQUARE_ENVIRONMENT as SquareEnvironment) ||
-  SquareEnvironment.Production;
-
-const squareClient = new SquareClient({
-  token: squareAccessToken,
-  environment: squareEnvironment,
-});
 
 // ============================================================================
 // Type Definitions
@@ -310,7 +317,8 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   let order;
   try {
-    const response = await squareClient.orders.get({
+    const client = getSquareClient();
+    const response = await client.orders.get({
       orderId: orderId,
     });
     order = response.order;
