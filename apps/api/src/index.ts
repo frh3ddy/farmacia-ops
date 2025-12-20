@@ -3,7 +3,9 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { NestFactory } from '@nestjs/core';
 import { INestApplication } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import * as express from 'express';
 
 // Load .env file from project root
 // __dirname in compiled code will be apps/api/dist, so we need to go up 3 levels to reach root
@@ -28,7 +30,15 @@ let app: INestApplication;
 async function bootstrap() {
   console.log(`🚀 Starting Farmacia Ops API on port ${port}...`);
 
-  app = await NestFactory.create(AppModule);
+  app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false, // Disable default JSON parser to handle raw body
+  });
+
+  // Apply raw body parser for webhook route (must be before JSON parser)
+  app.use('/webhooks/square', express.raw({ type: 'application/json' }));
+  
+  // Apply JSON parser for all other routes
+  app.use(express.json());
 
   // Configure CORS
   app.enableCors({

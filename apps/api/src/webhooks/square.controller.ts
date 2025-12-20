@@ -1,5 +1,6 @@
 import {
     Controller,
+    Get,
     Post,
     Headers,
     Req,
@@ -14,29 +15,41 @@ import {
   export class SquareWebhookController {
     constructor(private readonly saleQueue: SaleQueue) {}
   
-    @Post()
-    async handle(
-      @Req() req: Request,
-      @Res() res: Response,
-      @Headers('x-square-signature') signature: string,
-    ) {
-      const body = JSON.stringify(req.body);
+  @Get()
+  async get() {
+    return {
+      message: 'Square webhook endpoint',
+      method: 'POST',
+      status: 'active',
+    };
+  }
   
-      if (!this.verifySignature(body, signature)) {
-        return res.status(HttpStatus.UNAUTHORIZED).send('Invalid signature');
-      }
+  @Post()
+  async handle(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Headers('x-square-signature') signature: string,
+  ) {
+    // Get raw body as Buffer (from express.raw middleware)
+    const rawBody = req.body as Buffer;
+    const bodyString = rawBody.toString('utf8');
   
-      const event = req.body;
-  
-      // Only process relevant events
-      if (event.type !== 'payment.created') {
-        return res.status(HttpStatus.OK).send('Ignored');
-      }
-  
-      await this.saleQueue.enqueue(event);
-  
-      return res.status(HttpStatus.OK).send('Accepted');
+    if (!this.verifySignature(bodyString, signature)) {
+      return res.status(HttpStatus.UNAUTHORIZED).send('Invalid signature');
     }
+  
+    // Parse the body for processing
+    const event = JSON.parse(bodyString);
+  
+    // Only process relevant events
+    if (event.type !== 'payment.created') {
+      return res.status(HttpStatus.OK).send('Ignored');
+    }
+  
+    await this.saleQueue.enqueue(event);
+  
+    return res.status(HttpStatus.OK).send('Accepted');
+  }
   
     private verifySignature(body: string, signature: string): boolean {
       const hmac = crypto
