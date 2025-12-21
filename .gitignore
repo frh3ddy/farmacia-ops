@@ -1,5 +1,6 @@
 # compiled output
 /dist
+**/dist
 node_modules
 **/node_modules
 package-lock.json
@@ -69,6 +70,7 @@ codecov.*
 
 # DATA
 .mongo_data/*
+sudospecs
 ./.mongo_data
 .postgres_data
 .postgres_data/*

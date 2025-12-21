@@ -35,3 +35,31 @@ export class SaleValidationError extends Error {
   }
 }
 
+export class UnmappedVariationError extends Error {
+  constructor(
+    public readonly squareVariationId: string,
+    public readonly locationId: string,
+    public readonly message: string = 'Square variation is not mapped to a product. Please run catalog sync.',
+  ) {
+    super(
+      `Unmapped variation error: ${message}. ` +
+        `Square variation ID: ${squareVariationId}, Location ID: ${locationId}`,
+    );
+    this.name = 'UnmappedVariationError';
+  }
+}
+
+export class ProductNotFoundError extends Error {
+  constructor(
+    public readonly productId: string,
+    public readonly mappingId: string,
+    public readonly message: string = 'Mapped product does not exist in database',
+  ) {
+    super(
+      `Product not found error: ${message}. ` +
+        `Product ID: ${productId}, Mapping ID: ${mappingId}`,
+    );
+    this.name = 'ProductNotFoundError';
+  }
+}
+

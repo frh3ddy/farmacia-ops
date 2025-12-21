@@ -12,10 +12,11 @@ model Location {
   address  String?
   isActive Boolean @default(true)
 
-  inventories Inventory[]
-  expenses    Expense[]
-  sales       Sale[]
-  racks       Rack[]
+  inventories     Inventory[]
+  expenses        Expense[]
+  sales           Sale[]
+  racks           Rack[]
+  catalogMappings CatalogMapping[]
 
   createdAt DateTime @default(now())
 }
@@ -37,11 +38,12 @@ model Product {
   sku        String? @unique
   categoryId String?
 
-  category    Category?         @relation(fields: [categoryId], references: [id])
-  suppliers   SupplierProduct[]
-  inventories Inventory[]
-  placements  Placement[]
-  saleItems   SaleItem[]
+  category        Category?         @relation(fields: [categoryId], references: [id])
+  suppliers       SupplierProduct[]
+  inventories     Inventory[]
+  placements      Placement[]
+  saleItems       SaleItem[]
+  catalogMappings CatalogMapping[]
 
   createdAt DateTime @default(now())
 }
@@ -174,4 +176,23 @@ model DemandSignal {
   count Int @default(1)
 
   createdAt DateTime @default(now())
+}
+
+model CatalogMapping {
+  id                String   @id @default(uuid())
+  squareVariationId String   // ITEM_VARIATION.id from Square
+  productId         String
+  locationId        String?  // Optional, null = global mapping
+
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  syncedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([squareVariationId, locationId]) // Unique per variation+location combination
+  @@index([productId])
+  @@index([locationId])
+  @@index([squareVariationId])
 }

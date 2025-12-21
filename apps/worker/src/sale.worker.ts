@@ -7,7 +7,9 @@ import {
   InsufficientInventoryError,
   DatabaseTransactionError,
   SaleValidationError,
+  UnmappedVariationError,
 } from './errors';
+import { mapVariationToProduct } from './catalog.mapper';
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -506,7 +508,7 @@ export async function processSaleJob(job: Job): Promise<void> {
       continue;
     }
 
-    // Try to find product by catalogObjectId (variation ID) or SKU
+    // Map variation ID to product using CatalogMapping
     const catalogObjectId = orderLineItem.catalogObjectId;
     const itemName = orderLineItem.name;
     console.log(`[DEBUG] Looking up product for line item ${i + 1}:`, {
@@ -514,38 +516,46 @@ export async function processSaleJob(job: Job): Promise<void> {
       itemName,
     });
 
-    // Find product by SKU (using name as fallback, or catalogObjectId if you have a mapping)
-    // Note: You may need to create a mapping table for catalogObjectId -> productId
-    let product;
-    
-    // First, try to find by SKU if the name matches a SKU pattern
-    if (itemName) {
-      console.log(`[DEBUG] Searching for product with SKU: "${itemName}"`);
-      product = await prisma.product.findUnique({
-        where: { sku: itemName },
-      });
-      if (product) {
-        console.log(`[DEBUG] ✓ Product found by SKU:`, { id: product.id, name: product.name, sku: product.sku });
-      } else {
-        console.log(`[DEBUG] ✗ No product found with SKU: "${itemName}"`);
-      }
+    // Validate catalogObjectId exists (this is the variation ID)
+    if (!catalogObjectId) {
+      console.warn(`[DEBUG] WARNING: Line item ${i + 1} missing catalogObjectId, skipping`);
+      continue;
     }
 
-    // If not found by SKU, you could:
-    // 1. Create a ProductMapping table with catalogObjectId -> productId
-    // 2. Or fetch catalog item variation to get SKU
-    // For now, we'll require products to have SKU matching the item name
-    if (!product) {
-      console.error(`[DEBUG] ERROR: Product not found for line item ${i + 1}`);
-      throw new SaleValidationError(
-        `Product not found for line item. Name: ${itemName}, Catalog Object ID: ${catalogObjectId}. ` +
-          `Please ensure product SKU matches the item name, or create a mapping for catalogObjectId.`,
-        {
-          orderLineItem: safeStringify(orderLineItem),
-          orderId,
-          squareId,
-        },
+    // Map variation to product using CatalogMapping
+    let productId: string;
+    try {
+      productId = await mapVariationToProduct(
+        catalogObjectId,
+        locationId,
+        prisma,
       );
+      console.log(`[DEBUG] ✓ Product mapped for line item ${i + 1}:`, {
+        variationId: catalogObjectId,
+        productId,
+        locationId,
+      });
+    } catch (error) {
+      if (error instanceof UnmappedVariationError) {
+        console.error(`[DEBUG] ERROR: Unmapped variation for line item ${i + 1}:`, {
+          variationId: error.squareVariationId,
+          locationId: error.locationId,
+          message: error.message,
+        });
+        throw new SaleValidationError(
+          `Square variation is not mapped to a product. Variation ID: ${error.squareVariationId}, Location ID: ${error.locationId}. ` +
+            `Please run catalog sync to create mappings.`,
+          {
+            variationId: error.squareVariationId,
+            locationId: error.locationId,
+            orderLineItem: safeStringify(orderLineItem),
+            orderId,
+            squareId,
+          },
+        );
+      }
+      // Re-throw other errors
+      throw error;
     }
 
     const quantity = orderLineItem.quantity
@@ -585,7 +595,7 @@ export async function processSaleJob(job: Job): Promise<void> {
     });
 
     lineItems.push({
-      productId: product.id,
+      productId: productId,
       quantitySold: quantity,
       salePrice: new Prisma.Decimal(unitPrice),
     });
@@ -727,6 +737,17 @@ export async function processSaleJob(job: Job): Promise<void> {
     console.log('[DEBUG] ========================================');
   } catch (error) {
     // Error handling
+    if (error instanceof UnmappedVariationError) {
+      console.error('Unmapped variation error:', {
+        variationId: error.squareVariationId,
+        locationId: error.locationId,
+        message: error.message,
+        squareId: squareId,
+      });
+      // Re-throw as SaleValidationError (already converted above, but handle here for safety)
+      throw error;
+    }
+
     if (error instanceof InsufficientInventoryError) {
       console.error('Insufficient inventory error:', {
         productId: error.productId,
