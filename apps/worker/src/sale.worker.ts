@@ -18,6 +18,27 @@ const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+/**
+ * Safely stringify objects that may contain BigInt values
+ * BigInt values are converted to strings
+ */
+function safeStringify(obj: any, space?: number): string {
+  return JSON.stringify(
+    obj,
+    (key, value) => {
+      if (typeof value === 'bigint') {
+        return value.toString() + 'n'; // Add 'n' suffix to indicate it was a BigInt
+      }
+      return value;
+    },
+    space,
+  );
+}
+
 // Lazy initialization of Square client (only when needed)
 let squareClient: SquareClient | null = null;
 
@@ -477,6 +498,8 @@ export async function processSaleJob(job: Job): Promise<void> {
       name: orderLineItem.name,
       catalogObjectId: orderLineItem.catalogObjectId,
       quantity: orderLineItem.quantity,
+      // Note: catalogVersion is a BigInt, so we convert it to string
+      catalogVersion: orderLineItem.catalogVersion?.toString(),
     });
     if (!orderLineItem.uid && !orderLineItem.catalogObjectId) {
       console.warn(`[DEBUG] WARNING: Skipping line item ${i + 1} without uid or catalogObjectId:`, orderLineItem);
@@ -518,7 +541,7 @@ export async function processSaleJob(job: Job): Promise<void> {
         `Product not found for line item. Name: ${itemName}, Catalog Object ID: ${catalogObjectId}. ` +
           `Please ensure product SKU matches the item name, or create a mapping for catalogObjectId.`,
         {
-          orderLineItem: JSON.stringify(orderLineItem),
+          orderLineItem: safeStringify(orderLineItem),
           orderId,
           squareId,
         },
@@ -534,7 +557,7 @@ export async function processSaleJob(job: Job): Promise<void> {
       console.error(`[DEBUG] ERROR: Line item ${i + 1} has invalid quantity`);
       throw new SaleValidationError(
         'Line item quantity must be positive',
-        { orderLineItem: JSON.stringify(orderLineItem) },
+        { orderLineItem: safeStringify(orderLineItem) },
       );
     }
 
@@ -548,7 +571,7 @@ export async function processSaleJob(job: Job): Promise<void> {
       console.error(`[DEBUG] ERROR: Line item ${i + 1} missing price information`);
       throw new SaleValidationError(
         'Line item missing price information',
-        { orderLineItem: JSON.stringify(orderLineItem) },
+        { orderLineItem: safeStringify(orderLineItem) },
       );
     }
 
