@@ -89,18 +89,8 @@ export async function syncSquareCatalog(
         cursor: cursor,
       });
 
-      console.log('[CATALOG_SYNC] Square API response:', {
-        responseType: typeof response,
-        responseKeys: Object.keys(response || {}),
-        hasObjects: !!response.objects,
-        objectsLength: response.objects?.length || 0,
-        cursor: response.cursor,
-      });
-
       // Square SDK v40 response structure: response.objects (array)
       if (response.objects && Array.isArray(response.objects)) {
-        console.log('[CATALOG_SYNC] Processing', response.objects.length, 'objects');
-        
         for (const item of response.objects) {
           // Only add ITEM_VARIATION objects (should all be, but double-check)
           if (item.type === 'ITEM_VARIATION') {
@@ -112,8 +102,6 @@ export async function syncSquareCatalog(
       // Get next page cursor
       cursor = response.cursor || undefined;
     } while (cursor);
-
-    console.log('[CATALOG_SYNC] Total variations collected:', catalogObjects.length);
   } catch (error) {
     console.error('[CATALOG_SYNC] Square API error:', error);
     console.error('[CATALOG_SYNC] Error details:', {
