@@ -885,7 +885,7 @@
               </tr>
             </thead>
             <tbody>
-              {Object.values(grouped).map((group: any, idx) => (
+              {Object.values(grouped).map((group, idx) => (
                 <tr key={idx}>
                   <td>{group.product?.name || 'N/A'}</td>
                   <td>{group.location?.name || group.location?.squareId || 'N/A'}</td>
