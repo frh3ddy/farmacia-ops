@@ -82,10 +82,27 @@ export async function syncSquareCatalog(
 
   try {
     do {
-      // Square SDK v40 - use catalog.search method
-      const response: any = await client.catalog.search({
-        objectTypes: ['ITEM_VARIATION'],
-        cursor: cursor,
+      // Try using list method first (simpler, might work better)
+      let response: any;
+      try {
+        response = await client.catalog.list({
+          types: 'ITEM_VARIATION',
+          cursor: cursor,
+        });
+      } catch (listError) {
+        // Fallback to search if list doesn't work
+        console.log('[CATALOG_SYNC] List method failed, trying search...');
+        response = await client.catalog.search({
+          objectTypes: ['ITEM_VARIATION'],
+          cursor: cursor,
+        });
+      }
+
+      console.log('[CATALOG_SYNC] Square API response:', {
+        hasResult: !!response.result,
+        objectsCount: response.result?.objects?.length || 0,
+        cursor: response.result?.cursor,
+        responseKeys: Object.keys(response.result || {}),
       });
 
       if (response.result?.objects) {
@@ -95,6 +112,11 @@ export async function syncSquareCatalog(
       cursor = response.result?.cursor || undefined;
     } while (cursor);
   } catch (error) {
+    console.error('[CATALOG_SYNC] Square API error:', error);
+    console.error('[CATALOG_SYNC] Error details:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     throw new Error(
       `Failed to fetch catalog from Square: ${
         error instanceof Error ? error.message : String(error)
