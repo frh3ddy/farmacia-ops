@@ -20,63 +20,6 @@ import {
   export class SquareWebhookController {
     constructor(private readonly saleQueue: SaleQueue) {}
   
-  }
-
-  @Controller('api/webhooks/square')
-  export class WebhookTestController {
-    constructor(private readonly saleQueue: SaleQueue) {}
-    
-    @Post('test')
-    @HttpCode(200)
-    async testWebhook(@Req() req: Request) {
-      // Test endpoint to simulate Square webhook without signature verification
-      // Useful for testing sale processing
-      const body = req.body;
-      
-      // Create a mock Square webhook event structure
-      const mockEvent = {
-        type: 'payment.created',
-        event_id: `test_${Date.now()}`,
-        data: body.data || {
-          type: 'payment',
-          id: body.paymentId || `test_payment_${Date.now()}`,
-          object: {
-            payment: {
-              id: body.paymentId || `test_payment_${Date.now()}`,
-              location_id: body.locationId || 'L60AMVPDZJ48F',
-              order_id: body.orderId || `test_order_${Date.now()}`,
-              created_at: new Date().toISOString(),
-              status: 'APPROVED',
-              amount_money: {
-                amount: body.amount || 100,
-                currency: 'USD',
-              },
-              total_money: {
-                amount: body.amount || 100,
-                currency: 'USD',
-              },
-            },
-          },
-        },
-      };
-      
-      console.log('[DEBUG] [WEBHOOK_TEST] Simulating webhook event:', mockEvent.event_id);
-      
-      try {
-        await this.saleQueue.enqueue(mockEvent);
-        return {
-          success: true,
-          message: 'Test webhook enqueued successfully',
-          eventId: mockEvent.event_id,
-        };
-      } catch (error) {
-        return {
-          success: false,
-          message: `Failed to enqueue test webhook: ${error instanceof Error ? error.message : String(error)}`,
-        };
-      }
-    }
-  
     @Get()
     async get() {
       return {
@@ -176,4 +119,60 @@ import {
       return res.status(HttpStatus.OK).send('Accepted');
     }
   
+  }
+
+  @Controller('api/webhooks/square')
+  export class WebhookTestController {
+    constructor(private readonly saleQueue: SaleQueue) {}
+    
+    @Post('test')
+    @HttpCode(200)
+    async testWebhook(@Req() req: Request) {
+      // Test endpoint to simulate Square webhook without signature verification
+      // Useful for testing sale processing
+      const body = req.body;
+      
+      // Create a mock Square webhook event structure
+      const mockEvent = {
+        type: 'payment.created',
+        event_id: `test_${Date.now()}`,
+        data: body.data || {
+          type: 'payment',
+          id: body.paymentId || `test_payment_${Date.now()}`,
+          object: {
+            payment: {
+              id: body.paymentId || `test_payment_${Date.now()}`,
+              location_id: body.locationId || 'L60AMVPDZJ48F',
+              order_id: body.orderId || `test_order_${Date.now()}`,
+              created_at: new Date().toISOString(),
+              status: 'APPROVED',
+              amount_money: {
+                amount: body.amount || 100,
+                currency: 'USD',
+              },
+              total_money: {
+                amount: body.amount || 100,
+                currency: 'USD',
+              },
+            },
+          },
+        },
+      };
+      
+      console.log('[DEBUG] [WEBHOOK_TEST] Simulating webhook event:', mockEvent.event_id);
+      
+      try {
+        await this.saleQueue.enqueue(mockEvent);
+        return {
+          success: true,
+          message: 'Test webhook enqueued successfully',
+          eventId: mockEvent.event_id,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          message: `Failed to enqueue test webhook: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    }
   }
