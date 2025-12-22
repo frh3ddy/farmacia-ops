@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Farmacia Ops - Kitchen Sink</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 20px;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 30px;
+      border-bottom: 2px solid #007bff;
+      padding-bottom: 10px;
+    }
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+    .tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-size: 16px;
+      color: #666;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab:hover {
+      color: #007bff;
+    }
+    .tab.active {
+      color: #007bff;
+      border-bottom-color: #007bff;
+      font-weight: 600;
+    }
+    .content {
+      margin-top: 20px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+      color: #333;
+    }
+    input[type="text"],
+    input[type="number"],
+    textarea {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    textarea {
+      min-height: 150px;
+      font-family: monospace;
+    }
+    input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    button {
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #6c757d;
+    }
+    .btn-secondary:hover {
+      background: #545b62;
+    }
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #666;
+    }
+    .error {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    .success {
+      background: #d4edda;
+      color: #155724;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    th {
+      background: #f8f9fa;
+      font-weight: 600;
+      color: #333;
+    }
+    tr:hover {
+      background: #f8f9fa;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .badge-success {
+      background: #d4edda;
+      color: #155724;
+    }
+    .badge-danger {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    .badge-info {
+      background: #d1ecf1;
+      color: #0c5460;
+    }
+    .expandable {
+      cursor: pointer;
+    }
+    .details {
+      padding: 15px;
+      background: #f8f9fa;
+      margin-top: 10px;
+      border-radius: 4px;
+    }
+    .json-view {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('catalog-sync');
+
+      return (
+        <div className="container">
+          <h1>🧪 Farmacia Ops - Kitchen Sink</h1>
+          <div className="tabs">
+            <button className={`tab ${activeTab === 'catalog-sync' ? 'active' : ''}`} onClick={() => setActiveTab('catalog-sync')}>
+              Catalog Sync
+            </button>
+            <button className={`tab ${activeTab === 'mappings' ? 'active' : ''}`} onClick={() => setActiveTab('mappings')}>
+              Catalog Mappings
+            </button>
+            <button className={`tab ${activeTab === 'products' ? 'active' : ''}`} onClick={() => setActiveTab('products')}>
+              Products
+            </button>
+            <button className={`tab ${activeTab === 'sales' ? 'active' : ''}`} onClick={() => setActiveTab('sales')}>
+              Sales
+            </button>
+            <button className={`tab ${activeTab === 'locations' ? 'active' : ''}`} onClick={() => setActiveTab('locations')}>
+              Locations
+            </button>
+            <button className={`tab ${activeTab === 'webhook-test' ? 'active' : ''}`} onClick={() => setActiveTab('webhook-test')}>
+              Webhook Test
+            </button>
+          </div>
+          <div className="content">
+            {activeTab === 'catalog-sync' && <CatalogSync />}
+            {activeTab === 'mappings' && <CatalogMappings />}
+            {activeTab === 'products' && <Products />}
+            {activeTab === 'sales' && <Sales />}
+            {activeTab === 'locations' && <Locations />}
+            {activeTab === 'webhook-test' && <WebhookTest />}
+          </div>
+        </div>
+      );
+    }
+
+    function CatalogSync() {
+      const [locationId, setLocationId] = useState('');
+      const [forceResync, setForceResync] = useState(false);
+      const [loading, setLoading] = useState(false);
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState(null);
+
+      const handleSync = async () => {
+        setLoading(true);
+        setError(null);
+        setResult(null);
+
+        try {
+          const response = await fetch('/admin/square/catalog/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              locationId: locationId || null,
+              forceResync,
+            }),
+          });
+
+          const data = await response.json();
+          if (response.ok) {
+            setResult(data);
+          } else {
+            setError(data.message || 'Sync failed');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to sync catalog');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div>
+          <h2>Catalog Sync</h2>
+          <div className="form-group">
+            <label>Location ID (optional):</label>
+            <input
+              type="text"
+              value={locationId}
+              onChange={(e) => setLocationId(e.target.value)}
+              placeholder="Leave empty for global sync"
+            />
+          </div>
+          <div className="form-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={forceResync}
+                onChange={(e) => setForceResync(e.target.checked)}
+              />
+              Force Resync (re-sync existing mappings)
+            </label>
+          </div>
+          <button onClick={handleSync} disabled={loading}>
+            {loading ? 'Syncing...' : 'Sync Catalog'}
+          </button>
+
+          {error && <div className="error">{error}</div>}
+          {result && (
+            <div className="success">
+              <h3>Sync Results</h3>
+              <p><strong>Total Variations Found:</strong> {result.result?.totalVariationsFound || 0}</p>
+              <p><strong>Variations Processed:</strong> {result.result?.variationsProcessed || 0}</p>
+              <p><strong>Products Created:</strong> {result.result?.productsCreated || 0}</p>
+              <p><strong>Mappings Created:</strong> {result.result?.mappingsCreated || 0}</p>
+              <p><strong>Mappings Skipped:</strong> {result.result?.mappingsSkipped || 0}</p>
+              {result.result?.errors?.length > 0 && (
+                <div>
+                  <strong>Errors:</strong>
+                  <ul>
+                    {result.result.errors.map((err, i) => (
+                      <li key={i}>{err.variationName}: {err.error}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function CatalogMappings() {
+      const [mappings, setMappings] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      const fetchMappings = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const response = await fetch('/api/catalog/mappings');
+          const data = await response.json();
+          if (data.success) {
+            setMappings(data.data || []);
+          } else {
+            setError('Failed to fetch mappings');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to fetch mappings');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        fetchMappings();
+      }, []);
+
+      if (loading) return <div className="loading">Loading mappings...</div>;
+      if (error) return <div className="error">{error}</div>;
+
+      return (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2>Catalog Mappings ({mappings.length})</h2>
+            <button onClick={fetchMappings} className="btn-secondary">Refresh</button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Variation ID</th>
+                <th>Product</th>
+                <th>Location</th>
+                <th>Synced At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mappings.map((mapping) => (
+                <tr key={mapping.id}>
+                  <td><code>{mapping.squareVariationId}</code></td>
+                  <td>{mapping.product?.name || 'N/A'}</td>
+                  <td>{mapping.location?.name || (mapping.locationId ? mapping.locationId : 'Global')}</td>
+                  <td>{new Date(mapping.syncedAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function Products() {
+      const [products, setProducts] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      useEffect(() => {
+        fetch('/api/products')
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) {
+              setProducts(data.data || []);
+            } else {
+              setError('Failed to fetch products');
+            }
+          })
+          .catch(err => setError(err.message))
+          .finally(() => setLoading(false));
+      }, []);
+
+      if (loading) return <div className="loading">Loading products...</div>;
+      if (error) return <div className="error">{error}</div>;
+
+      return (
+        <div>
+          <h2>Products ({products.length})</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>SKU</th>
+                <th>Category</th>
+                <th>Mappings</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((product) => (
+                <tr key={product.id}>
+                  <td><code>{product.id.substring(0, 8)}...</code></td>
+                  <td>{product.name}</td>
+                  <td>{product.sku || '-'}</td>
+                  <td>{product.category?.name || '-'}</td>
+                  <td><span className="badge badge-info">{product.catalogMappings?.length || 0}</span></td>
+                  <td>{new Date(product.createdAt).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function Sales() {
+      const [sales, setSales] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+      const [expanded, setExpanded] = useState(new Set());
+
+      useEffect(() => {
+        fetch('/api/sales')
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) {
+              setSales(data.data || []);
+            } else {
+              setError('Failed to fetch sales');
+            }
+          })
+          .catch(err => setError(err.message))
+          .finally(() => setLoading(false));
+      }, []);
+
+      const toggleExpand = (id) => {
+        const newExpanded = new Set(expanded);
+        if (newExpanded.has(id)) {
+          newExpanded.delete(id);
+        } else {
+          newExpanded.add(id);
+        }
+        setExpanded(newExpanded);
+      };
+
+      if (loading) return <div className="loading">Loading sales...</div>;
+      if (error) return <div className="error">{error}</div>;
+
+      return (
+        <div>
+          <h2>Sales ({sales.length})</h2>
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>Square ID</th>
+                <th>Location</th>
+                <th>Revenue</th>
+                <th>Cost</th>
+                <th>Profit</th>
+                <th>Items</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sales.map((sale) => (
+                <React.Fragment key={sale.id}>
+                  <tr className="expandable" onClick={() => toggleExpand(sale.id)}>
+                    <td>{expanded.has(sale.id) ? '▼' : '▶'}</td>
+                    <td><code>{sale.squareId}</code></td>
+                    <td>{sale.location?.name || sale.locationId}</td>
+                    <td>${parseFloat(sale.totalRevenue).toFixed(2)}</td>
+                    <td>${parseFloat(sale.totalCost).toFixed(2)}</td>
+                    <td>${parseFloat(sale.grossProfit).toFixed(2)}</td>
+                    <td>{sale.items?.length || 0}</td>
+                    <td>{new Date(sale.createdAt).toLocaleString()}</td>
+                  </tr>
+                  {expanded.has(sale.id) && (
+                    <tr>
+                      <td colSpan="8">
+                        <div className="details">
+                          <h4>Sale Items:</h4>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Product</th>
+                                <th>Quantity</th>
+                                <th>Price</th>
+                                <th>Cost</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sale.items?.map((item) => (
+                                <tr key={item.id}>
+                                  <td>{item.product?.name || 'N/A'}</td>
+                                  <td>{item.quantity}</td>
+                                  <td>${parseFloat(item.price).toFixed(2)}</td>
+                                  <td>${parseFloat(item.cost).toFixed(2)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function Locations() {
+      const [locations, setLocations] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      useEffect(() => {
+        fetch('/locations')
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) {
+              setLocations(data.data || []);
+            } else {
+              setError('Failed to fetch locations');
+            }
+          })
+          .catch(err => setError(err.message))
+          .finally(() => setLoading(false));
+      }, []);
+
+      if (loading) return <div className="loading">Loading locations...</div>;
+      if (error) return <div className="error">{error}</div>;
+
+      return (
+        <div>
+          <h2>Locations ({locations.length})</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Address</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {locations.map((location) => (
+                <tr key={location.id}>
+                  <td><code>{location.id.substring(0, 8)}...</code></td>
+                  <td>{location.name}</td>
+                  <td>{location.address || '-'}</td>
+                  <td>
+                    <span className={`badge ${location.isActive ? 'badge-success' : 'badge-danger'}`}>
+                      {location.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td>{new Date(location.createdAt).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    function WebhookTest() {
+      const [paymentId, setPaymentId] = useState('');
+      const [orderId, setOrderId] = useState('');
+      const [locationId, setLocationId] = useState('L60AMVPDZJ48F');
+      const [amount, setAmount] = useState(100);
+      const [loading, setLoading] = useState(false);
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState(null);
+
+      const handleTest = async () => {
+        setLoading(true);
+        setError(null);
+        setResult(null);
+
+        try {
+          const response = await fetch('/api/webhooks/square/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              paymentId: paymentId || undefined,
+              orderId: orderId || undefined,
+              locationId,
+              amount,
+            }),
+          });
+
+          const data = await response.json();
+          if (data.success) {
+            setResult(data);
+          } else {
+            setError(data.message || 'Webhook test failed');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to test webhook');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div>
+          <h2>Test Webhook</h2>
+          <p style={{ marginBottom: '15px', color: '#666' }}>
+            Simulate a Square payment webhook to test sale processing.
+          </p>
+          <div className="form-group">
+            <label>Payment ID (optional, auto-generated if empty):</label>
+            <input
+              type="text"
+              value={paymentId}
+              onChange={(e) => setPaymentId(e.target.value)}
+              placeholder="test_payment_123"
+            />
+          </div>
+          <div className="form-group">
+            <label>Order ID (optional, auto-generated if empty):</label>
+            <input
+              type="text"
+              value={orderId}
+              onChange={(e) => setOrderId(e.target.value)}
+              placeholder="test_order_123"
+            />
+          </div>
+          <div className="form-group">
+            <label>Location ID:</label>
+            <input
+              type="text"
+              value={locationId}
+              onChange={(e) => setLocationId(e.target.value)}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label>Amount (cents):</label>
+            <input
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(parseInt(e.target.value) || 0)}
+              min="1"
+            />
+          </div>
+          <button onClick={handleTest} disabled={loading}>
+            {loading ? 'Sending...' : 'Send Test Webhook'}
+          </button>
+
+          {error && <div className="error">{error}</div>}
+          {result && (
+            <div className="success">
+              <h3>Webhook Test Result</h3>
+              <p><strong>Status:</strong> {result.message}</p>
+              <p><strong>Event ID:</strong> {result.eventId}</p>
+              <p style={{ marginTop: '10px' }}>Check the worker logs to see if the sale was processed.</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
+

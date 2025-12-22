@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { config } from 'dotenv';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
 import { NestFactory } from '@nestjs/core';
 import { INestApplication } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -25,7 +25,7 @@ if (!connectionString) {
 
 const port = process.env.PORT || 3000;
 
-let app: INestApplication;
+let app: NestExpressApplication;
 
 async function bootstrap() {
   console.log(`🚀 Starting Farmacia Ops API on port ${port}...`);
@@ -47,8 +47,32 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type'],
   });
 
+  // Serve static files from public directory
+  const publicPath = join(__dirname, '..', 'public');
+  app.useStaticAssets(publicPath, {
+    index: 'index.html',
+  });
+
+  // Fallback to index.html for non-API routes (client-side routing)
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const path = req.path;
+    if (
+      !path.startsWith('/api') &&
+      !path.startsWith('/admin') &&
+      !path.startsWith('/webhooks') &&
+      !path.startsWith('/locations') &&
+      path !== '/' &&
+      !path.includes('.')
+    ) {
+      res.sendFile(join(publicPath, 'index.html'));
+    } else {
+      next();
+    }
+  });
+
   await app.listen(port);
   console.log(`✅ API server listening on port ${port}`);
+  console.log(`📁 Serving static files from: ${publicPath}`);
 }
 
 // Graceful shutdown
