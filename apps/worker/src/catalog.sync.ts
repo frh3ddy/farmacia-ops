@@ -77,32 +77,41 @@ export async function syncSquareCatalog(
   const client = getSquareClient();
 
   // Fetch catalog objects (ITEM_VARIATION type only)
-  // Square SDK v40 uses pagination iterators - see https://github.com/square/square-nodejs-sdk#pagination
+  // Square SDK v40 - handle pagination manually with cursor
   let catalogObjects: any[] = [];
+  let cursor: string | undefined = undefined;
 
   try {
-    // Use the search method which returns an iterable
-    const response = await client.catalog.search({
-      objectTypes: ['ITEM_VARIATION'],
-    });
-
-    console.log('[CATALOG_SYNC] Square API response type:', typeof response);
-    console.log('[CATALOG_SYNC] Is iterable:', Symbol.iterator in (response as any));
-
-    // Square SDK v40 returns an iterable - iterate through all pages
-    // See: https://github.com/square/square-nodejs-sdk#pagination
-    for await (const item of response as any) {
-      console.log('[CATALOG_SYNC] Processing item:', {
-        type: item.type,
-        id: item.id,
-        hasItemVariationData: !!item.itemVariationData,
+    do {
+      // Square SDK v40 - catalog.search returns a response object, not an iterable
+      const response = await client.catalog.search({
+        objectTypes: ['ITEM_VARIATION'],
+        cursor: cursor,
       });
-      
-      // Only add ITEM_VARIATION objects
-      if (item.type === 'ITEM_VARIATION') {
-        catalogObjects.push(item);
+
+      console.log('[CATALOG_SYNC] Square API response:', {
+        responseType: typeof response,
+        responseKeys: Object.keys(response || {}),
+        hasObjects: !!response.objects,
+        objectsLength: response.objects?.length || 0,
+        cursor: response.cursor,
+      });
+
+      // Square SDK v40 response structure: response.objects (array)
+      if (response.objects && Array.isArray(response.objects)) {
+        console.log('[CATALOG_SYNC] Processing', response.objects.length, 'objects');
+        
+        for (const item of response.objects) {
+          // Only add ITEM_VARIATION objects (should all be, but double-check)
+          if (item.type === 'ITEM_VARIATION') {
+            catalogObjects.push(item);
+          }
+        }
       }
-    }
+
+      // Get next page cursor
+      cursor = response.cursor || undefined;
+    } while (cursor);
 
     console.log('[CATALOG_SYNC] Total variations collected:', catalogObjects.length);
   } catch (error) {
