@@ -63,40 +63,34 @@ export class CatalogService {
     const client = this.getSquareClient();
 
     // Fetch catalog objects (ITEM_VARIATION type only)
+    // Square SDK v40 uses pagination iterators - see https://github.com/square/square-nodejs-sdk#pagination
     let catalogObjects: any[] = [];
-    let cursor: string | undefined = undefined;
 
     try {
-      do {
-        // Try using list method first (simpler, might work better)
-        let response: any;
-        try {
-          response = await client.catalog.list({
-            types: 'ITEM_VARIATION',
-            cursor: cursor,
-          });
-        } catch (listError) {
-          // Fallback to search if list doesn't work
-          console.log('[CATALOG_SYNC] List method failed, trying search...');
-          response = await client.catalog.search({
-            objectTypes: ['ITEM_VARIATION'],
-            cursor: cursor,
-          });
-        }
+      // Use the search method which returns an iterable
+      const response = await client.catalog.search({
+        objectTypes: ['ITEM_VARIATION'],
+      });
 
-        console.log('[CATALOG_SYNC] Square API response:', {
-          hasResult: !!response.result,
-          objectsCount: response.result?.objects?.length || 0,
-          cursor: response.result?.cursor,
-          responseKeys: Object.keys(response.result || {}),
+      console.log('[CATALOG_SYNC] Square API response type:', typeof response);
+      console.log('[CATALOG_SYNC] Is iterable:', Symbol.iterator in (response as any));
+
+      // Square SDK v40 returns an iterable - iterate through all pages
+      // See: https://github.com/square/square-nodejs-sdk#pagination
+      for await (const item of response as any) {
+        console.log('[CATALOG_SYNC] Processing item:', {
+          type: item.type,
+          id: item.id,
+          hasItemVariationData: !!item.itemVariationData,
         });
-
-        if (response.result?.objects) {
-          catalogObjects = catalogObjects.concat(response.result.objects);
+        
+        // Only add ITEM_VARIATION objects
+        if (item.type === 'ITEM_VARIATION') {
+          catalogObjects.push(item);
         }
+      }
 
-        cursor = response.result?.cursor || undefined;
-      } while (cursor);
+      console.log('[CATALOG_SYNC] Total variations collected:', catalogObjects.length);
     } catch (error) {
       console.error('[CATALOG_SYNC] Square API error:', error);
       console.error('[CATALOG_SYNC] Error details:', {
