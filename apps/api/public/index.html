@@ -593,8 +593,62 @@
       const [loading, setLoading] = useState(false);
       const [result, setResult] = useState(null);
       const [error, setError] = useState(null);
+      const [isPaused, setIsPaused] = useState(false);
+      const [statusLoading, setStatusLoading] = useState(true);
+
+      useEffect(() => {
+        // Fetch initial status
+        fetchStatus();
+      }, []);
+
+      const fetchStatus = async () => {
+        try {
+          const response = await fetch('/api/webhooks/square/test/status');
+          const data = await response.json();
+          if (data.success) {
+            setIsPaused(data.paused || false);
+          }
+        } catch (err) {
+          console.error('Failed to fetch webhook status:', err);
+        } finally {
+          setStatusLoading(false);
+        }
+      };
+
+      const handlePause = async () => {
+        try {
+          const response = await fetch('/api/webhooks/square/test/pause', {
+            method: 'POST',
+          });
+          const data = await response.json();
+          if (data.success) {
+            setIsPaused(true);
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to pause webhook testing');
+        }
+      };
+
+      const handleResume = async () => {
+        try {
+          const response = await fetch('/api/webhooks/square/test/resume', {
+            method: 'POST',
+          });
+          const data = await response.json();
+          if (data.success) {
+            setIsPaused(false);
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to resume webhook testing');
+        }
+      };
 
       const handleTest = async () => {
+        if (isPaused) {
+          setError('Webhook testing is paused. Please resume to send test webhooks.');
+          return;
+        }
+
         setLoading(true);
         setError(null);
         setResult(null);
@@ -616,6 +670,9 @@
             setResult(data);
           } else {
             setError(data.message || 'Webhook test failed');
+            if (data.paused) {
+              setIsPaused(true);
+            }
           }
         } catch (err) {
           setError(err.message || 'Failed to test webhook');
@@ -626,9 +683,34 @@
 
       return (
         <div>
-          <h2>Test Webhook</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h2>Test Webhook</h2>
+            {!statusLoading && (
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <span style={{ 
+                  padding: '5px 15px', 
+                  background: isPaused ? '#dc3545' : '#28a745', 
+                  color: 'white', 
+                  borderRadius: '4px',
+                  fontWeight: '600'
+                }}>
+                  {isPaused ? '⏸ PAUSED' : '▶ ACTIVE'}
+                </span>
+                {isPaused ? (
+                  <button onClick={handleResume} style={{ background: '#28a745' }}>
+                    Resume
+                  </button>
+                ) : (
+                  <button onClick={handlePause} style={{ background: '#dc3545' }}>
+                    Pause
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           <p style={{ marginBottom: '15px', color: '#666' }}>
             Simulate a Square payment webhook to test sale processing.
+            {isPaused && <strong style={{ color: '#dc3545', display: 'block', marginTop: '5px' }}>⚠️ Webhook testing is paused. Jobs will not be sent.</strong>}
           </p>
           <div className="form-group">
             <label>Payment ID (optional, auto-generated if empty):</label>
@@ -666,8 +748,8 @@
               min="1"
             />
           </div>
-          <button onClick={handleTest} disabled={loading}>
-            {loading ? 'Sending...' : 'Send Test Webhook'}
+          <button onClick={handleTest} disabled={loading || isPaused}>
+            {loading ? 'Sending...' : isPaused ? 'Paused - Cannot Send' : 'Send Test Webhook'}
           </button>
 
           {error && <div className="error">{error}</div>}

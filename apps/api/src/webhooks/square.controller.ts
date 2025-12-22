@@ -15,10 +15,14 @@ import {
   import { Request, Response } from 'express';
   import { WebhooksHelper } from 'square';
   import { SaleQueue } from '../queues/sale.queue';
+  import { WebhookTestService } from './webhook-test.service';
   
   @Controller('webhooks/square')
   export class SquareWebhookController {
-    constructor(private readonly saleQueue: SaleQueue) {}
+    constructor(
+      private readonly saleQueue: SaleQueue,
+      private readonly webhookTestService: WebhookTestService,
+    ) {}
   
     @Get()
     async get() {
@@ -109,8 +113,15 @@ import {
         console.log('[DEBUG] [WEBHOOK] ⚠️ Event type mismatch, ignoring');
         return res.status(HttpStatus.OK).send('Ignored');
       }
-      console.log('[DEBUG] [WEBHOOK] ✓ Event type matches, proceeding to enqueue');
-    
+      console.log('[DEBUG] [WEBHOOK] ✓ Event type matches');
+
+      // Check if webhook processing is paused
+      if (this.webhookTestService.isWebhookPaused()) {
+        console.log('[DEBUG] [WEBHOOK] ⚠️ Webhook processing is paused, ignoring event');
+        return res.status(HttpStatus.OK).send('Paused - Not Processed');
+      }
+
+      console.log('[DEBUG] [WEBHOOK] Proceeding to enqueue');
       console.log('[DEBUG] [WEBHOOK] Calling saleQueue.enqueue()...');
       await this.saleQueue.enqueue(event);
       console.log('[DEBUG] [WEBHOOK] ✓ Event enqueued successfully');
@@ -123,11 +134,53 @@ import {
 
   @Controller('api/webhooks/square')
   export class WebhookTestController {
-    constructor(private readonly saleQueue: SaleQueue) {}
+    constructor(
+      private readonly saleQueue: SaleQueue,
+      private readonly webhookTestService: WebhookTestService,
+    ) {}
+    
+    @Get('test/status')
+    getStatus() {
+      return {
+        success: true,
+        ...this.webhookTestService.getStatus(),
+      };
+    }
+
+    @Post('test/pause')
+    pause() {
+      // Only updates state - does NOT call enqueue
+      this.webhookTestService.pause();
+      return {
+        success: true,
+        message: 'Webhook testing paused',
+        paused: true,
+      };
+    }
+
+    @Post('test/resume')
+    resume() {
+      // Only updates state - does NOT call enqueue
+      this.webhookTestService.resume();
+      return {
+        success: true,
+        message: 'Webhook testing resumed',
+        paused: false,
+      };
+    }
     
     @Post('test')
     @HttpCode(200)
     async testWebhook(@Req() req: Request) {
+      // Check if webhook testing is paused - if so, return early without calling enqueue
+      if (this.webhookTestService.isWebhookPaused()) {
+        return {
+          success: false,
+          message: 'Webhook testing is paused. Please resume to send test webhooks.',
+          paused: true,
+        };
+      }
+
       // Test endpoint to simulate Square webhook without signature verification
       // Useful for testing sale processing
       const body = req.body;
@@ -162,6 +215,7 @@ import {
       console.log('[DEBUG] [WEBHOOK_TEST] Simulating webhook event:', mockEvent.event_id);
       
       try {
+        // Only reaches here if NOT paused - enqueue the test webhook
         await this.saleQueue.enqueue(mockEvent);
         return {
           success: true,
