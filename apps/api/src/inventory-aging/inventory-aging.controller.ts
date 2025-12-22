@@ -19,20 +19,24 @@ export class InventoryAgingController {
     @Query('categoryId') categoryId?: string,
   ) {
     try {
+      // Normalize empty strings to undefined
+      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedCategoryId = categoryId?.trim() || undefined;
+
       let agedBatches =
         await this.inventoryAgingService.classifyInventoryAging();
 
       // Filter by location if provided
-      if (locationId) {
+      if (normalizedLocationId) {
         agedBatches = agedBatches.filter(
-          (batch) => batch.batch.locationId === locationId,
+          (batch) => batch.batch.locationId === normalizedLocationId,
         );
       }
 
       // Filter by category if provided
-      if (categoryId) {
+      if (normalizedCategoryId) {
         agedBatches = agedBatches.filter(
-          (batch) => batch.batch.product.categoryId === categoryId,
+          (batch) => batch.batch.product.categoryId === normalizedCategoryId,
         );
       }
 
@@ -72,25 +76,34 @@ export class InventoryAgingController {
   async getProductAging(
     @Query('locationId') locationId?: string,
     @Query('categoryId') categoryId?: string,
-    @Query('riskLevel') riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+    @Query('riskLevel') riskLevel?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
     try {
+      // Normalize empty strings to undefined
+      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedCategoryId = categoryId?.trim() || undefined;
+      const normalizedRiskLevel = riskLevel?.trim() || undefined;
+      const validRiskLevels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+      const normalizedRiskLevelEnum = normalizedRiskLevel && validRiskLevels.includes(normalizedRiskLevel)
+        ? (normalizedRiskLevel as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL')
+        : undefined;
+
       let agedBatches =
         await this.inventoryAgingService.classifyInventoryAging();
 
       // Filter by location if provided
-      if (locationId) {
+      if (normalizedLocationId) {
         agedBatches = agedBatches.filter(
-          (batch) => batch.batch.locationId === locationId,
+          (batch) => batch.batch.locationId === normalizedLocationId,
         );
       }
 
       // Filter by category if provided
-      if (categoryId) {
+      if (normalizedCategoryId) {
         agedBatches = agedBatches.filter(
-          (batch) => batch.batch.product.categoryId === categoryId,
+          (batch) => batch.batch.product.categoryId === normalizedCategoryId,
         );
       }
 
@@ -98,9 +111,9 @@ export class InventoryAgingController {
         this.inventoryAgingService.analyzeProductAging(agedBatches);
 
       // Filter by risk level if provided
-      if (riskLevel) {
+      if (normalizedRiskLevelEnum) {
         productAnalyses = productAnalyses.filter(
-          (product) => product.riskLevel === riskLevel,
+          (product) => product.riskLevel === normalizedRiskLevelEnum,
         );
       }
 
@@ -159,13 +172,16 @@ export class InventoryAgingController {
   @Get('location')
   async getLocationAging(@Query('locationId') locationId?: string) {
     try {
+      // Normalize empty strings to undefined
+      const normalizedLocationId = locationId?.trim() || undefined;
+
       let agedBatches =
         await this.inventoryAgingService.classifyInventoryAging();
 
       // Filter by location if provided
-      if (locationId) {
+      if (normalizedLocationId) {
         agedBatches = agedBatches.filter(
-          (batch) => batch.batch.locationId === locationId,
+          (batch) => batch.batch.locationId === normalizedLocationId,
         );
       }
 
@@ -209,13 +225,16 @@ export class InventoryAgingController {
   @Get('category')
   async getCategoryAging(@Query('categoryId') categoryId?: string) {
     try {
+      // Normalize empty strings to undefined
+      const normalizedCategoryId = categoryId?.trim() || undefined;
+
       let agedBatches =
         await this.inventoryAgingService.classifyInventoryAging();
 
       // Filter by category if provided
-      if (categoryId) {
+      if (normalizedCategoryId) {
         agedBatches = agedBatches.filter(
-          (batch) => batch.batch.product.categoryId === categoryId,
+          (batch) => batch.batch.product.categoryId === normalizedCategoryId,
         );
       }
 
@@ -258,12 +277,23 @@ export class InventoryAgingController {
 
   @Get('signals')
   async getActionableSignals(
-    @Query('severity') severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
-    @Query('type')
-    type?: 'AT_RISK' | 'SLOW_MOVING_EXPENSIVE' | 'OVERSTOCKED_CATEGORY',
+    @Query('severity') severity?: string,
+    @Query('type') type?: string,
     @Query('limit') limit?: string,
   ) {
     try {
+      // Normalize empty strings to undefined
+      const normalizedSeverity = severity?.trim() || undefined;
+      const normalizedType = type?.trim() || undefined;
+      const validSeverities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+      const validTypes = ['AT_RISK', 'SLOW_MOVING_EXPENSIVE', 'OVERSTOCKED_CATEGORY'];
+      const normalizedSeverityEnum = normalizedSeverity && validSeverities.includes(normalizedSeverity)
+        ? (normalizedSeverity as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL')
+        : undefined;
+      const normalizedTypeEnum = normalizedType && validTypes.includes(normalizedType)
+        ? (normalizedType as 'AT_RISK' | 'SLOW_MOVING_EXPENSIVE' | 'OVERSTOCKED_CATEGORY')
+        : undefined;
+
       const agedBatches =
         await this.inventoryAgingService.classifyInventoryAging();
 
@@ -281,13 +311,13 @@ export class InventoryAgingController {
       );
 
       // Filter by severity if provided
-      if (severity) {
-        signals = signals.filter((signal) => signal.severity === severity);
+      if (normalizedSeverityEnum) {
+        signals = signals.filter((signal) => signal.severity === normalizedSeverityEnum);
       }
 
       // Filter by type if provided
-      if (type) {
-        signals = signals.filter((signal) => signal.type === type);
+      if (normalizedTypeEnum) {
+        signals = signals.filter((signal) => signal.type === normalizedTypeEnum);
       }
 
       const total = signals.length;

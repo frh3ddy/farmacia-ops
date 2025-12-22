@@ -1044,8 +1044,8 @@
         setError(null);
         try {
           const params = new URLSearchParams();
-          if (locationId) params.append('locationId', locationId);
-          if (categoryId) params.append('categoryId', categoryId);
+          if (locationId && locationId.trim()) params.append('locationId', locationId.trim());
+          if (categoryId && categoryId.trim()) params.append('categoryId', categoryId.trim());
           const response = await fetch(`/inventory/aging/summary?${params}`);
           const data = await response.json();
           if (response.ok) {
@@ -1065,11 +1065,11 @@
         setError(null);
         try {
           const params = new URLSearchParams();
-          if (locationId) params.append('locationId', locationId);
-          if (categoryId) params.append('categoryId', categoryId);
-          if (riskLevel) params.append('riskLevel', riskLevel);
-          if (limit) params.append('limit', limit);
-          if (offset) params.append('offset', offset);
+          if (locationId && locationId.trim()) params.append('locationId', locationId.trim());
+          if (categoryId && categoryId.trim()) params.append('categoryId', categoryId.trim());
+          if (riskLevel && riskLevel.trim()) params.append('riskLevel', riskLevel.trim());
+          if (limit && limit.trim()) params.append('limit', limit.trim());
+          if (offset && offset.trim()) params.append('offset', offset.trim());
           const response = await fetch(`/inventory/aging/products?${params}`);
           const data = await response.json();
           if (response.ok) {
@@ -1089,7 +1089,7 @@
         setError(null);
         try {
           const params = new URLSearchParams();
-          if (locationId) params.append('locationId', locationId);
+          if (locationId && locationId.trim()) params.append('locationId', locationId.trim());
           const response = await fetch(`/inventory/aging/location?${params}`);
           const data = await response.json();
           if (response.ok) {
@@ -1109,7 +1109,7 @@
         setError(null);
         try {
           const params = new URLSearchParams();
-          if (categoryId) params.append('categoryId', categoryId);
+          if (categoryId && categoryId.trim()) params.append('categoryId', categoryId.trim());
           const response = await fetch(`/inventory/aging/category?${params}`);
           const data = await response.json();
           if (response.ok) {
@@ -1129,9 +1129,9 @@
         setError(null);
         try {
           const params = new URLSearchParams();
-          if (severity) params.append('severity', severity);
-          if (signalType) params.append('type', signalType);
-          if (limit) params.append('limit', limit);
+          if (severity && severity.trim()) params.append('severity', severity.trim());
+          if (signalType && signalType.trim()) params.append('type', signalType.trim());
+          if (limit && limit.trim()) params.append('limit', limit.trim());
           const response = await fetch(`/inventory/aging/signals?${params}`);
           const data = await response.json();
           if (response.ok) {
@@ -1508,7 +1508,7 @@
             (activeView === 'signals' && signals.length === 0)
           ) && (
             <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-              No data available. Make sure you have inventory with quantity > 0.
+              No data available. Make sure you have inventory with quantity &gt; 0.
             </div>
           )}
         </div>
