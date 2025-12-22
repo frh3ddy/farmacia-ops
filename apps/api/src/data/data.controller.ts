@@ -69,5 +69,24 @@ export class DataController {
       count: sales.length,
     };
   }
+
+  @Get('inventory')
+  async getInventory() {
+    const inventory = await this.prisma.inventory.findMany({
+      include: {
+        product: true,
+        location: true,
+      },
+      orderBy: {
+        receivedAt: 'asc', // FIFO order
+      },
+    });
+
+    return {
+      success: true,
+      data: inventory,
+      count: inventory.length,
+    };
+  }
 }
 

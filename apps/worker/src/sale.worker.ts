@@ -689,7 +689,7 @@ export async function processSaleJob(job: Job): Promise<void> {
             const saleItem = await processSaleItem(
               sale.id,
               lineItem.productId,
-              locationId,
+              location.id, // Use Location UUID, not Square location ID
               lineItem.quantitySold,
               new Prisma.Decimal(lineItem.salePrice),
               tx,

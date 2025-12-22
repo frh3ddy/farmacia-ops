@@ -215,6 +215,9 @@
             <button className={`tab ${activeTab === 'webhook-test' ? 'active' : ''}`} onClick={() => setActiveTab('webhook-test')}>
               Webhook Test
             </button>
+            <button className={`tab ${activeTab === 'inventory' ? 'active' : ''}`} onClick={() => setActiveTab('inventory')}>
+              Inventory
+            </button>
           </div>
           <div className="content">
             {activeTab === 'catalog-sync' && <CatalogSync />}
@@ -223,6 +226,7 @@
             {activeTab === 'sales' && <Sales />}
             {activeTab === 'locations' && <Locations />}
             {activeTab === 'webhook-test' && <WebhookTest />}
+            {activeTab === 'inventory' && <Inventory />}
           </div>
         </div>
       );
@@ -673,6 +677,115 @@
               <p><strong>Status:</strong> {result.message}</p>
               <p><strong>Event ID:</strong> {result.eventId}</p>
               <p style={{ marginTop: '10px' }}>Check the worker logs to see if the sale was processed.</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Inventory() {
+      const [inventory, setInventory] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState(null);
+
+      useEffect(() => {
+        fetch('/api/inventory')
+          .then(res => res.json())
+          .then(data => {
+            if (data.success) {
+              setInventory(data.data || []);
+            } else {
+              setError('Failed to fetch inventory');
+            }
+          })
+          .catch(err => setError(err.message))
+          .finally(() => setLoading(false));
+      }, []);
+
+      if (loading) return <div className="loading">Loading inventory...</div>;
+      if (error) return <div className="error">{error}</div>;
+
+      // Group inventory by product and location for better display
+      const grouped = inventory.reduce((acc, item) => {
+        const key = `${item.productId}-${item.locationId}`;
+        if (!acc[key]) {
+          acc[key] = {
+            product: item.product,
+            location: item.location,
+            items: [],
+            totalQuantity: 0,
+          };
+        }
+        acc[key].items.push(item);
+        acc[key].totalQuantity += item.quantity;
+        return acc;
+      }, {});
+
+      return (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h2>Inventory ({inventory.length} batches)</h2>
+            <button onClick={() => window.location.reload()} className="btn-secondary">Refresh</button>
+          </div>
+          
+          <div style={{ marginBottom: '20px', padding: '15px', background: '#f8f9fa', borderRadius: '4px' }}>
+            <strong>Note:</strong> This is for testing purposes. A full inventory management feature will be added later.
+            <br />
+            <strong>Total Unique Products:</strong> {Object.keys(grouped).length}
+          </div>
+
+          <h3>By Product & Location</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Location</th>
+                <th>Total Qty</th>
+                <th>Batches</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.values(grouped).map((group: any, idx) => (
+                <tr key={idx}>
+                  <td>{group.product?.name || 'N/A'}</td>
+                  <td>{group.location?.name || group.location?.squareId || 'N/A'}</td>
+                  <td><strong>{group.totalQuantity}</strong></td>
+                  <td>{group.items.length}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 style={{ marginTop: '30px' }}>All Inventory Batches (FIFO Order)</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Location</th>
+                <th>Quantity</th>
+                <th>Unit Cost</th>
+                <th>Total Cost</th>
+                <th>Received At</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inventory.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.product?.name || 'N/A'}</td>
+                  <td>{item.location?.name || item.location?.squareId || 'N/A'}</td>
+                  <td><strong>{item.quantity}</strong></td>
+                  <td>${parseFloat(item.unitCost).toFixed(2)}</td>
+                  <td>${(parseFloat(item.unitCost) * item.quantity).toFixed(2)}</td>
+                  <td>{new Date(item.receivedAt).toLocaleDateString()}</td>
+                  <td>{new Date(item.createdAt).toLocaleDateString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {inventory.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+              No inventory records found. Create inventory batches to track stock.
             </div>
           )}
         </div>
