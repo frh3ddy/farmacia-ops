@@ -68,7 +68,8 @@ export class CatalogService {
 
     try {
       do {
-        const response: any = await (this.squareClient as any).catalogApi.searchCatalogObjects({
+        // Square SDK v40 - use catalog.search method
+        const response: any = await client.catalog.search({
           objectTypes: ['ITEM_VARIATION'],
           cursor: cursor,
         });
