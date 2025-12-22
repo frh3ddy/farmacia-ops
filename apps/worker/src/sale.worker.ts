@@ -638,12 +638,33 @@ export async function processSaleJob(job: Job): Promise<void> {
   try {
     const result = await prisma.$transaction(
       async (tx) => {
+        // Find or create Location based on Square location ID
+        let location = await tx.location.findUnique({
+          where: { squareId: locationId },
+        });
+
+        if (!location) {
+          console.log('[DEBUG] [TX] Location not found, creating new location with squareId:', locationId);
+          // Fetch location details from Square API if needed, or create with minimal data
+          // For now, create with squareId only - name/address can be updated later
+          location = await tx.location.create({
+            data: {
+              squareId: locationId,
+              name: `Location ${locationId}`, // Temporary name, can be updated via sync
+              isActive: true,
+            },
+          });
+          console.log('[DEBUG] [TX] Created location:', location.id);
+        } else {
+          console.log('[DEBUG] [TX] Found existing location:', location.id);
+        }
+
         console.log('[DEBUG] [TX] Creating Sale record...');
         // Create Sale record (initial with temporary totals)
         const sale = await tx.sale.create({
           data: {
             squareId: squareId,
-            locationId: locationId,
+            locationId: location.id, // Use Location UUID, not Square location ID
             createdAt: createdAt,
             totalRevenue: new Prisma.Decimal(0), // Temporary
             totalCost: new Prisma.Decimal(0), // Temporary

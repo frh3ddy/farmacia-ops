@@ -8,6 +8,7 @@ datasource db {
 
 model Location {
   id       String  @id @default(uuid())
+  squareId String? @unique
   name     String
   address  String?
   isActive Boolean @default(true)
