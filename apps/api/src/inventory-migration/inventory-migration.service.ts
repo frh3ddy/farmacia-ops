@@ -21,14 +21,35 @@ import {
 import { SquareInventoryService } from './square-inventory.service';
 import { CostExtractionService } from './cost-extraction.service';
 import { CatalogMapperService } from './catalog-mapper.service';
+import { SupplierService } from './supplier.service';
 
 @Injectable()
 export class InventoryMigrationService {
+  // In-memory store for extraction sessions (keyed by sessionId)
+  private extractionSessions = new Map<
+    string,
+    {
+      locationIds: string[];
+      allItems: Array<{
+        locationId: string;
+        locationName: string;
+        squareInventoryItem: any;
+      }>;
+      extractionResults: CostExtractionResult[];
+      processedItemKeys: Set<string>;
+      batchSize: number;
+      currentBatch: number;
+      totalBatches: number;
+      totalItems: number;
+    }
+  >();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly squareInventory: SquareInventoryService,
     private readonly costExtraction: CostExtractionService,
     private readonly catalogMapper: CatalogMapperService,
+    private readonly supplierService: SupplierService,
   ) {}
 
   /**
@@ -76,11 +97,12 @@ export class InventoryMigrationService {
     }
 
     // Validate cost approval for DESCRIPTION basis
+    // Note: For DESCRIPTION cost basis, approved costs are recommended but migration can proceed
+    // without them (it will extract costs on-the-fly), though upfront extraction is more accurate
     if (input.costBasis === 'DESCRIPTION') {
       if (!input.approvedCosts || input.approvedCosts.length === 0) {
-        errors.push(
-          'Cost extraction must be approved before migration when using DESCRIPTION cost basis',
-        );
+        // Allow migration to proceed, but it's better to extract and approve upfront
+        // Migration will extract costs on-the-fly if needed
       }
     }
 
@@ -92,124 +114,277 @@ export class InventoryMigrationService {
 
   /**
    * Extract costs from all products for migration preview and approval
+   * Supports batch processing to avoid timeouts
    */
   async extractCostsForMigration(
     locationIds: string[],
     costBasis: 'DESCRIPTION',
+    batchSize?: number | null,
+    extractionSessionId?: string | null,
   ): Promise<CostApprovalRequest> {
-    const extractionResults: CostExtractionResult[] = [];
-    let productsWithExtraction = 0;
-    let productsRequiringManualInput = 0;
+    // Get or create extraction session
+    let sessionId = extractionSessionId || this.generateUUID();
+    let session = this.extractionSessions.get(sessionId);
 
-    // Fetch all products for specified locations
-    for (const locationId of locationIds) {
-      const location = await this.prisma.location.findUnique({
-        where: { id: locationId },
-      });
+    // If resuming, use existing session; otherwise create new
+    if (!session) {
+      // Step 1: Collect all items to process
+      interface ItemToProcess {
+        locationId: string;
+        locationName: string;
+        squareInventoryItem: any;
+      }
 
-      if (!location || !location.squareId) {
+      const allItems: ItemToProcess[] = [];
+
+      // Collect items from all locations
+      for (const locationId of locationIds) {
+        const location = await this.prisma.location.findUnique({
+          where: { id: locationId },
+        });
+
+        if (!location || !location.squareId) {
+          continue;
+        }
+
+        // Fetch Square inventory
+        const squareInventory =
+          await this.squareInventory.fetchSquareInventory(location.squareId);
+
+        // Add items to process list
+        for (const item of squareInventory) {
+          allItems.push({
+            locationId: locationId,
+            locationName: location.name,
+            squareInventoryItem: item,
+          });
+        }
+      }
+
+      // Calculate batches
+      const effectiveBatchSize = batchSize != null && batchSize > 0 
+        ? batchSize 
+        : allItems.length;
+      const totalBatches = Math.ceil(allItems.length / effectiveBatchSize);
+
+      // Create new session
+      session = {
+        locationIds: locationIds,
+        allItems: allItems,
+        extractionResults: [],
+        processedItemKeys: new Set<string>(),
+        batchSize: effectiveBatchSize,
+        currentBatch: 0,
+        totalBatches: totalBatches,
+        totalItems: allItems.length,
+      };
+
+      this.extractionSessions.set(sessionId, session);
+    }
+
+    // Step 2: Process current batch
+    const startIndex = session.currentBatch * session.batchSize;
+    const endIndex = Math.min(startIndex + session.batchSize, session.allItems.length);
+    const batchItems = session.allItems.slice(startIndex, endIndex);
+
+    console.log(`[EXTRACTION_BATCH] Processing batch ${session.currentBatch + 1}/${session.totalBatches}`);
+    console.log(`[EXTRACTION_BATCH] Items ${startIndex} to ${endIndex} (${batchItems.length} items)`);
+
+    let batchProductsWithExtraction = 0;
+    let batchProductsRequiringManualInput = 0;
+
+    // Process batch items
+    for (const itemData of batchItems) {
+      const { locationId, locationName, squareInventoryItem: item } = itemData;
+      const itemKey = `${locationId}:${item.catalogObjectId}`;
+
+      // Skip if already processed
+      if (session.processedItemKeys.has(itemKey)) {
         continue;
       }
 
-      // Fetch Square inventory
-      const squareInventory =
-        await this.squareInventory.fetchSquareInventory(location.squareId);
+      try {
+        // Resolve product
+        const productId = await this.catalogMapper.resolveProductFromSquareVariation(
+          item.catalogObjectId,
+          locationId,
+        );
 
-      // Fetch catalog objects to get product names
-      for (const item of squareInventory) {
-        try {
-          // Resolve product
-          const productId = await this.catalogMapper.resolveProductFromSquareVariation(
-            item.catalogObjectId,
-            locationId,
-          );
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
+        });
 
-          const product = await this.prisma.product.findUnique({
-            where: { id: productId },
-          });
-
-          if (!product) {
-            continue;
-          }
-
-          // Fetch catalog object for product name
-          let catalogObject;
-          try {
-            catalogObject =
-              await this.squareInventory.fetchSquareCatalogObject(
-                item.catalogObjectId,
-              );
-          } catch (error) {
-            console.warn(
-              `[COST_EXTRACTION] Failed to fetch catalog object for ${item.catalogObjectId}:`,
-              error,
-            );
-          }
-
-          // Try Square name first, then fallback to DB product name
-          const squareName = catalogObject?.itemVariationData?.name || null;
-          const dbName = product.name;
-          const productName = squareName || dbName;
-
-          // Debug: Log first few product names to understand format
-          if (extractionResults.length < 5) {
-            console.log(`[COST_EXTRACTION] Product ${product.name}:`);
-            console.log(`[COST_EXTRACTION]   Square name: "${squareName || 'null'}"`);
-            console.log(`[COST_EXTRACTION]   DB name: "${dbName}"`);
-            console.log(`[COST_EXTRACTION]   Using: "${productName}"`);
-          }
-
-          // Extract costs from the product name
-          const extractionResult = this.costExtraction.extractCostFromDescription(
-            productName,
-          );
-          
-          // Debug: Log extraction results for first few products
-          if (extractionResults.length < 5) {
-            console.log(`[COST_EXTRACTION]   Extracted entries: ${extractionResult.extractedEntries.length}`);
-            if (extractionResult.extractedEntries.length > 0) {
-              console.log(`[COST_EXTRACTION]   First entry:`, extractionResult.extractedEntries[0]);
-            } else {
-              console.log(`[COST_EXTRACTION]   Errors:`, extractionResult.extractionErrors);
-              console.log(`[COST_EXTRACTION]   Product name length: ${productName.length}`);
-              console.log(`[COST_EXTRACTION]   Contains $: ${productName.includes('$')}`);
-              console.log(`[COST_EXTRACTION]   Contains 💲: ${productName.includes('💲')}`);
-            }
-          }
-
-          const fullResult: CostExtractionResult = {
-            ...extractionResult,
-            productId: productId,
-            productName: product.name,
-            originalDescription: productName,
-          };
-
-          extractionResults.push(fullResult);
-
-          if (extractionResult.extractedEntries.length > 0) {
-            productsWithExtraction++;
-          } else {
-            productsRequiringManualInput++;
-          }
-        } catch (error) {
-          // Log error, continue processing
-          console.error(
-            `[COST_EXTRACTION] Error processing item ${item.catalogObjectId}:`,
-            error,
-          );
+        if (!product) {
           continue;
         }
+
+        // Fetch catalog object for product name
+        let catalogObject;
+        try {
+          catalogObject =
+            await this.squareInventory.fetchSquareCatalogObject(
+              item.catalogObjectId,
+            );
+        } catch (error) {
+          console.warn(
+            `[COST_EXTRACTION] Failed to fetch catalog object for ${item.catalogObjectId}:`,
+            error,
+          );
+        }
+
+        // Try Square product name from related ITEM first, then variation name, then DB product name
+        // Filter out "Sin variación" (Spanish for "No variation") which Square uses as a default
+        const squareProductName = catalogObject?.productName || null;
+        const squareVariationName = catalogObject?.itemVariationData?.name || null;
+        const dbName = product.name;
+        
+        // Filter out "Sin variación" and similar default values
+        const filteredSquareName = squareProductName && 
+          !squareProductName.toLowerCase().includes('sin variación') && 
+          !squareProductName.toLowerCase().includes('no variation') &&
+          squareProductName.trim().length > 0
+          ? squareProductName : null;
+        
+        const filteredVariationName = squareVariationName && 
+          !squareVariationName.toLowerCase().includes('sin variación') && 
+          !squareVariationName.toLowerCase().includes('no variation') &&
+          squareVariationName.trim().length > 0
+          ? squareVariationName : null;
+        
+        const productName = filteredSquareName || filteredVariationName || dbName;
+
+        // Get description from Square catalog object (from related ITEM)
+        const productDescription = catalogObject?.productDescription || null;
+
+        // Extract costs from product name and description
+        const extractionResult = this.costExtraction.extractCostFromDescription(
+          productName,
+          productDescription,
+        );
+
+        // Enrich extracted entries with supplier lookups and suggestions
+        const totalEntries = extractionResult.extractedEntries.length;
+        const enrichedEntries = await Promise.all(
+          extractionResult.extractedEntries.map(async (entry, idx) => {
+            // Lookup existing suppliers by supplier name
+            const suggestions = await this.supplierService.suggestSuppliers(
+              entry.supplier,
+              5,
+            );
+
+            // Try to find exact match
+            let supplierId: string | null = null;
+            const exactMatch = suggestions.find(
+              (s) =>
+                s.name.toLowerCase().trim() === entry.supplier.toLowerCase().trim(),
+            );
+            if (exactMatch) {
+              supplierId = exactMatch.id;
+            }
+
+            // Calculate default date: use extracted month if available, otherwise one week ago
+            let defaultDateString: string;
+            if (entry.month) {
+              // Convert month name to date (use first day of that month)
+              const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+              const monthIndex = monthNames.indexOf(entry.month);
+              if (monthIndex !== -1) {
+                const now = new Date();
+                const currentYear = now.getFullYear();
+                const currentMonth = now.getMonth();
+                // Use the extracted month, first day of month
+                // If the extracted month is later in the year than current month, use previous year
+                const year = monthIndex > currentMonth ? currentYear - 1 : currentYear;
+                const extractedDate = new Date(year, monthIndex, 1);
+                defaultDateString = extractedDate.toISOString().split('T')[0];
+              } else {
+                // Fallback: one week ago
+                const defaultDate = new Date();
+                defaultDate.setDate(defaultDate.getDate() - 7);
+                defaultDateString = defaultDate.toISOString().split('T')[0];
+              }
+            } else {
+              // Default date: one week prior to current date
+              const defaultDate = new Date();
+              defaultDate.setDate(defaultDate.getDate() - 7);
+              defaultDateString = defaultDate.toISOString().split('T')[0];
+            }
+
+            // Set last entry as selected by default
+            const isLastEntry = idx === totalEntries - 1;
+            
+            return {
+              ...entry,
+              supplierId: supplierId,
+              isEditable: true,
+              suggestedSuppliers: suggestions,
+              addToHistory: true, // Default: add all entries to history
+              editedSupplierName: null, // Initialize editable name
+              editedCost: null, // Initialize editable cost
+              editedEffectiveDate: defaultDateString, // Use extracted month date or default to one week ago
+              isSelected: isLastEntry, // Last entry is selected by default
+            };
+          }),
+        );
+
+        const fullResult: CostExtractionResult = {
+          ...extractionResult,
+          productId: productId,
+          productName: productName, // Use calculated productName (from Square or DB), not just product.name
+          originalDescription: productName,
+          extractedEntries: enrichedEntries,
+          imageUrl: catalogObject?.imageUrl || null, // Include image URL if available
+        };
+
+        session.extractionResults.push(fullResult);
+        session.processedItemKeys.add(itemKey);
+
+        if (extractionResult.extractedEntries.length > 0) {
+          batchProductsWithExtraction++;
+        } else {
+          batchProductsRequiringManualInput++;
+        }
+      } catch (error) {
+        // Log error, continue processing
+        console.error(
+          `[COST_EXTRACTION] Error processing item ${item.catalogObjectId}:`,
+          error,
+        );
+        continue;
+      }
+    }
+
+    // Update session for next batch
+    session.currentBatch++;
+    const isComplete = session.currentBatch >= session.totalBatches;
+
+    // Calculate totals from all processed results
+    let totalProductsWithExtraction = 0;
+    let totalProductsRequiringManualInput = 0;
+    for (const result of session.extractionResults) {
+      if (result.extractedEntries.length > 0) {
+        totalProductsWithExtraction++;
+      } else {
+        totalProductsRequiringManualInput++;
       }
     }
 
     return {
-      cutoverId: this.generateUUID(),
-      locationIds: locationIds,
+      cutoverId: sessionId, // Use sessionId as cutoverId for tracking
+      locationIds: session.locationIds,
       costBasis: costBasis,
-      extractionResults: extractionResults,
-      totalProducts: extractionResults.length,
-      productsWithExtraction: productsWithExtraction,
-      productsRequiringManualInput: productsRequiringManualInput,
+      extractionResults: session.extractionResults,
+      totalProducts: session.extractionResults.length,
+      productsWithExtraction: totalProductsWithExtraction,
+      productsRequiringManualInput: totalProductsRequiringManualInput,
+      batchSize: session.batchSize,
+      currentBatch: session.currentBatch,
+      totalBatches: session.totalBatches,
+      processedItems: session.extractionResults.length,
+      totalItems: session.totalItems,
+      isComplete: isComplete,
+      canContinue: !isComplete,
+      extractionSessionId: sessionId,
     };
   }
 
@@ -224,6 +399,7 @@ export class InventoryMigrationService {
     productName?: string | null,
     approvedCost?: Prisma.Decimal | null,
     manualCost?: Prisma.Decimal | null,
+    productDescription?: string | null,
   ): Promise<Prisma.Decimal | null> {
     if (costBasis === 'MANUAL_INPUT') {
       if (!manualCost || manualCost.lessThan(0)) {
@@ -241,7 +417,7 @@ export class InventoryMigrationService {
       // Fallback: extract and use last entry (should not happen if approval step worked)
       if (productName) {
         const extractionResult =
-          this.costExtraction.extractCostFromDescription(productName);
+          this.costExtraction.extractCostFromDescription(productName, productDescription);
         if (
           extractionResult.selectedCost !== null &&
           extractionResult.selectedCost !== undefined
@@ -383,11 +559,13 @@ export class InventoryMigrationService {
   }
 
   /**
-   * Main migration function: execute complete cutover process
+   * Main migration function: execute complete cutover process (with batch support)
    */
   async executeInventoryMigration(
     input: CutoverInput,
     approvedCosts: { productId: string; cost: Prisma.Decimal }[],
+    batchSize?: number | null,
+    cutoverId?: string | null,
   ): Promise<MigrationResult> {
     // Step 1: Validate input
     const validation = await this.validateCutoverInput(input);
@@ -404,81 +582,197 @@ export class InventoryMigrationService {
       approvedCostsMap.set(approvedCost.productId, approvedCost.cost);
     }
 
-    // Step 3: Initialize result
+    // Step 3: Get or create cutover record
+    let cutoverRecord: any;
+    let batchState: {
+      processedProductIds: Set<string>;
+      allItems: Array<{
+        locationId: string;
+        locationName: string;
+        item: any;
+      }>;
+    } | null = null;
+
+    if (cutoverId) {
+      // Resume existing cutover
+      cutoverRecord = await this.prisma.cutover.findUnique({
+        where: { id: cutoverId },
+      });
+      if (!cutoverRecord) {
+        throw new CutoverValidationError('Cutover not found', []);
+      }
+      if (cutoverRecord.status === 'COMPLETED') {
+        throw new CutoverValidationError('Cutover already completed', []);
+      }
+      // Load batch state
+      batchState = cutoverRecord.batchState as any;
+    } else {
+      // Create new cutover
+      cutoverRecord = await this.prisma.cutover.create({
+        data: {
+          cutoverDate: input.cutoverDate,
+          costBasis: input.costBasis,
+          ownerApproved: input.ownerApproved,
+          ownerApprovedAt: input.ownerApprovedAt || new Date(),
+          ownerApprovedBy: input.ownerApprovedBy || null,
+          status: 'PENDING',
+          batchSize: batchSize || null,
+          currentBatch: 0,
+          totalBatches: null,
+          processedItems: 0,
+          totalItems: null,
+        } as any,
+      });
+    }
+
     const result: MigrationResult = {
-      cutoverId: this.generateUUID(),
+      cutoverId: cutoverRecord.id,
       cutoverDate: input.cutoverDate,
       locationsProcessed: 0,
-      productsProcessed: 0,
+      productsProcessed: cutoverRecord.processedItems || 0,
       openingBalancesCreated: 0,
       errors: [],
       warnings: [],
       completedAt: new Date(),
       completedBy: input.ownerApprovedBy || null,
+      batchSize: batchSize || null,
+      currentBatch: cutoverRecord.currentBatch || 0,
+      totalBatches: cutoverRecord.totalBatches || null,
+      processedItems: cutoverRecord.processedItems || 0,
+      totalItems: cutoverRecord.totalItems || null,
+      isComplete: false,
+      canContinue: false,
     };
 
-    // Step 4: Create cutover record
-    const cutoverRecord = await this.prisma.cutover.create({
-      data: {
-        cutoverDate: input.cutoverDate,
-        costBasis: input.costBasis,
-        ownerApproved: input.ownerApproved,
-        ownerApprovedAt: input.ownerApprovedAt || new Date(),
-        ownerApprovedBy: input.ownerApprovedBy || null,
-        status: 'PENDING',
-      },
-    });
+    // Step 4: Collect all items to process (outside transaction for batch processing)
+    interface ItemToProcess {
+      locationId: string;
+      locationName: string;
+      squareInventoryItem: any;
+    }
 
-    result.cutoverId = cutoverRecord.id;
+    const itemsToProcess: ItemToProcess[] = [];
+    const processedItemKeys = batchState?.processedProductIds
+      ? new Set<string>(Array.from(batchState.processedProductIds))
+      : new Set<string>();
 
-    // Step 5: Begin database transaction
-    try {
-      await this.prisma.$transaction(async (tx) => {
-        // Step 6: Process each location
-      for (const locationId of input.locationIds) {
-        const location = await tx.location.findUnique({
-          where: { id: locationId },
+    // Collect items from all locations
+    for (const locationId of input.locationIds) {
+      const location = await this.prisma.location.findUnique({
+        where: { id: locationId },
+      });
+
+      if (!location || !location.squareId) {
+        result.errors.push({
+          locationId: locationId,
+          errorType: 'SQUARE_API_ERROR',
+          message: 'Location does not have Square ID configured',
+          canProceed: false,
         });
+        continue;
+      }
 
-        if (!location || !location.squareId) {
-          result.errors.push({
-            locationId: locationId,
-            errorType: 'SQUARE_API_ERROR',
-            message: 'Location does not have Square ID configured',
-            canProceed: false,
-          });
-          continue;
-        }
+      // Fetch Square inventory for location
+      let squareInventory;
+      try {
+        squareInventory = await this.squareInventory.fetchSquareInventory(
+          location.squareId,
+        );
+      } catch (error) {
+        result.errors.push({
+          locationId: locationId,
+          locationName: location.name,
+          errorType: 'SQUARE_API_ERROR',
+          message: `Failed to fetch Square inventory: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          canProceed: false,
+        });
+        continue;
+      }
 
-        // Step 6: Fetch Square inventory for location
-        let squareInventory;
-        try {
-          squareInventory = await this.squareInventory.fetchSquareInventory(
-            location.squareId,
-          );
-        } catch (error) {
-          result.errors.push({
+      if (squareInventory.length === 0) {
+        result.warnings.push({
+          locationId: locationId,
+          message: `No inventory found for location ${location.name}`,
+          recommendation: 'Verify Square inventory is configured',
+        });
+      }
+
+      // Add items to process list (skip already processed)
+      for (const item of squareInventory) {
+        const itemKey = `${locationId}:${item.catalogObjectId}`;
+        if (!processedItemKeys.has(itemKey)) {
+          itemsToProcess.push({
             locationId: locationId,
             locationName: location.name,
-            errorType: 'SQUARE_API_ERROR',
-            message: `Failed to fetch Square inventory: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-            canProceed: false,
-          });
-          continue;
-        }
-
-        if (squareInventory.length === 0) {
-          result.warnings.push({
-            locationId: locationId,
-            message: `No inventory found for location ${location.name}`,
-            recommendation: 'Verify Square inventory is configured',
+            squareInventoryItem: item,
           });
         }
+      }
+    }
 
-        // Step 7: Process each inventory item
-        for (const item of squareInventory) {
+    // Update total items if not set
+    if (!cutoverRecord.totalItems) {
+      await this.prisma.cutover.update({
+        where: { id: cutoverRecord.id },
+        data: { totalItems: itemsToProcess.length } as any,
+      });
+      result.totalItems = itemsToProcess.length;
+    } else {
+      result.totalItems = cutoverRecord.totalItems;
+    }
+
+    // Calculate batches
+    // If batchSize is explicitly provided (not null/undefined), use it; otherwise process all at once
+    const effectiveBatchSize = batchSize != null && batchSize > 0 
+      ? batchSize 
+      : itemsToProcess.length;
+    const totalBatches = Math.ceil(itemsToProcess.length / effectiveBatchSize);
+    const currentBatch = cutoverRecord.currentBatch || 0;
+    const startIndex = currentBatch * effectiveBatchSize;
+    const endIndex = Math.min(startIndex + effectiveBatchSize, itemsToProcess.length);
+    const batchItems = itemsToProcess.slice(startIndex, endIndex);
+
+    // Debug logging
+    console.log(`[BATCH_PROCESSING] Total items: ${itemsToProcess.length}`);
+    console.log(`[BATCH_PROCESSING] Batch size requested: ${batchSize}`);
+    console.log(`[BATCH_PROCESSING] Effective batch size: ${effectiveBatchSize}`);
+    console.log(`[BATCH_PROCESSING] Total batches: ${totalBatches}`);
+    console.log(`[BATCH_PROCESSING] Current batch: ${currentBatch}`);
+    console.log(`[BATCH_PROCESSING] Processing items ${startIndex} to ${endIndex} (${batchItems.length} items)`);
+
+    result.batchSize = effectiveBatchSize;
+    result.totalBatches = totalBatches;
+    result.currentBatch = currentBatch;
+
+    if (batchItems.length === 0) {
+      // All items processed
+      result.isComplete = true;
+      result.canContinue = false;
+      
+      // Update cutover as completed
+      await this.prisma.cutover.update({
+        where: { id: cutoverRecord.id },
+        data: {
+          status: 'COMPLETED',
+          completedAt: new Date(),
+          result: result as any,
+        },
+      });
+
+      // Lock system
+      await this.enableCutoverLock(input.cutoverDate, input.locationIds, this.prisma);
+
+      return result;
+    }
+
+    // Step 5: Process batch in transaction
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Process batch items
+        for (const itemData of batchItems) {
+          const { locationId, locationName, squareInventoryItem: item } = itemData;
           let productId: string | undefined;
           let productName: string | undefined;
 
@@ -509,15 +803,21 @@ export class InventoryMigrationService {
             // Determine unit cost
             const approvedCost = approvedCostsMap.get(productId);
 
-            // Fetch catalog object for product name if needed
+            // Fetch catalog object for product name and description if needed
             let productNameForExtraction = productName;
+            let productDescriptionForExtraction: string | null = null;
             if (input.costBasis === 'DESCRIPTION') {
               const catalogObject =
                 await this.squareInventory.fetchSquareCatalogObject(
                   item.catalogObjectId,
                 );
+              // Use product name from related ITEM, fallback to variation name, then DB name
               productNameForExtraction =
-                catalogObject?.itemVariationData?.name || productName;
+                catalogObject?.productName ||
+                catalogObject?.itemVariationData?.name ||
+                productName;
+              // Get description for cost extraction (often contains cost info like "Ba$13.50")
+              productDescriptionForExtraction = catalogObject?.productDescription || null;
             }
 
             const unitCost = await this.determineUnitCost(
@@ -527,6 +827,8 @@ export class InventoryMigrationService {
               item.catalogObjectId,
               productNameForExtraction,
               approvedCost,
+              null,
+              productDescriptionForExtraction,
             );
 
             if (unitCost === null) {
@@ -557,6 +859,10 @@ export class InventoryMigrationService {
 
             result.openingBalancesCreated++;
             result.productsProcessed++;
+            
+            // Mark as processed
+            const itemKey = `${locationId}:${item.catalogObjectId}`;
+            processedItemKeys.add(itemKey);
           } catch (error) {
             if (error instanceof MigrationErrorClass) {
               result.errors.push({
@@ -581,35 +887,39 @@ export class InventoryMigrationService {
           }
         }
 
-        result.locationsProcessed++;
-      }
-
-      // Step 8: Check if migration can proceed
-      const criticalErrors = result.errors.filter((e) => !e.canProceed);
-      if (criticalErrors.length > 0) {
-        throw new MigrationErrorClass(
-          'MIGRATION_BLOCKED',
-          `Migration blocked by ${criticalErrors.length} critical errors`,
-          false,
-        );
-      }
-
-        // Step 9: Lock system (prevent backdated edits)
-        await this.enableCutoverLock(input.cutoverDate, input.locationIds, tx);
-
-        // Step 10: Record cutover completion
-        result.completedAt = new Date();
+        result.locationsProcessed = input.locationIds.length;
       }); // End transaction
 
-      // Update cutover record as completed
+      // Update cutover record with batch progress
+      const isLastBatch = currentBatch + 1 >= totalBatches;
+      const newProcessedItems = (cutoverRecord.processedItems || 0) + batchItems.length;
+
       await this.prisma.cutover.update({
         where: { id: cutoverRecord.id },
         data: {
-          status: 'COMPLETED',
-          completedAt: result.completedAt,
-          result: result as any, // Store MigrationResult as JSON
-        },
+          status: isLastBatch ? 'COMPLETED' : 'IN_PROGRESS',
+          currentBatch: currentBatch + 1,
+          processedItems: newProcessedItems,
+          totalBatches: totalBatches,
+          batchState: {
+            processedProductIds: Array.from(processedItemKeys),
+            locationIds: input.locationIds, // Store for resuming
+          } as any,
+          completedAt: isLastBatch ? new Date() : null,
+          result: result as any,
+        } as any,
       });
+
+      result.processedItems = newProcessedItems;
+      result.currentBatch = currentBatch + 1;
+      result.isComplete = isLastBatch;
+      result.canContinue = !isLastBatch;
+
+      // Lock system if this was the last batch
+      if (isLastBatch) {
+        await this.enableCutoverLock(input.cutoverDate, input.locationIds, this.prisma);
+        result.completedAt = new Date();
+      }
     } catch (error) {
       // Update cutover record as failed
       await this.prisma.cutover.update({
@@ -624,6 +934,59 @@ export class InventoryMigrationService {
     }
 
     return result;
+  }
+
+  /**
+   * Continue batch migration from where it left off
+   */
+  async continueBatchMigration(
+    cutoverId: string,
+    approvedCosts: { productId: string; cost: Prisma.Decimal }[],
+  ): Promise<MigrationResult> {
+    const cutoverRecord = await this.prisma.cutover.findUnique({
+      where: { id: cutoverId },
+    });
+
+    if (!cutoverRecord) {
+      throw new CutoverValidationError('Cutover not found', []);
+    }
+
+    if (cutoverRecord.status === 'COMPLETED') {
+      throw new CutoverValidationError('Cutover already completed', []);
+    }
+
+    if (cutoverRecord.status !== 'IN_PROGRESS') {
+      throw new CutoverValidationError('Cutover is not in progress', []);
+    }
+
+    // Reconstruct input from cutover record
+    const batchState = (cutoverRecord as any).batchState as any;
+    const locationIds = batchState?.locationIds || [];
+
+    if (locationIds.length === 0) {
+      throw new CutoverValidationError(
+        'Cannot continue batch without locationIds. Please restart migration.',
+        [],
+      );
+    }
+
+    const input: CutoverInput = {
+      cutoverDate: cutoverRecord.cutoverDate,
+      locationIds: locationIds,
+      costBasis: cutoverRecord.costBasis as any,
+      ownerApproved: cutoverRecord.ownerApproved,
+      ownerApprovedAt: cutoverRecord.ownerApprovedAt,
+      ownerApprovedBy: cutoverRecord.ownerApprovedBy,
+      approvedCosts: null,
+    };
+
+    // Continue migration with same batch size
+    return this.executeInventoryMigration(
+      input,
+      approvedCosts,
+      (cutoverRecord as any).batchSize || null,
+      cutoverId,
+    );
   }
 
   /**
@@ -784,13 +1147,19 @@ export class InventoryMigrationService {
           const approvedCost = approvedCostsMap.get(productId);
 
           let productNameForExtraction = product.name;
+          let productDescriptionForExtraction: string | null = null;
           if (input.costBasis === 'DESCRIPTION') {
             const catalogObject =
               await this.squareInventory.fetchSquareCatalogObject(
                 item.catalogObjectId,
               );
+            // Use product name from related ITEM, fallback to variation name, then DB name
             productNameForExtraction =
-              catalogObject?.itemVariationData?.name || product.name;
+              catalogObject?.productName ||
+              catalogObject?.itemVariationData?.name ||
+              product.name;
+            // Get description for cost extraction
+            productDescriptionForExtraction = catalogObject?.productDescription || null;
           }
 
           const unitCost = await this.determineUnitCost(
@@ -800,6 +1169,8 @@ export class InventoryMigrationService {
             item.catalogObjectId,
             productNameForExtraction,
             approvedCost,
+            null,
+            productDescriptionForExtraction,
           );
 
           const hasCost = unitCost !== null;
@@ -931,20 +1302,131 @@ export class InventoryMigrationService {
       cost: Prisma.Decimal;
       source: string;
       notes?: string | null;
+      supplierId?: string | null;
+      supplierName?: string | null;
+      isPreferred?: boolean;
     }>,
     approvedBy?: string | null,
+    effectiveAt?: Date | null,
+    entriesToAddToHistory?: Array<{
+      productId: string;
+      supplierName: string;
+      supplierId?: string | null;
+      cost: number;
+      effectiveAt?: Date | undefined;
+    }> | null,
   ): Promise<void> {
-    await this.prisma.costApproval.createMany({
-      data: approvedCosts.map((ac) => ({
-        cutoverId: cutoverId,
-        productId: ac.productId,
-        approvedCost: ac.cost,
-        source: ac.source,
-        notes: ac.notes || null,
-        approvedBy: approvedBy || null,
-      })),
-      skipDuplicates: true,
-    });
+    const effectiveDate = effectiveAt || new Date();
+
+    // Process each approval with supplier management
+    for (const ac of approvedCosts) {
+      // Store cost approval
+      await this.prisma.costApproval.create({
+        data: {
+          cutoverId: cutoverId,
+          productId: ac.productId,
+          approvedCost: ac.cost,
+          source: ac.source,
+          notes: ac.notes || null,
+          approvedBy: approvedBy || null,
+        },
+      });
+
+      // Handle supplier if provided
+      if (ac.supplierName) {
+        try {
+          // Find or create supplier (ensures no duplicates)
+          const supplier = await this.supplierService.findOrCreateSupplier(
+            ac.supplierName,
+          );
+
+          // Create cost history
+          await this.supplierService.createSupplierCostHistory(
+            ac.productId,
+            supplier.id,
+            ac.cost,
+            'MIGRATION',
+            effectiveDate,
+          );
+
+          // Set as preferred if requested
+          if (ac.isPreferred) {
+            await this.supplierService.setPreferredSupplier(
+              ac.productId,
+              supplier.id,
+            );
+          }
+        } catch (error) {
+          console.error(
+            `[COST_APPROVAL] Failed to create supplier/cost history for product ${ac.productId}:`,
+            error,
+          );
+          // Continue processing other approvals even if one fails
+        }
+      } else if (ac.supplierId) {
+        // Use existing supplier ID
+        try {
+          // Create cost history
+          await this.supplierService.createSupplierCostHistory(
+            ac.productId,
+            ac.supplierId,
+            ac.cost,
+            'MIGRATION',
+            effectiveDate,
+          );
+
+          // Set as preferred if requested
+          if (ac.isPreferred) {
+            await this.supplierService.setPreferredSupplier(
+              ac.productId,
+              ac.supplierId,
+            );
+          }
+        } catch (error) {
+          console.error(
+            `[COST_APPROVAL] Failed to create cost history for product ${ac.productId}:`,
+            error,
+          );
+        }
+      }
+    }
+
+    // Process entries to add to supplier history (from extracted options)
+    if (entriesToAddToHistory && entriesToAddToHistory.length > 0) {
+      for (const entry of entriesToAddToHistory) {
+        try {
+          // Find or create supplier (ensures no duplicates)
+          const supplier = await this.supplierService.findOrCreateSupplier(
+            entry.supplierName,
+          );
+
+          // Create cost history for this entry
+          // Use entry's effectiveAt if provided, otherwise default to one week ago
+          let entryEffectiveDate: Date;
+          if (entry.effectiveAt) {
+            entryEffectiveDate = entry.effectiveAt;
+          } else {
+            // Default: one week prior to current date
+            entryEffectiveDate = new Date();
+            entryEffectiveDate.setDate(entryEffectiveDate.getDate() - 7);
+          }
+          
+          await this.supplierService.createSupplierCostHistory(
+            entry.productId,
+            supplier.id,
+            new Prisma.Decimal(entry.cost),
+            'MIGRATION',
+            entryEffectiveDate,
+          );
+        } catch (error) {
+          console.error(
+            `[COST_APPROVAL] Failed to add entry to supplier history for product ${entry.productId}, supplier ${entry.supplierName}:`,
+            error,
+          );
+          // Continue processing other entries even if one fails
+        }
+      }
+    }
   }
 
   /**

@@ -4,10 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Farmacia Ops - Kitchen Sink</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#007bff',
+            'primary-hover': '#0056b3',
+          }
+        }
+      }
+    }
+  </script>
   <style>
+    body { font-family: 'Inter', sans-serif; }
     * {
       margin: 0;
       padding: 0;
@@ -278,38 +294,111 @@
       const [activeTab, setActiveTab] = useState('catalog-sync');
 
       return (
-        <div className="container">
-          <h1>🧪 Farmacia Ops - Kitchen Sink</h1>
-          <div className="tabs">
-            <button className={`tab ${activeTab === 'catalog-sync' ? 'active' : ''}`} onClick={() => setActiveTab('catalog-sync')}>
+        <div className="max-w-7xl mx-auto bg-white rounded-xl shadow-sm p-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-6 pb-3 border-b-2 border-primary">🧪 Farmacia Ops - Kitchen Sink</h1>
+          <div className="flex gap-2 mb-6 border-b-2 border-gray-200">
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'catalog-sync' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('catalog-sync')}
+            >
               Catalog Sync
             </button>
-            <button className={`tab ${activeTab === 'mappings' ? 'active' : ''}`} onClick={() => setActiveTab('mappings')}>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'mappings' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('mappings')}
+            >
               Catalog Mappings
             </button>
-            <button className={`tab ${activeTab === 'products' ? 'active' : ''}`} onClick={() => setActiveTab('products')}>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'products' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('products')}
+            >
               Products
             </button>
-            <button className={`tab ${activeTab === 'sales' ? 'active' : ''}`} onClick={() => setActiveTab('sales')}>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'sales' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('sales')}
+            >
               Sales
             </button>
-            <button className={`tab ${activeTab === 'locations' ? 'active' : ''}`} onClick={() => setActiveTab('locations')}>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'locations' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('locations')}
+            >
               Locations
             </button>
-            <button className={`tab ${activeTab === 'webhook-test' ? 'active' : ''}`} onClick={() => setActiveTab('webhook-test')}>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'webhook-test' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('webhook-test')}
+            >
               Webhook Test
             </button>
-            <button className={`tab ${activeTab === 'inventory' ? 'active' : ''}`} onClick={() => setActiveTab('inventory')}>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'inventory' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('inventory')}
+            >
               Inventory
             </button>
-            <button className={`tab ${activeTab === 'inventory-aging' ? 'active' : ''}`} onClick={() => setActiveTab('inventory-aging')}>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'inventory-aging' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('inventory-aging')}
+            >
               Inventory Aging
             </button>
-            <button className={`tab ${activeTab === 'inventory-migration' ? 'active' : ''}`} onClick={() => setActiveTab('inventory-migration')}>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'inventory-migration' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('inventory-migration')}
+            >
               Inventory Migration
             </button>
+            <button 
+              className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                activeTab === 'suppliers' 
+                  ? 'border-primary text-primary font-semibold' 
+                  : 'border-transparent text-gray-600 hover:text-primary'
+              }`}
+              onClick={() => setActiveTab('suppliers')}
+            >
+              Suppliers
+            </button>
           </div>
-          <div className="content">
+          <div className="mt-6">
             {activeTab === 'catalog-sync' && <CatalogSync />}
             {activeTab === 'mappings' && <CatalogMappings />}
             {activeTab === 'products' && <Products />}
@@ -319,6 +408,7 @@
             {activeTab === 'inventory' && <Inventory />}
             {activeTab === 'inventory-aging' && <InventoryAging />}
             {activeTab === 'inventory-migration' && <InventoryMigration />}
+            {activeTab === 'suppliers' && <Suppliers />}
           </div>
         </div>
       );
@@ -1532,10 +1622,197 @@
       const [approvedCosts, setApprovedCosts] = useState({});
       const [migrationResult, setMigrationResult] = useState(null);
       const [previewResult, setPreviewResult] = useState(null);
+      const [batchSize, setBatchSize] = useState(100);
+      const [extractionBatchSize, setExtractionBatchSize] = useState(100);
+      const [currentCutoverId, setCurrentCutoverId] = useState(null);
+      const [currentExtractionSessionId, setCurrentExtractionSessionId] = useState(null);
+      const [editedExtractionResults, setEditedExtractionResults] = useState({});
+      const [supplierSuggestions, setSupplierSuggestions] = useState({});
+      const [openAutocomplete, setOpenAutocomplete] = useState({});
+      const [supplierNameMappings, setSupplierNameMappings] = useState([]); // Track supplier name changes: [{ supplierOriginal: 'L', new: 'Levi' }]
+      const [allSuppliers, setAllSuppliers] = useState([]); // All suppliers with initials for autocomplete
+      const [activeTab, setActiveTab] = useState('WITH_EXTRACTION'); // Active tab: 'WITH_EXTRACTION', 'TOTAL_PRODUCTS', 'REMAINING'
+
+      // Close autocomplete when clicking outside
+      useEffect(() => {
+        const handleClickOutside = (event) => {
+          if (!event.target.closest('.autocomplete-container')) {
+            setOpenAutocomplete({});
+          }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+      }, []);
 
       useEffect(() => {
         fetchLocations();
+        fetchAllSuppliers();
       }, []);
+
+      const fetchAllSuppliers = async () => {
+        try {
+          const response = await fetch('/admin/inventory/cutover/suppliers');
+          const data = await response.json();
+          if (data.success) {
+            setAllSuppliers(data.suppliers || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch suppliers:', err);
+        }
+      };
+
+      // Function to get supplier suggestions based on input
+      const getSupplierSuggestions = (inputValue, originalSupplierName) => {
+        if (!inputValue || inputValue.trim().length === 0) {
+          return [];
+        }
+
+        const searchTerm = inputValue.trim().toLowerCase();
+        const suggestions = [];
+
+        // 1. First, check if input matches a supplier initial (case-insensitive) - EXACT match
+        const initialMatches = allSuppliers
+          .filter(s => s.initials && s.initials.toLowerCase() === searchTerm && s.isActive)
+          .map(s => ({ id: s.id, name: s.name, contactInfo: s.contactInfo, matchType: 'initial', isExactMatch: true }));
+
+        if (initialMatches.length > 0) {
+          suggestions.push(...initialMatches);
+        }
+
+        // 2. Check if input matches a supplier name exactly (case-insensitive)
+        const exactNameMatches = allSuppliers
+          .filter(s => s.isActive && s.name.toLowerCase() === searchTerm)
+          .map(s => ({ id: s.id, name: s.name, contactInfo: s.contactInfo, matchType: 'name', isExactMatch: true }))
+          .filter(s => !suggestions.find(existing => existing.id === s.id)); // Avoid duplicates
+
+        if (exactNameMatches.length > 0) {
+          suggestions.push(...exactNameMatches);
+        }
+
+        // 3. Check local mappings for renamed suppliers
+        const mappingMatches = supplierNameMappings
+          .filter(m => 
+            m.supplierOriginal.toLowerCase() === searchTerm || 
+            m.new.toLowerCase() === searchTerm
+          )
+          .map(m => {
+            // Find the supplier in allSuppliers by the mapped name
+            const supplier = allSuppliers.find(s => s.name === m.new);
+            if (supplier && supplier.isActive) {
+              return { id: supplier.id, name: supplier.name, contactInfo: supplier.contactInfo, matchType: 'mapping', isExactMatch: true };
+            }
+            // If not found in suppliers, return a virtual suggestion
+            return { id: null, name: m.new, contactInfo: null, matchType: 'mapping', isExactMatch: true };
+          })
+          .filter((s, index, self) => index === self.findIndex(t => t.name === s.name)); // Remove duplicates
+
+        suggestions.push(...mappingMatches);
+
+        // 4. Check supplier names that start with or contain the search term (partial matches)
+        if (suggestions.length === 0) {
+          const nameMatches = allSuppliers
+            .filter(s => {
+              if (!s.isActive) return false;
+              const nameLower = s.name.toLowerCase();
+              return nameLower.startsWith(searchTerm) || nameLower.includes(searchTerm);
+            })
+            .map(s => ({ id: s.id, name: s.name, contactInfo: s.contactInfo, matchType: 'name', isExactMatch: false }))
+            .filter(s => !suggestions.find(existing => existing.name === s.name)); // Avoid duplicates
+
+          suggestions.push(...nameMatches);
+        }
+
+        return suggestions.slice(0, 10); // Limit to 10 suggestions
+      };
+
+      // Function to auto-select supplier if there's an exact single match
+      const autoSelectSupplier = (inputValue, originalSupplierName, productId, entryIdx, isExtractedEntry, currentResult) => {
+        if (!inputValue || inputValue.trim().length === 0) {
+          return null;
+        }
+
+        const suggestions = getSupplierSuggestions(inputValue, originalSupplierName);
+        
+        // Auto-select if there's exactly one exact match (by initial or exact name)
+        const exactMatches = suggestions.filter(s => s.isExactMatch);
+        
+        if (exactMatches.length === 1) {
+          const supplier = exactMatches[0];
+          
+          // Use functional update to ensure we have the latest state
+          setEditedExtractionResults(prevResults => {
+            const newResults = { ...prevResults };
+            
+            if (isExtractedEntry) {
+              // For extracted entries
+              if (!newResults[productId]) {
+                newResults[productId] = { ...currentResult };
+              }
+              if (!newResults[productId].extractedEntries) {
+                newResults[productId].extractedEntries = [...currentResult.extractedEntries];
+              }
+              if (!newResults[productId].extractedEntries[entryIdx]) {
+                newResults[productId].extractedEntries[entryIdx] = { ...currentResult.extractedEntries[entryIdx] };
+              }
+              
+              newResults[productId].extractedEntries[entryIdx] = {
+                ...newResults[productId].extractedEntries[entryIdx],
+                editedSupplierName: supplier.name,
+                supplierId: supplier.id,
+              };
+              
+              // Check if this entry is selected
+              const isSelected = newResults[productId].extractedEntries[entryIdx].isSelected !== undefined 
+                ? newResults[productId].extractedEntries[entryIdx].isSelected 
+                : (entryIdx === newResults[productId].extractedEntries.length - 1);
+              
+              if (isSelected) {
+                newResults[productId].selectedSupplierName = supplier.name;
+                newResults[productId].selectedSupplierId = supplier.id;
+              }
+            } else {
+              // For manual input
+              if (!newResults[productId]) {
+                newResults[productId] = { ...currentResult };
+              }
+              newResults[productId].selectedSupplierName = supplier.name;
+              newResults[productId].selectedSupplierId = supplier.id;
+            }
+            
+            return newResults;
+          });
+          
+          // Update supplier name mapping if name changed (for extracted entries only)
+          if (isExtractedEntry && originalSupplierName) {
+            const isUnknownOrGeneral = !originalSupplierName || originalSupplierName === 'Unknown' || originalSupplierName === 'General';
+            if (!isUnknownOrGeneral && supplier.name !== originalSupplierName) {
+              setSupplierNameMappings(prev => {
+                const filtered = prev.filter(m => m.supplierOriginal !== originalSupplierName);
+                return [...filtered, { supplierOriginal: originalSupplierName, new: supplier.name }];
+              });
+            }
+          }
+          
+          // Close autocomplete
+          if (isExtractedEntry) {
+            setOpenAutocomplete(prev => {
+              const newState = { ...prev };
+              delete newState[`${productId}_${entryIdx}`];
+              return newState;
+            });
+          } else {
+            setOpenAutocomplete(prev => {
+              const newState = { ...prev };
+              delete newState[productId];
+              return newState;
+            });
+          }
+          
+          return supplier.name; // Return the supplier name so we can use it to update the input
+        }
+        
+        return null; // No auto-selection
+      };
 
       const fetchLocations = async () => {
         setLoadingLocations(true);
@@ -1580,15 +1857,18 @@
         }
       };
 
-      const handleExtractCosts = async () => {
-        if (selectedLocations.length === 0) {
+      const handleExtractCosts = async (continueExtraction = false) => {
+        if (!continueExtraction && selectedLocations.length === 0) {
           setError('Please select at least one location');
           return;
         }
 
         setLoading(true);
         setError(null);
-        setExtractionResult(null);
+        if (!continueExtraction) {
+          setExtractionResult(null);
+          setCurrentExtractionSessionId(null);
+        }
 
         try {
           const response = await fetch('/admin/inventory/cutover/extract-costs', {
@@ -1597,13 +1877,114 @@
             body: JSON.stringify({
               locationIds: selectedLocations,
               costBasis: 'DESCRIPTION',
+              batchSize: continueExtraction ? null : (extractionBatchSize && extractionBatchSize > 0 ? extractionBatchSize : null),
+              extractionSessionId: continueExtraction ? currentExtractionSessionId : null,
             }),
           });
 
           const data = await response.json();
           if (response.ok && data.success) {
-            setExtractionResult(data.result);
-            setStep('approve');
+            const result = data.result;
+            
+            // Match supplier initials to full supplier names and apply supplier name mappings
+            if (result.extractionResults) {
+              result.extractionResults = result.extractionResults.map(productResult => {
+                if (productResult.extractedEntries) {
+                  productResult.extractedEntries = productResult.extractedEntries.map(entry => {
+                    const originalSupplier = entry.supplier;
+                    let matchedSupplierName = null;
+                    let matchedSupplierId = null;
+                    
+                    // DO NOT apply matching for Unknown/General/null suppliers
+                    const isUnknownOrGeneral = !originalSupplier || originalSupplier === 'Unknown' || originalSupplier === 'General';
+                    
+                    if (!isUnknownOrGeneral && originalSupplier) {
+                      // First, try to match by supplier initial (case-insensitive)
+                      const supplierInitial = originalSupplier.trim().toLowerCase();
+                      const matchedByInitial = allSuppliers.find(s => 
+                        s.initials && s.initials.toLowerCase() === supplierInitial && s.isActive
+                      );
+                      
+                      if (matchedByInitial) {
+                        matchedSupplierName = matchedByInitial.name;
+                        matchedSupplierId = matchedByInitial.id;
+                      } else {
+                        // Second, try to match by supplier name (case-insensitive exact match)
+                        const matchedByName = allSuppliers.find(s => 
+                          s.name.toLowerCase() === originalSupplier.toLowerCase() && s.isActive
+                        );
+                        
+                        if (matchedByName) {
+                          matchedSupplierName = matchedByName.name;
+                          matchedSupplierId = matchedByName.id;
+                        }
+                      }
+                      
+                      // Third, check supplier name mappings if no direct match found
+                      if (!matchedSupplierName && supplierNameMappings.length > 0) {
+                        const mapping = supplierNameMappings.find(m => m.supplierOriginal === originalSupplier);
+                        if (mapping) {
+                          matchedSupplierName = mapping.new;
+                          // Try to find supplier ID for the mapped name
+                          const mappedSupplier = allSuppliers.find(s => 
+                            s.name === mapping.new && s.isActive
+                          );
+                          if (mappedSupplier) {
+                            matchedSupplierId = mappedSupplier.id;
+                          }
+                        }
+                      }
+                    }
+                    
+                    // Return entry with matched supplier name if found, otherwise keep original
+                    // Keep original supplier for display, but use matched name for the input field
+                    if (matchedSupplierName) {
+                      return {
+                        ...entry,
+                        supplier: originalSupplier, // Keep original extracted value for display (e.g., "L")
+                        editedSupplierName: matchedSupplierName, // Use matched full name for input (e.g., "Levic")
+                        supplierId: matchedSupplierId
+                      };
+                    }
+                    
+                    return entry;
+                  });
+                  
+                  // Also update selectedSupplierName if the last entry (default selected) has a match
+                  const lastEntry = productResult.extractedEntries[productResult.extractedEntries.length - 1];
+                  if (lastEntry && lastEntry.editedSupplierName) {
+                    productResult.selectedSupplierName = lastEntry.editedSupplierName;
+                    productResult.selectedSupplierId = lastEntry.supplierId;
+                  }
+                }
+                return productResult;
+              });
+            }
+            
+            // Clear previous batch items from editedExtractionResults, keep only current batch
+            if (continueExtraction && result.extractionResults) {
+              const currentBatchProductIds = new Set(result.extractionResults.map(r => r.productId));
+              setEditedExtractionResults(prev => {
+                const filtered = {};
+                // Only keep items from current batch
+                currentBatchProductIds.forEach(productId => {
+                  if (prev[productId]) {
+                    filtered[productId] = prev[productId];
+                  }
+                });
+                return filtered;
+              });
+            } else if (!continueExtraction) {
+              // New extraction session - clear all edited results
+              setEditedExtractionResults({});
+            }
+            
+            setExtractionResult(result);
+            if (result.extractionSessionId) {
+              setCurrentExtractionSessionId(result.extractionSessionId);
+            }
+            // Allow moving to approve step even if incomplete
+            // User can choose to review partial results or continue extraction
           } else {
             setError(data.message || 'Failed to extract costs');
           }
@@ -1621,13 +2002,64 @@
         setError(null);
 
         try {
-          const approvedCostsArray = extractionResult.extractionResults
-            .filter(r => r.selectedCost !== null && r.selectedCost !== undefined)
-            .map(r => ({
-              productId: r.productId,
-              cost: r.selectedCost,
-              source: r.extractedEntries.length > 0 ? 'EXTRACTED_SELECTED' : 'MANUAL_INPUT',
-            }));
+          // Use edited results if available, otherwise use original
+          const resultsToUse = Object.keys(editedExtractionResults).length > 0
+            ? extractionResult.extractionResults.map(r => editedExtractionResults[r.productId] || r)
+            : extractionResult.extractionResults;
+
+          const approvedCostsArray = resultsToUse
+            .filter(r => {
+              const cost = r.selectedCost || (r.extractedEntries.length > 0 ? r.extractedEntries[r.extractedEntries.length - 1]?.amount : null);
+              return cost !== null && cost !== undefined;
+            })
+            .map(r => {
+              const edited = editedExtractionResults[r.productId] || r;
+              // Find the selected entry (marked with isSelected: true)
+              const selectedEntry = edited.extractedEntries.find(e => e.isSelected) 
+                || (edited.extractedEntries.length > 0 ? edited.extractedEntries[edited.extractedEntries.length - 1] : null);
+              const cost = edited.selectedCost !== null && edited.selectedCost !== undefined 
+                ? edited.selectedCost 
+                : (selectedEntry ? (selectedEntry.editedCost !== null && selectedEntry.editedCost !== undefined ? selectedEntry.editedCost : selectedEntry.amount) : null);
+              const supplierId = edited.selectedSupplierId || selectedEntry?.supplierId || null;
+              const supplierName = edited.selectedSupplierName || (selectedEntry ? (selectedEntry.editedSupplierName || selectedEntry.supplier) : null) || 'General';
+              // Check if preferred supplier (from dropdown) matches selected supplier
+              const preferredSupplierName = edited.preferredSupplierName !== undefined ? edited.preferredSupplierName : supplierName;
+              const isPreferred = preferredSupplierName === supplierName;
+
+              return {
+                productId: r.productId,
+                cost: cost,
+                source: edited.extractedEntries.length > 0 ? 'EXTRACTED_SELECTED' : 'MANUAL_INPUT',
+                supplierId: supplierId,
+                supplierName: supplierName,
+                isPreferred: isPreferred,
+              };
+            });
+
+          // Collect all entries marked to add to supplier history
+          const entriesToAddToHistory = [];
+          resultsToUse.forEach(r => {
+            const edited = editedExtractionResults[r.productId] || r;
+            edited.extractedEntries.forEach((entry, idx) => {
+              // Check if this entry should be added to history
+              const shouldAdd = entry.addToHistory !== undefined 
+                ? entry.addToHistory 
+                : (idx === edited.extractedEntries.length - 1); // Default: only selected entry
+              
+              if (shouldAdd && entry.amount) {
+                const supplierName = entry.editedSupplierName || entry.supplier;
+                if (supplierName && supplierName.trim() && supplierName !== 'General') {
+                  entriesToAddToHistory.push({
+                    productId: r.productId,
+                    supplierName: supplierName.trim(),
+                    supplierId: entry.supplierId || null,
+                    cost: entry.amount,
+                    effectiveAt: null, // Will use cutover date
+                  });
+                }
+              }
+            });
+          });
 
           const response = await fetch('/admin/inventory/cutover/approve-costs', {
             method: 'POST',
@@ -1635,7 +2067,9 @@
             body: JSON.stringify({
               cutoverId: extractionResult.cutoverId,
               approvedCosts: approvedCostsArray,
+              entriesToAddToHistory: entriesToAddToHistory.length > 0 ? entriesToAddToHistory : null,
               rejectedProducts: [],
+              effectiveAt: cutoverDate + 'T00:00:00Z',
             }),
           });
 
@@ -1694,41 +2128,64 @@
         }
       };
 
-      const handleMigrate = async () => {
-        if (selectedLocations.length === 0) {
+      const handleMigrate = async (continueMigration = false) => {
+        if (!continueMigration && selectedLocations.length === 0) {
           setError('Please select at least one location');
           return;
         }
 
-        if (!window.confirm('Are you sure you want to execute the inventory migration? This will create opening balances and lock the system.')) {
+        if (!continueMigration && !window.confirm('Are you sure you want to execute the inventory migration? This will create opening balances and lock the system.')) {
           return;
         }
 
         setLoading(true);
         setError(null);
-        setMigrationResult(null);
+        if (!continueMigration) {
+          setMigrationResult(null);
+        }
 
         try {
-          const response = await fetch('/admin/inventory/cutover', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              cutoverDate: cutoverDate + 'T00:00:00Z',
-              locationIds: selectedLocations,
-              costBasis: costBasis,
-              ownerApproved: true,
-              approvalId: extractionResult?.cutoverId,
-              manualCosts: Object.keys(approvedCosts).map(productId => ({
-                productId,
-                cost: approvedCosts[productId],
-              })),
-            }),
-          });
+          let response;
+          if (continueMigration && currentCutoverId) {
+            // Continue batch migration
+            response = await fetch('/admin/inventory/cutover/continue', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                cutoverId: currentCutoverId,
+              }),
+            });
+          } else {
+            // Start new migration
+            response = await fetch('/admin/inventory/cutover', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                cutoverDate: cutoverDate + 'T00:00:00Z',
+                locationIds: selectedLocations,
+                costBasis: costBasis,
+                ownerApproved: true,
+                approvalId: extractionResult?.cutoverId,
+                manualCosts: Object.keys(approvedCosts).map(productId => ({
+                  productId,
+                  cost: approvedCosts[productId],
+                })),
+                batchSize: batchSize && batchSize > 0 ? batchSize : null,
+              }),
+            });
+          }
 
           const data = await response.json();
           if (response.ok && data.success) {
             setMigrationResult(data.result);
-            setStep('complete');
+            if (data.result.cutoverId) {
+              setCurrentCutoverId(data.result.cutoverId);
+            }
+            if (data.result.isComplete) {
+              setStep('complete');
+            } else {
+              setStep('migrate'); // Stay on migrate step to show continue button
+            }
           } else {
             setError(data.message || 'Migration failed');
           }
@@ -1740,55 +2197,58 @@
       };
 
       return (
-        <div>
-          <h2>Inventory Migration & Cutover</h2>
-          <p style={{ marginBottom: '20px', color: '#666' }}>
-            Migrate inventory from Square to the new FIFO-based system. This process creates opening balances and locks the system.
-          </p>
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Inventory Migration & Cutover</h2>
+            <p className="text-gray-600 mb-6">
+              Migrate inventory from Square to the new FIFO-based system. This process creates opening balances and locks the system.
+            </p>
+          </div>
 
           {error && (
-            <div style={{ padding: '15px', background: '#fee', color: '#c33', borderRadius: '4px', marginBottom: '20px' }}>
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
               {error}
             </div>
           )}
 
-          <div className="form-group">
-            <label>Cutover Date</label>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Cutover Date</label>
             <input
               type="date"
               value={cutoverDate}
               onChange={(e) => setCutoverDate(e.target.value)}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
             />
           </div>
 
-          <div className="form-group">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <label style={{ marginBottom: 0 }}>Locations</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
+          <div className="space-y-1">
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-sm font-medium text-gray-700">Locations</label>
+              <div className="flex gap-2">
                 <button 
                   onClick={syncLocationsFromSquare} 
                   disabled={loadingLocations}
-                  style={{ padding: '6px 12px', fontSize: '12px', background: '#28a745' }}
+                  className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loadingLocations ? 'Syncing...' : 'Sync from Square'}
                 </button>
                 <button 
                   onClick={fetchLocations} 
                   disabled={loadingLocations}
-                  style={{ padding: '6px 12px', fontSize: '12px', background: '#6c757d' }}
+                  className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loadingLocations ? 'Loading...' : 'Refresh'}
                 </button>
               </div>
             </div>
             {locations.length === 0 ? (
-              <div style={{ padding: '15px', background: '#f8f9fa', borderRadius: '4px', color: '#666', textAlign: 'center' }}>
-                No locations found. Click "Pull Locations" to fetch locations.
+              <div className="p-4 bg-gray-50 rounded-lg text-gray-600 text-center border border-gray-200">
+                No locations found. Click "Sync from Square" to fetch locations.
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto', padding: '10px', border: '1px solid #ddd', borderRadius: '4px' }}>
+              <div className="flex flex-col gap-2 max-h-72 overflow-y-auto p-3 border border-gray-200 rounded-lg bg-white">
                 {locations.map(loc => (
-                  <label key={loc.id} style={{ display: 'flex', alignItems: 'center', padding: '5px' }}>
+                  <label key={loc.id} className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer">
                     <input
                       type="checkbox"
                       checked={selectedLocations.includes(loc.id)}
@@ -1799,9 +2259,10 @@
                           setSelectedLocations(selectedLocations.filter(id => id !== loc.id));
                         }
                       }}
+                      className="rounded text-primary border-gray-300 focus:ring-primary"
                     />
-                    <span style={{ marginLeft: '8px' }}>
-                      {loc.name} {loc.squareId && <span style={{ color: '#666' }}>({loc.squareId})</span>}
+                    <span className="ml-2 text-sm text-gray-700">
+                      {loc.name} {loc.squareId && <span className="text-gray-500">({loc.squareId})</span>}
                     </span>
                   </label>
                 ))}
@@ -1809,12 +2270,12 @@
             )}
           </div>
 
-          <div className="form-group">
-            <label>Cost Basis</label>
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Cost Basis</label>
             <select
               value={costBasis}
               onChange={(e) => setCostBasis(e.target.value)}
-              style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
             >
               <option value="DESCRIPTION">Extract from Description</option>
               <option value="SQUARE_COST">Square Cost</option>
@@ -1823,93 +2284,1496 @@
             </select>
           </div>
 
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-gray-700">Batch Size (items per batch, leave empty for no batching)</label>
+            <input
+              type="number"
+              value={batchSize || ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                setBatchSize(value === '' ? '' : (parseInt(value) || ''));
+              }}
+              placeholder="e.g., 100"
+              min="1"
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Process migration in batches to avoid timeouts. Leave empty to process all items at once.
+            </p>
+          </div>
+
           {step === 'extract' && (
-            <div>
-              <button onClick={handleExtractCosts} disabled={loading || selectedLocations.length === 0}>
-                {loading ? 'Extracting...' : 'Extract Costs'}
-              </button>
+            <div className="space-y-6">
+              {costBasis === 'DESCRIPTION' ? (
+                <div className="space-y-4">
+                  <p className="text-gray-600">
+                    Cost extraction is required for "Extract from Description" cost basis.
+                    This will process all products to extract costs from their descriptions.
+                  </p>
+                  
+                  <div className="space-y-1">
+                    <label className="block text-sm font-medium text-gray-700">Extraction Batch Size (items per batch, leave empty for no batching)</label>
+                    <input
+                      type="number"
+                      value={extractionBatchSize || ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setExtractionBatchSize(value === '' ? '' : (parseInt(value) || ''));
+                      }}
+                      placeholder="e.g., 100"
+                      min="1"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Process extraction in batches to avoid timeouts. Leave empty to process all items at once.
+                    </p>
+                  </div>
+
+                  {extractionResult && !extractionResult.isComplete && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                      <h4 className="font-semibold text-yellow-800 mb-2">Extraction Batch Progress</h4>
+                      <p className="text-sm text-yellow-700 mb-1"><strong>Batch:</strong> {extractionResult.currentBatch} / {extractionResult.totalBatches}</p>
+                      <p className="text-sm text-yellow-700 mb-3"><strong>Processed:</strong> {extractionResult.processedItems} / {extractionResult.totalItems} items</p>
+                      <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
+                        <div 
+                          className="bg-primary h-full transition-all duration-300"
+                          style={{ width: `${(extractionResult.processedItems / extractionResult.totalItems) * 100}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-sm text-yellow-700 mt-3">
+                        Products Extracted: {extractionResult.productsWithExtraction} | 
+                        Requiring Manual Input: {extractionResult.productsRequiringManualInput}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 flex-wrap">
+                    {!extractionResult && (
+                      <button 
+                        onClick={() => handleExtractCosts(false)} 
+                        disabled={loading || selectedLocations.length === 0}
+                        className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {loading ? 'Extracting Costs...' : 'Extract Costs from Descriptions'}
+                      </button>
+                    )}
+                    {extractionResult && !extractionResult.isComplete && (
+                      <>
+                        <button 
+                          onClick={() => handleExtractCosts(true)} 
+                          disabled={loading}
+                          className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {loading ? 'Processing Batch...' : `Continue Extraction Batch ${extractionResult.currentBatch + 1}/${extractionResult.totalBatches}`}
+                        </button>
+                        <button 
+                          onClick={() => setStep('approve')} 
+                          disabled={loading}
+                          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Review Extracted Costs ({extractionResult.processedItems} items)
+                        </button>
+                      </>
+                    )}
+                    {extractionResult && extractionResult.isComplete && (
+                      <button 
+                        onClick={() => setStep('approve')} 
+                        disabled={loading}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Review & Approve Extracted Costs
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-gray-600">
+                    Cost extraction is not required for "{costBasis}" cost basis.
+                    You can proceed directly to migration.
+                  </p>
+                  <button 
+                    onClick={() => {
+                      setStep('migrate');
+                      setApprovedCosts({});
+                    }} 
+                    disabled={loading || selectedLocations.length === 0}
+                    className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Skip Extraction & Proceed to Migration
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
           {step === 'approve' && extractionResult && (
-            <div>
-              <h3>Review Extracted Costs</h3>
-              <p>Total Products: {extractionResult.totalProducts}</p>
-              <p>With Extraction: {extractionResult.productsWithExtraction}</p>
-              <p>Requiring Manual Input: {extractionResult.productsRequiringManualInput}</p>
-              
-              <div style={{ maxHeight: '400px', overflowY: 'auto', marginTop: '20px' }}>
-                {extractionResult.extractionResults.map(result => (
-                  <div key={result.productId} style={{ padding: '10px', border: '1px solid #ddd', marginBottom: '10px', borderRadius: '4px' }}>
-                    <strong>{result.productName}</strong>
-                    {result.extractedEntries.length > 0 && (
-                      <div style={{ marginTop: '8px' }}>
-                        {result.extractedEntries.map((entry, idx) => (
-                          <div key={idx} style={{ padding: '5px', background: idx === result.extractedEntries.length - 1 ? '#e7f3ff' : '#f5f5f5', marginTop: '5px', borderRadius: '3px' }}>
-                            {entry.provider} ${entry.amount} {entry.month || ''} ({entry.confidence})
-                            {idx === result.extractedEntries.length - 1 && ' ← Selected'}
-                          </div>
-                        ))}
+            <div className="max-w-5xl mx-auto space-y-8">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-6">Review Extracted Costs</h1>
+                
+                {!extractionResult.isComplete && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm mb-6">
+                    <div className="flex gap-4">
+                      <div className="flex-shrink-0">
+                        <span className="material-icons text-yellow-600 text-3xl">warning</span>
                       </div>
-                    )}
-                    {result.extractedEntries.length === 0 && (
-                      <div style={{ color: '#c33', marginTop: '5px' }}>No cost extracted - manual input required</div>
-                    )}
+                      <div>
+                        <h3 className="text-lg font-semibold text-yellow-800">Extraction Incomplete</h3>
+                        <p className="text-yellow-700 mt-1 max-w-2xl text-sm leading-relaxed">
+                          Only <span className="font-bold">{extractionResult.processedItems} of {extractionResult.totalItems}</span> items have been extracted. You can review and approve the extracted costs now, or continue extraction to process remaining items.
+                        </p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setStep('extract');
+                        handleExtractCosts(true);
+                      }}
+                      disabled={loading}
+                      className="bg-primary hover:bg-primary-hover text-white px-5 py-2.5 rounded-lg font-medium shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 text-sm whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Continue Extraction
+                    </button>
                   </div>
-                ))}
+                )}
+
+                {/* Tab Navigation */}
+                <div className="flex gap-4 mb-6 border-b border-gray-200">
+                  <button
+                    onClick={() => setActiveTab('WITH_EXTRACTION')}
+                    className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${
+                      activeTab === 'WITH_EXTRACTION'
+                        ? 'border-green-600 text-green-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    With Extraction
+                    <span className="ml-2 text-xs font-semibold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                      {extractionResult.productsWithExtraction}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('MANUAL_INPUT')}
+                    className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${
+                      activeTab === 'MANUAL_INPUT'
+                        ? 'border-orange-600 text-orange-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Manual Input
+                    <span className="ml-2 text-xs font-semibold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                      {extractionResult.productsRequiringManualInput}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('TOTAL_PRODUCTS')}
+                    className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${
+                      activeTab === 'TOTAL_PRODUCTS'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Total Products
+                    <span className="ml-2 text-xs font-semibold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                      {extractionResult.totalProducts}
+                    </span>
+                  </button>
+                  <button
+                    disabled
+                    className="px-6 py-3 font-medium text-sm text-gray-400 border-b-2 border-transparent cursor-not-allowed opacity-50"
+                  >
+                    Remaining
+                    <span className="ml-2 text-xs font-semibold bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">
+                      {!extractionResult.isComplete ? extractionResult.totalItems - extractionResult.processedItems : 0}
+                    </span>
+                  </button>
+                </div>
+              </div>
+              
+              <div className="space-y-6 max-h-[600px] overflow-y-auto">
+                {extractionResult.extractionResults.filter(result => {
+                  // Filter based on active tab
+                  if (activeTab === 'WITH_EXTRACTION') {
+                    // Show only items with extraction
+                    return (result.extractedEntries || []).length > 0;
+                  } else if (activeTab === 'MANUAL_INPUT') {
+                    // Show only items requiring manual input (no extraction)
+                    return (result.extractedEntries || []).length === 0;
+                  } else if (activeTab === 'TOTAL_PRODUCTS') {
+                    // Show all items (both extracted and manual input)
+                    return true;
+                  }
+                  return false;
+                }).map(result => {
+                  const editedResult = editedExtractionResults[result.productId] || result;
+                  // Find the selected entry (the one with isSelected = true)
+                  const selectedEntry = editedResult.extractedEntries.find(e => e.isSelected) 
+                    || (editedResult.extractedEntries.length > 0 ? editedResult.extractedEntries[editedResult.extractedEntries.length - 1] : null);
+                  const selectedSupplierId = editedResult.selectedSupplierId || selectedEntry?.supplierId || null;
+                  const selectedSupplierName = editedResult.selectedSupplierName || selectedEntry?.supplier || 'General';
+                  const selectedCost = editedResult.selectedCost || result.selectedCost || null;
+                  
+                  // Extract unique suppliers from extracted entries for dropdown
+                  const uniqueSuppliers = [...new Set(
+                    editedResult.extractedEntries.map(e => 
+                      (e.editedSupplierName !== undefined && e.editedSupplierName !== null) 
+                        ? e.editedSupplierName 
+                        : (e.supplier || 'General')
+                    )
+                  )];
+                  
+                  // Preferred supplier: default to selected option's supplier, but allow independent selection
+                  const preferredSupplierName = editedResult.preferredSupplierName !== undefined 
+                    ? editedResult.preferredSupplierName 
+                    : selectedSupplierName;
+                  
+                  // Get date from selected entry (user input from selected option)
+                  let selectedDate = null;
+                  if (selectedEntry) {
+                    selectedDate = selectedEntry.editedEffectiveDate || null;
+                    // If no edited date, calculate default from extracted month or one week ago
+                    if (!selectedDate && selectedEntry.month) {
+                      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                      const monthIndex = monthNames.indexOf(selectedEntry.month);
+                      if (monthIndex !== -1) {
+                        const now = new Date();
+                        const currentYear = now.getFullYear();
+                        const currentMonth = now.getMonth();
+                        const year = monthIndex > currentMonth ? currentYear - 1 : currentYear;
+                        const extractedDate = new Date(year, monthIndex, 1);
+                        selectedDate = extractedDate.toISOString().split('T')[0];
+                      }
+                    }
+                    if (!selectedDate) {
+                      // Default: one week ago
+                      const defaultDate = new Date();
+                      defaultDate.setDate(defaultDate.getDate() - 7);
+                      selectedDate = defaultDate.toISOString().split('T')[0];
+                    }
+                  }
+                  
+                  // Split product name into main name and brand (last 1-2 words as brand)
+                  const splitProductName = (name) => {
+                    if (!name) return { main: '', brand: '' };
+                    const words = name.trim().split(/\s+/);
+                    if (words.length <= 1) return { main: name, brand: '' };
+                    // If 2-3 words, use last word as brand
+                    if (words.length <= 3) {
+                      return { main: words.slice(0, -1).join(' '), brand: words[words.length - 1] };
+                    }
+                    // For longer names, use last 2 words as brand
+                    return { main: words.slice(0, -2).join(' '), brand: words.slice(-2).join(' ') };
+                  };
+                  const { main: productMainName, brand: productBrand } = splitProductName(result.productName);
+
+                  return (
+                    <div key={result.productId} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                      {editedResult.extractedEntries.length > 0 ? (
+                        <div className="p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                          <div className="lg:col-span-4 space-y-5">
+                            {/* Product Image */}
+                            <div className="w-full bg-gray-200 rounded-lg flex items-center justify-center relative" style={{ height: '200px', minHeight: '200px' }}>
+                              {result.imageUrl ? (
+                                <>
+                                  <img 
+                                    src={result.imageUrl} 
+                                    alt={result.productName}
+                                    className="w-full h-full object-cover rounded-lg"
+                                    onError={(e) => {
+                                      // Hide image and show placeholder if image fails to load
+                                      e.target.style.display = 'none';
+                                      const placeholder = e.target.parentElement?.querySelector('.image-placeholder');
+                                      if (placeholder) {
+                                        placeholder.style.display = 'flex';
+                                      }
+                                    }}
+                                  />
+                                  <div className="image-placeholder absolute inset-0 w-full h-full bg-gray-200 rounded-lg flex items-center justify-center" style={{ display: 'none' }}>
+                                    <div className="text-center">
+                                      <span className="material-icons text-gray-400 text-6xl">image</span>
+                                      <p className="text-xs text-gray-500 mt-2">No Product Image</p>
+                                    </div>
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="text-center">
+                                  <span className="material-icons text-gray-400 text-6xl">image</span>
+                                  <p className="text-xs text-gray-500 mt-2">No Product Image</p>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Product Name - Two Lines */}
+                            <div>
+                              <h2 className="text-xl font-bold text-gray-900">{productMainName}</h2>
+                              {productBrand && <p className="text-xl font-bold text-gray-900">{productBrand}</p>}
+                            </div>
+                            
+                            {/* Separator instead of "SELECTED VALUES" heading */}
+                            <div className="border-t border-gray-200 my-4"></div>
+                            <div className="space-y-1">
+                              <label className="block text-xs font-medium text-gray-500 uppercase">Supplier Name</label>
+                              <input 
+                                className="block w-full rounded-md border-gray-300 bg-gray-50 text-gray-900 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" 
+                                readOnly 
+                                type="text" 
+                                value={selectedSupplierName || 'N/A'}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="block text-xs font-medium text-gray-500 uppercase">Cost</label>
+                              <div className="relative rounded-md shadow-sm">
+                                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                  <span className="text-gray-500 sm:text-sm">$</span>
+                                </div>
+                                <input 
+                                  className="block w-full rounded-md border-gray-300 bg-gray-50 text-gray-900 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" 
+                                  style={{ paddingLeft: '21px' }}
+                                  readOnly 
+                                  type="text" 
+                                  value={selectedCost !== null && selectedCost !== undefined ? selectedCost.toFixed(2) : 'N/A'}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="block text-xs font-medium text-gray-500 uppercase">Preferred Supplier</label>
+                              <select
+                                className="block w-full rounded-md border-gray-300 bg-white text-gray-900 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+                                value={preferredSupplierName || 'General'}
+                                onChange={(e) => {
+                                  const newResults = { ...editedExtractionResults };
+                                  if (!newResults[result.productId]) {
+                                    newResults[result.productId] = { ...result };
+                                  }
+                                  newResults[result.productId].preferredSupplierName = e.target.value;
+                                  setEditedExtractionResults(newResults);
+                                }}
+                              >
+                                {uniqueSuppliers.map((supplier, idx) => (
+                                  <option key={idx} value={supplier}>{supplier}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="block text-xs font-medium text-gray-500 uppercase">Cost History Date</label>
+                              <input 
+                                className="block w-full rounded-md border-gray-300 bg-gray-50 text-gray-900 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" 
+                                readOnly 
+                                type="text" 
+                                value={selectedDate ? (() => {
+                                  // Parse date string (format: YYYY-MM-DD or MM/DD/YYYY)
+                                  // Always parse as local time to avoid timezone issues
+                                  let date;
+                                  if (selectedDate.includes('/')) {
+                                    // Handle MM/DD/YYYY format
+                                    const parts = selectedDate.split('/');
+                                    const month = parseInt(parts[0], 10) - 1; // JavaScript months are 0-indexed
+                                    const day = parseInt(parts[1], 10);
+                                    const year = parseInt(parts[2], 10);
+                                    date = new Date(year, month, day);
+                                  } else {
+                                    // Handle YYYY-MM-DD format (ISO) - parse as local time, not UTC
+                                    const parts = selectedDate.split('-');
+                                    const year = parseInt(parts[0], 10);
+                                    const month = parseInt(parts[1], 10) - 1; // JavaScript months are 0-indexed
+                                    const day = parseInt(parts[2], 10);
+                                    date = new Date(year, month, day);
+                                  }
+                                  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                                  return monthNames[date.getMonth()];
+                                })() : 'N/A'}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="lg:col-span-8 space-y-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">Extracted Options</h3>
+                              <span className="text-xs text-gray-500">Select the correct extraction below</span>
+                            </div>
+                            <div className="space-y-3">
+                              {editedResult.extractedEntries.map((entry, idx) => {
+                                const editedEntry = editedResult.extractedEntries[idx];
+                                const isSelected = editedEntry.isSelected !== undefined ? editedEntry.isSelected : (idx === editedResult.extractedEntries.length - 1);
+                                const entrySupplierName = editedEntry.editedSupplierName !== undefined && editedEntry.editedSupplierName !== null 
+                                  ? editedEntry.editedSupplierName 
+                                  : (entry.supplier || 'General');
+                                const entryCost = editedEntry.editedCost !== null && editedEntry.editedCost !== undefined ? editedEntry.editedCost : entry.amount;
+                                
+                                // Calculate default date: use extracted month if available, otherwise one week ago
+                                let defaultDateString;
+                                if (entry.month) {
+                                  // Convert month name to date (use first day of that month)
+                                  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                                  const monthIndex = monthNames.indexOf(entry.month);
+                                  if (monthIndex !== -1) {
+                                    const now = new Date();
+                                    const currentYear = now.getFullYear();
+                                    const currentMonth = now.getMonth();
+                                    // Use the extracted month, first day of month
+                                    // If the extracted month is later in the year than current month, use previous year
+                                    const year = monthIndex > currentMonth ? currentYear - 1 : currentYear;
+                                    const extractedDate = new Date(year, monthIndex, 1);
+                                    defaultDateString = extractedDate.toISOString().split('T')[0];
+                                  } else {
+                                    // Fallback: one week ago
+                                    const defaultDate = new Date();
+                                    defaultDate.setDate(defaultDate.getDate() - 7);
+                                    defaultDateString = defaultDate.toISOString().split('T')[0];
+                                  }
+                                } else {
+                                  // Default date: one week ago
+                                  const defaultDate = new Date();
+                                  defaultDate.setDate(defaultDate.getDate() - 7);
+                                  defaultDateString = defaultDate.toISOString().split('T')[0];
+                                }
+                                
+                                const entryDate = editedEntry.editedEffectiveDate || defaultDateString;
+                                const entryAddToHistory = editedEntry.addToHistory !== undefined ? editedEntry.addToHistory : true;
+                                
+                                // Format date for display
+                                const displayDate = entryDate ? (() => {
+                                  let date;
+                                  if (entryDate.includes('/')) {
+                                    const parts = entryDate.split('/');
+                                    const month = parseInt(parts[0], 10) - 1;
+                                    const day = parseInt(parts[1], 10);
+                                    const year = parseInt(parts[2], 10);
+                                    date = new Date(year, month, day);
+                                  } else {
+                                    const parts = entryDate.split('-');
+                                    const year = parseInt(parts[0], 10);
+                                    const month = parseInt(parts[1], 10) - 1;
+                                    const day = parseInt(parts[2], 10);
+                                    date = new Date(year, month, day);
+                                  }
+                                  const monthNames = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
+                                  const dayNames = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31'];
+                                  return `${monthNames[date.getMonth()]}/${dayNames[date.getDate() - 1]}/${date.getFullYear()}`;
+                                })() : '';
+                                
+                                // Confidence badge styling
+                                const confidenceClass = entry.confidence === 'HIGH' 
+                                  ? 'text-green-600 border-green-200 bg-green-50' 
+                                  : entry.confidence === 'MEDIUM'
+                                  ? 'text-gray-500 border-gray-200'
+                                  : 'text-orange-600 border-orange-200 bg-orange-50';
+                                
+                                return (
+                                  <div 
+                                    key={idx} 
+                                    className={`relative border rounded-lg p-4 transition-colors cursor-pointer group ${
+                                      isSelected 
+                                        ? 'border-2 border-primary bg-blue-50/50 shadow-sm ring-1 ring-primary/10' 
+                                        : 'border-gray-200 bg-white hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {isSelected && (
+                                      <div className="absolute top-0 left-0 w-full h-1 bg-primary rounded-t-lg"></div>
+                                    )}
+                                    {!isSelected && (
+                                      <div className="absolute top-0 left-0 w-full h-1 bg-gray-200 rounded-t-lg group-hover:bg-gray-300 transition-colors"></div>
+                                    )}
+                                    <div className="flex items-start gap-4">
+                                      <div className="pt-1 flex flex-col items-center gap-1">
+                                        <input
+                                          type="radio"
+                                          name={`selected_${result.productId}`}
+                                          checked={isSelected}
+                                          onChange={() => {
+                                            const newResults = { ...editedExtractionResults };
+                                            if (!newResults[result.productId]) {
+                                              newResults[result.productId] = { ...result };
+                                            }
+                                            if (!newResults[result.productId].extractedEntries) {
+                                              newResults[result.productId].extractedEntries = [...result.extractedEntries];
+                                            }
+                                            // Unselect all entries for this product
+                                            newResults[result.productId].extractedEntries = newResults[result.productId].extractedEntries.map((e, i) => ({
+                                              ...e,
+                                              isSelected: i === idx,
+                                            }));
+                                            // Update selected cost and supplier
+                                            newResults[result.productId].selectedCost = entryCost;
+                                            newResults[result.productId].selectedSupplierName = entrySupplierName;
+                                            newResults[result.productId].selectedSupplierId = editedEntry.supplierId || null;
+                                            setEditedExtractionResults(newResults);
+                                          }}
+                                          className="h-4 w-4 text-primary border-gray-300 focus:ring-primary"
+                                        />
+                                        {isSelected && <span className="material-icons text-primary text-sm font-bold">check</span>}
+                                      </div>
+                                      <div className="flex-1 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                          <div className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-mono">
+                                            Original: {entry.originalLine}
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <input
+                                              type="checkbox"
+                                              checked={entryAddToHistory}
+                                              onChange={(e) => {
+                                                const newResults = { ...editedExtractionResults };
+                                                if (!newResults[result.productId]) {
+                                                  newResults[result.productId] = { ...result };
+                                                }
+                                                if (!newResults[result.productId].extractedEntries[idx]) {
+                                                  newResults[result.productId].extractedEntries = [...result.extractedEntries];
+                                                }
+                                                newResults[result.productId].extractedEntries[idx] = {
+                                                  ...newResults[result.productId].extractedEntries[idx],
+                                                  addToHistory: e.target.checked,
+                                                };
+                                                setEditedExtractionResults(newResults);
+                                              }}
+                                              className="h-3 w-3 rounded text-primary border-gray-300 focus:ring-primary"
+                                            />
+                                            <span className="text-xs font-medium text-gray-500">History</span>
+                                          </div>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                          <div className="md:col-span-6 space-y-1">
+                                            <label className="text-xs text-gray-500">Supplier</label>
+                                            <div className="relative autocomplete-container">
+                                              <input
+                                                type="text"
+                                                value={entrySupplierName}
+                                                onChange={(e) => {
+                                                  const inputValue = e.target.value;
+                                                  const originalSupplierName = entry.supplier;
+                                                  const newSupplierName = inputValue;
+                                                  
+                                                  // Update state with the input value (no auto-select when typing)
+                                                  setEditedExtractionResults(prevResults => {
+                                                    const newResults = { ...prevResults };
+                                                    if (!newResults[result.productId]) {
+                                                      newResults[result.productId] = { ...result };
+                                                    }
+                                                    if (!newResults[result.productId].extractedEntries) {
+                                                      newResults[result.productId].extractedEntries = [...result.extractedEntries];
+                                                    }
+                                                    if (!newResults[result.productId].extractedEntries[idx]) {
+                                                      newResults[result.productId].extractedEntries[idx] = { ...result.extractedEntries[idx] };
+                                                    }
+                                                    newResults[result.productId].extractedEntries[idx] = {
+                                                      ...newResults[result.productId].extractedEntries[idx],
+                                                      editedSupplierName: newSupplierName,
+                                                      supplierId: null,
+                                                    };
+                                                    if (isSelected) {
+                                                      newResults[result.productId].selectedSupplierName = newSupplierName;
+                                                      newResults[result.productId].selectedSupplierId = null;
+                                                    }
+                                                    return newResults;
+                                                  });
+                                                  
+                                                  // Update supplier name mapping if name changed
+                                                  // DO NOT track mappings for Unknown/General/null suppliers
+                                                  const isUnknownOrGeneral = !originalSupplierName || originalSupplierName === 'Unknown' || originalSupplierName === 'General';
+                                                  
+                                                  if (!isUnknownOrGeneral && newSupplierName !== originalSupplierName && newSupplierName.trim() !== '') {
+                                                    setSupplierNameMappings(prev => {
+                                                      // Remove existing mapping for this original name if it exists
+                                                      const filtered = prev.filter(m => m.supplierOriginal !== originalSupplierName);
+                                                      // Add or update the mapping
+                                                      return [...filtered, { supplierOriginal: originalSupplierName, new: newSupplierName }];
+                                                    });
+                                                  }
+                                                  
+                                                  if (inputValue.length > 0) {
+                                                    // First, try local matching (initials, mappings, names)
+                                                    const localSuggestions = getSupplierSuggestions(inputValue, originalSupplierName);
+                                                    
+                                                    if (localSuggestions.length > 0) {
+                                                      setOpenAutocomplete(prev => ({ ...prev, [`${result.productId}_${idx}`]: true }));
+                                                      setSupplierSuggestions(prev => ({
+                                                        ...prev,
+                                                        [`${result.productId}_${idx}`]: localSuggestions
+                                                      }));
+                                                    } else if (inputValue.length > 1) {
+                                                      // Fallback to API call if no local matches
+                                                      setOpenAutocomplete(prev => ({ ...prev, [`${result.productId}_${idx}`]: true }));
+                                                      fetch(`/admin/inventory/cutover/suppliers/suggest?q=${encodeURIComponent(inputValue)}`)
+                                                        .then(res => res.json())
+                                                        .then(data => {
+                                                          if (data.success) {
+                                                            setSupplierSuggestions(prev => ({
+                                                              ...prev,
+                                                              [`${result.productId}_${idx}`]: data.suppliers
+                                                            }));
+                                                          }
+                                                        })
+                                                        .catch(err => console.error('Failed to fetch suggestions:', err));
+                                                    } else {
+                                                      setOpenAutocomplete(prev => {
+                                                        const newState = { ...prev };
+                                                        delete newState[`${result.productId}_${idx}`];
+                                                        return newState;
+                                                      });
+                                                    }
+                                                  } else {
+                                                    setOpenAutocomplete(prev => {
+                                                      const newState = { ...prev };
+                                                      delete newState[`${result.productId}_${idx}`];
+                                                      return newState;
+                                                    });
+                                                  }
+                                                }}
+                                                className={`block w-full rounded-md border shadow-sm focus:border-primary focus:ring-primary sm:text-sm ${
+                                                  isSelected 
+                                                    ? 'border-primary bg-white' 
+                                                    : 'border-gray-300 bg-white'
+                                                }`}
+                                              />
+                                              {openAutocomplete[`${result.productId}_${idx}`] && supplierSuggestions[`${result.productId}_${idx}`] && supplierSuggestions[`${result.productId}_${idx}`].length > 0 && (
+                                                <div className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md mt-1 z-50 max-h-32 overflow-y-auto shadow-lg">
+                                                  {supplierSuggestions[`${result.productId}_${idx}`].map((supplier, suggestionIdx) => (
+                                                    <div
+                                                      key={supplier.id || `suggestion-${suggestionIdx}`}
+                                                      onClick={() => {
+                                                        const originalSupplierName = entry.supplier;
+                                                        const newSupplierName = supplier.name;
+                                                        
+                                                        const newResults = { ...editedExtractionResults };
+                                                        if (!newResults[result.productId]) {
+                                                          newResults[result.productId] = { ...result };
+                                                        }
+                                                        if (!newResults[result.productId].extractedEntries[idx]) {
+                                                          newResults[result.productId].extractedEntries = [...result.extractedEntries];
+                                                        }
+                                                        newResults[result.productId].extractedEntries[idx] = {
+                                                          ...newResults[result.productId].extractedEntries[idx],
+                                                          supplierId: supplier.id,
+                                                          editedSupplierName: supplier.name,
+                                                        };
+                                                        if (isSelected) {
+                                                          newResults[result.productId].selectedSupplierName = supplier.name;
+                                                          newResults[result.productId].selectedSupplierId = supplier.id;
+                                                        }
+                                                        setEditedExtractionResults(newResults);
+                                                        
+                                                        // Update supplier name mapping if name changed
+                                                        // DO NOT track mappings for Unknown/General/null suppliers
+                                                        const isUnknownOrGeneral = !originalSupplierName || originalSupplierName === 'Unknown' || originalSupplierName === 'General';
+                                                        
+                                                        if (!isUnknownOrGeneral && newSupplierName !== originalSupplierName && newSupplierName.trim() !== '') {
+                                                          setSupplierNameMappings(prev => {
+                                                            // Remove existing mapping for this original name if it exists
+                                                            const filtered = prev.filter(m => m.supplierOriginal !== originalSupplierName);
+                                                            // Add or update the mapping
+                                                            return [...filtered, { supplierOriginal: originalSupplierName, new: newSupplierName }];
+                                                          });
+                                                        }
+                                                        setOpenAutocomplete(prev => {
+                                                          const newState = { ...prev };
+                                                          delete newState[`${result.productId}_${idx}`];
+                                                          return newState;
+                                                        });
+                                                        setSupplierSuggestions(prev => {
+                                                          const newSuggestions = { ...prev };
+                                                          delete newSuggestions[`${result.productId}_${idx}`];
+                                                          return newSuggestions;
+                                                        });
+                                                      }}
+                                                      className="px-3 py-2 cursor-pointer border-b border-gray-100 text-sm hover:bg-gray-50"
+                                                    >
+                                                      {supplier.name}
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <div className="md:col-span-3 space-y-1">
+                                            <label className="text-xs text-gray-500">Cost</label>
+                                            <div className="relative rounded-md shadow-sm">
+                                              <input
+                                                type="number"
+                                                step="0.01"
+                                                value={entryCost}
+                                                onChange={(e) => {
+                                                  const newResults = { ...editedExtractionResults };
+                                                  if (!newResults[result.productId]) {
+                                                    newResults[result.productId] = { ...result };
+                                                  }
+                                                  if (!newResults[result.productId].extractedEntries[idx]) {
+                                                    newResults[result.productId].extractedEntries = [...result.extractedEntries];
+                                                  }
+                                                  const newCost = parseFloat(e.target.value) || null;
+                                                  newResults[result.productId].extractedEntries[idx] = {
+                                                    ...newResults[result.productId].extractedEntries[idx],
+                                                    editedCost: newCost,
+                                                  };
+                                                  if (isSelected) {
+                                                    newResults[result.productId].selectedCost = newCost;
+                                                  }
+                                                  setEditedExtractionResults(newResults);
+                                                }}
+                                                className={`block w-full rounded-md border pr-8 shadow-sm focus:border-primary focus:ring-primary sm:text-sm text-right ${
+                                                  isSelected 
+                                                    ? 'border-primary bg-white font-medium' 
+                                                    : 'border-gray-300 bg-white'
+                                                }`}
+                                              />
+                                              <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                                                <span className="material-icons text-gray-400 text-xs">unfold_more</span>
+                                              </div>
+                                            </div>
+                                          </div>
+                                          <div className="md:col-span-3 space-y-1">
+                                            <label className="text-xs text-gray-500">Date</label>
+                                            <input
+                                              type="date"
+                                              value={entryDate}
+                                              onChange={(e) => {
+                                                const newResults = { ...editedExtractionResults };
+                                                if (!newResults[result.productId]) {
+                                                  newResults[result.productId] = { ...result };
+                                                }
+                                                if (!newResults[result.productId].extractedEntries[idx]) {
+                                                  newResults[result.productId].extractedEntries = [...result.extractedEntries];
+                                                }
+                                                newResults[result.productId].extractedEntries[idx] = {
+                                                  ...newResults[result.productId].extractedEntries[idx],
+                                                  editedEffectiveDate: e.target.value,
+                                                };
+                                                setEditedExtractionResults(newResults);
+                                              }}
+                                              className={`block w-full rounded-md border shadow-sm focus:border-primary focus:ring-primary sm:text-sm text-center ${
+                                                isSelected 
+                                                  ? 'border-primary bg-white' 
+                                                  : 'border-gray-300 bg-white'
+                                              }`}
+                                            />
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                          <span className={`text-xs font-semibold border px-1.5 py-0.5 rounded uppercase ${confidenceClass}`}>
+                                            {entry.confidence} Confidence
+                                          </span>
+                                          {entry.month && (
+                                            <span className="text-xs text-gray-500">Month extracted: {entry.month}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                          <div className="lg:col-span-4 space-y-5">
+                            {/* Product Image */}
+                            <div className="w-full bg-gray-200 rounded-lg flex items-center justify-center relative" style={{ height: '200px', minHeight: '200px' }}>
+                              {result.imageUrl ? (
+                                <>
+                                  <img 
+                                    src={result.imageUrl} 
+                                    alt={result.productName}
+                                    className="w-full h-full object-cover rounded-lg"
+                                    onError={(e) => {
+                                      // Hide image and show placeholder if image fails to load
+                                      e.target.style.display = 'none';
+                                      const placeholder = e.target.parentElement?.querySelector('.image-placeholder');
+                                      if (placeholder) {
+                                        placeholder.style.display = 'flex';
+                                      }
+                                    }}
+                                  />
+                                  <div className="image-placeholder absolute inset-0 w-full h-full bg-gray-200 rounded-lg flex items-center justify-center" style={{ display: 'none' }}>
+                                    <div className="text-center">
+                                      <span className="material-icons text-gray-400 text-6xl">image</span>
+                                      <p className="text-xs text-gray-500 mt-2">No Product Image</p>
+                                    </div>
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="text-center">
+                                  <span className="material-icons text-gray-400 text-6xl">image</span>
+                                  <p className="text-xs text-gray-500 mt-2">No Product Image</p>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Product Name - Two Lines */}
+                            <div>
+                              <h2 className="text-xl font-bold text-gray-900">{productMainName}</h2>
+                              {productBrand && <p className="text-xl font-bold text-gray-900">{productBrand}</p>}
+                            </div>
+                            
+                            {/* Separator */}
+                            <div className="border-t border-gray-200 my-4"></div>
+                            
+                            <div className="space-y-1">
+                              <label className="block text-xs font-medium text-gray-500 uppercase">Supplier Name</label>
+                              <div className="relative autocomplete-container">
+                                <input
+                                  type="text"
+                                  value={editedResult.selectedSupplierName || ''}
+                                  onChange={(e) => {
+                                    const inputValue = e.target.value;
+                                    const originalSupplierName = result.selectedSupplierName;
+                                    const newSupplierName = inputValue;
+                                    
+                                    // Update state with the input value (no auto-select for manual input)
+                                    setEditedExtractionResults(prevResults => {
+                                      const newResults = { ...prevResults };
+                                      if (!newResults[result.productId]) {
+                                        newResults[result.productId] = { ...result };
+                                      }
+                                      newResults[result.productId].selectedSupplierName = newSupplierName;
+                                      newResults[result.productId].selectedSupplierId = null;
+                                      return newResults;
+                                    });
+                                    
+                                    // Update supplier name mapping if name changed
+                                    // DO NOT track mappings for Unknown/General/null suppliers
+                                    const isUnknownOrGeneral = !originalSupplierName || originalSupplierName === 'Unknown' || originalSupplierName === 'General';
+                                    
+                                    if (!isUnknownOrGeneral && newSupplierName !== originalSupplierName && newSupplierName.trim() !== '') {
+                                      setSupplierNameMappings(prev => {
+                                        // Remove existing mapping for this original name if it exists
+                                        const filtered = prev.filter(m => m.supplierOriginal !== originalSupplierName);
+                                        // Add or update the mapping
+                                        return [...filtered, { supplierOriginal: originalSupplierName, new: newSupplierName }];
+                                      });
+                                    }
+                                    
+                                    if (inputValue.length > 0) {
+                                      // First, try local matching (initials, mappings, names)
+                                      const localSuggestions = getSupplierSuggestions(inputValue, originalSupplierName);
+                                      
+                                      if (localSuggestions.length > 0) {
+                                        setOpenAutocomplete(prev => ({ ...prev, [result.productId]: true }));
+                                        setSupplierSuggestions(prev => ({
+                                          ...prev,
+                                          [result.productId]: localSuggestions
+                                        }));
+                                      } else if (inputValue.length > 1) {
+                                        // Fallback to API call if no local matches
+                                        setOpenAutocomplete(prev => ({ ...prev, [result.productId]: true }));
+                                        fetch(`/admin/inventory/cutover/suppliers/suggest?q=${encodeURIComponent(inputValue)}`)
+                                          .then(res => res.json())
+                                          .then(data => {
+                                            if (data.success) {
+                                              setSupplierSuggestions(prev => ({
+                                                ...prev,
+                                                [result.productId]: data.suppliers
+                                              }));
+                                            }
+                                          })
+                                          .catch(err => console.error('Failed to fetch suggestions:', err));
+                                      } else {
+                                        setOpenAutocomplete(prev => {
+                                          const newState = { ...prev };
+                                          delete newState[result.productId];
+                                          return newState;
+                                        });
+                                      }
+                                    } else if (inputValue.length === 0) {
+                                      setOpenAutocomplete(prev => {
+                                        const newState = { ...prev };
+                                        delete newState[result.productId];
+                                        return newState;
+                                      });
+                                    }
+                                  }}
+                                  onFocus={() => {
+                                    if (supplierSuggestions[result.productId] && supplierSuggestions[result.productId].length > 0) {
+                                      setOpenAutocomplete(prev => ({ ...prev, [result.productId]: true }));
+                                    }
+                                  }}
+                                  placeholder="Enter supplier name"
+                                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white"
+                                />
+                                {openAutocomplete[result.productId] && supplierSuggestions[result.productId] && supplierSuggestions[result.productId].length > 0 && (
+                                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md mt-1 z-50 max-h-48 overflow-y-auto shadow-lg">
+                                    {supplierSuggestions[result.productId].map((supplier, suggestionIdx) => (
+                                      <div
+                                        key={supplier.id || `suggestion-${suggestionIdx}`}
+                                        onClick={() => {
+                                          const originalSupplierName = result.selectedSupplierName;
+                                          const newSupplierName = supplier.name;
+                                          
+                                          const newResults = { ...editedExtractionResults };
+                                          if (!newResults[result.productId]) {
+                                            newResults[result.productId] = { ...result };
+                                          }
+                                          newResults[result.productId].selectedSupplierId = supplier.id;
+                                          newResults[result.productId].selectedSupplierName = supplier.name;
+                                          setEditedExtractionResults(newResults);
+                                          
+                                          // Update supplier name mapping if name changed
+                                          // DO NOT track mappings for Unknown/General/null suppliers
+                                          const isUnknownOrGeneral = !originalSupplierName || originalSupplierName === 'Unknown' || originalSupplierName === 'General';
+                                          
+                                          if (!isUnknownOrGeneral && newSupplierName !== originalSupplierName && newSupplierName.trim() !== '') {
+                                            setSupplierNameMappings(prev => {
+                                              // Remove existing mapping for this original name if it exists
+                                              const filtered = prev.filter(m => m.supplierOriginal !== originalSupplierName);
+                                              // Add or update the mapping
+                                              return [...filtered, { supplierOriginal: originalSupplierName, new: newSupplierName }];
+                                            });
+                                          }
+                                          setOpenAutocomplete(prev => {
+                                            const newState = { ...prev };
+                                            delete newState[result.productId];
+                                            return newState;
+                                          });
+                                          setSupplierSuggestions(prev => {
+                                            const newSuggestions = { ...prev };
+                                            delete newSuggestions[result.productId];
+                                            return newSuggestions;
+                                          });
+                                        }}
+                                        className="px-3 py-2 cursor-pointer border-b border-gray-100 hover:bg-gray-50"
+                                      >
+                                        {supplier.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="block text-xs font-medium text-gray-500 uppercase">Cost</label>
+                              <div className="relative rounded-md shadow-sm">
+                                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                                  <span className="text-gray-500 sm:text-sm">$</span>
+                                </div>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={editedResult.selectedCost || ''}
+                                  onChange={(e) => {
+                                    const newResults = { ...editedExtractionResults };
+                                    if (!newResults[result.productId]) {
+                                      newResults[result.productId] = { ...result };
+                                    }
+                                    newResults[result.productId].selectedCost = parseFloat(e.target.value) || null;
+                                    setEditedExtractionResults(newResults);
+                                  }}
+                                  placeholder="0.00"
+                                  style={{ paddingLeft: '21px' }}
+                                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white"
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="block text-xs font-medium text-gray-500 uppercase">Preferred Supplier</label>
+                              <input 
+                                className="block w-full rounded-md border-gray-300 bg-gray-50 text-gray-900 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" 
+                                readOnly 
+                                type="text" 
+                                value={editedResult.selectedSupplierName || 'N/A'}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="block text-xs font-medium text-gray-500 uppercase">Cost History Date</label>
+                              <input 
+                                className="block w-full rounded-md border-gray-300 bg-gray-50 text-gray-900 shadow-sm focus:border-primary focus:ring-primary sm:text-sm" 
+                                readOnly 
+                                type="text" 
+                                value="N/A"
+                              />
+                            </div>
+                          </div>
+                          <div className="lg:col-span-8">
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <p className="text-sm text-red-800 font-medium mb-2">No cost extracted - manual input required</p>
+                                  <p className="text-xs text-red-600">Please enter the supplier name and cost above.</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
-              <button onClick={handleApproveCosts} disabled={loading} style={{ marginTop: '20px' }}>
-                {loading ? 'Approving...' : 'Approve Costs'}
-              </button>
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end gap-3">
+                {!extractionResult.isComplete && (
+                  <button 
+                    onClick={() => {
+                      handleExtractCosts(true);
+                    }}
+                    disabled={loading}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? 'Processing Batch...' : `Continue Extraction Batch ${extractionResult.currentBatch + 1}/${extractionResult.totalBatches}`}
+                  </button>
+                )}
+                <button 
+                  onClick={handleApproveCosts} 
+                  disabled={loading} 
+                  className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Approving...' : extractionResult.isComplete ? 'Approve All Costs' : `Approve Extracted Costs (${extractionResult.processedItems} items)`}
+                </button>
+              </div>
             </div>
           )}
 
           {step === 'migrate' && (
-            <div>
-              <h3>Ready to Migrate</h3>
-              <p>Costs have been approved. You can preview the migration or proceed directly.</p>
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Ready to Migrate</h3>
+                <p className="text-gray-600">Costs have been approved. You can preview the migration or proceed directly.</p>
+              </div>
               
-              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                <button onClick={handlePreview} disabled={loading}>
-                  {loading ? 'Previewing...' : 'Preview Migration'}
-                </button>
-                <button onClick={handleMigrate} disabled={loading} style={{ background: '#28a745' }}>
-                  {loading ? 'Migrating...' : 'Execute Migration'}
-                </button>
+              {migrationResult && !migrationResult.isComplete && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-yellow-800 mb-2">Batch Progress</h4>
+                  <p className="text-sm text-yellow-700 mb-1"><strong>Batch:</strong> {migrationResult.currentBatch} / {migrationResult.totalBatches}</p>
+                  <p className="text-sm text-yellow-700 mb-3"><strong>Processed:</strong> {migrationResult.processedItems} / {migrationResult.totalItems} items</p>
+                  <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div 
+                      className="bg-green-600 h-full transition-all duration-300"
+                      style={{ width: `${(migrationResult.processedItems / migrationResult.totalItems) * 100}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-sm text-yellow-700 mt-3">
+                    Products Processed: {migrationResult.productsProcessed} | 
+                    Opening Balances Created: {migrationResult.openingBalancesCreated}
+                  </p>
+                  {migrationResult.errors.length > 0 && (
+                    <div className="mt-3 p-3 bg-white rounded border border-yellow-300">
+                      <strong className="text-yellow-800">Errors:</strong> <span className="text-yellow-700">{migrationResult.errors.length}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              <div className="flex gap-3">
+                {!migrationResult && (
+                  <>
+                    <button 
+                      onClick={handlePreview} 
+                      disabled={loading}
+                      className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loading ? 'Previewing...' : 'Preview Migration'}
+                    </button>
+                    <button 
+                      onClick={() => handleMigrate(false)} 
+                      disabled={loading}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loading ? 'Migrating...' : 'Execute Migration'}
+                    </button>
+                  </>
+                )}
+                {migrationResult && !migrationResult.isComplete && (
+                  <button 
+                    onClick={() => handleMigrate(true)} 
+                    disabled={loading}
+                    className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? 'Processing Batch...' : `Continue Batch ${migrationResult.currentBatch + 1}/${migrationResult.totalBatches}`}
+                  </button>
+                )}
               </div>
 
               {previewResult && (
-                <div style={{ marginTop: '20px', padding: '15px', background: '#f8f9fa', borderRadius: '4px' }}>
-                  <h4>Preview Results</h4>
-                  <p>Total Products: {previewResult.totalProducts}</p>
-                  <p>Products with Cost: {previewResult.productsWithCost}</p>
-                  <p>Products Missing Cost: {previewResult.productsMissingCost}</p>
-                  <p>Estimated Opening Balances: {previewResult.estimatedOpeningBalances}</p>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-gray-900 mb-3">Preview Results</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-600">Total Products:</span>
+                      <span className="ml-2 font-semibold text-gray-900">{previewResult.totalProducts}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Products with Cost:</span>
+                      <span className="ml-2 font-semibold text-green-600">{previewResult.productsWithCost}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Products Missing Cost:</span>
+                      <span className="ml-2 font-semibold text-orange-600">{previewResult.productsMissingCost}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Estimated Opening Balances:</span>
+                      <span className="ml-2 font-semibold text-gray-900">{previewResult.estimatedOpeningBalances}</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
           )}
 
           {step === 'complete' && migrationResult && (
-            <div style={{ padding: '20px', background: '#d4edda', borderRadius: '4px', color: '#155724' }}>
-              <h3>Migration Completed Successfully!</h3>
-              <p>Cutover Date: {new Date(migrationResult.cutoverDate).toLocaleString()}</p>
-              <p>Locations Processed: {migrationResult.locationsProcessed}</p>
-              <p>Products Processed: {migrationResult.productsProcessed}</p>
-              <p>Opening Balances Created: {migrationResult.openingBalancesCreated}</p>
-              {migrationResult.errors.length > 0 && (
-                <div style={{ marginTop: '15px', padding: '10px', background: '#fff', borderRadius: '4px' }}>
-                  <strong>Errors:</strong>
-                  <ul>
-                    {migrationResult.errors.map((err, idx) => (
-                      <li key={idx}>{err.message}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+            <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-green-800">
+              <h3 className="text-xl font-bold mb-4">Migration Completed Successfully!</h3>
+              <div className="space-y-2 text-sm">
+                <p><strong>Cutover Date:</strong> {new Date(migrationResult.cutoverDate).toLocaleString()}</p>
+                <p><strong>Locations Processed:</strong> {migrationResult.locationsProcessed}</p>
+                <p><strong>Products Processed:</strong> {migrationResult.productsProcessed}</p>
+                <p><strong>Opening Balances Created:</strong> {migrationResult.openingBalancesCreated}</p>
+                {migrationResult.batchSize && (
+                  <p><strong>Processed in:</strong> {migrationResult.totalBatches} batch(es) of {migrationResult.batchSize} items</p>
+                )}
+                {migrationResult.errors.length > 0 && (
+                  <div className="mt-4 p-3 bg-white rounded border border-green-300">
+                    <strong className="text-green-800">Errors:</strong>
+                    <ul className="mt-2 list-disc list-inside">
+                      {migrationResult.errors.map((err, idx) => (
+                        <li key={idx} className="text-green-700">{err.message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
             </div>
           )}
+        </div>
+      );
+    }
+
+    function Suppliers() {
+      const [suppliers, setSuppliers] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [editingId, setEditingId] = useState(null);
+      const [formData, setFormData] = useState({ name: '', initials: '', contactInfo: '', isActive: true });
+      const [showAddForm, setShowAddForm] = useState(false);
+      const [filterActive, setFilterActive] = useState(true);
+
+      const fetchSuppliers = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const response = await fetch('/admin/inventory/cutover/suppliers');
+          const data = await response.json();
+          if (data.success) {
+            setSuppliers(data.suppliers);
+          } else {
+            setError(data.message || 'Failed to fetch suppliers');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to fetch suppliers');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        fetchSuppliers();
+      }, []);
+
+      const handleCreate = async () => {
+        if (!formData.name.trim()) {
+          setError('Supplier name is required');
+          return;
+        }
+        setLoading(true);
+        setError(null);
+        try {
+          const response = await fetch('/admin/inventory/cutover/suppliers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: formData.name.trim(),
+              initials: formData.initials.trim() || null,
+              contactInfo: formData.contactInfo.trim() || null,
+            }),
+          });
+          const data = await response.json();
+          if (data.success) {
+            await fetchSuppliers();
+            setFormData({ name: '', initials: '', contactInfo: '', isActive: true });
+            setShowAddForm(false);
+          } else {
+            setError(data.message || 'Failed to create supplier');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to create supplier');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleUpdate = async (id) => {
+        if (!formData.name.trim()) {
+          setError('Supplier name is required');
+          return;
+        }
+        setLoading(true);
+        setError(null);
+        try {
+          const response = await fetch(`/admin/inventory/cutover/suppliers/${id}/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: formData.name.trim(),
+              initials: formData.initials.trim() || null,
+              contactInfo: formData.contactInfo.trim() || null,
+              isActive: formData.isActive,
+            }),
+          });
+          const data = await response.json();
+          if (data.success) {
+            await fetchSuppliers();
+            setEditingId(null);
+            setFormData({ name: '', initials: '', contactInfo: '', isActive: true });
+          } else {
+            setError(data.message || 'Failed to update supplier');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to update supplier');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleDelete = async (id) => {
+        if (!confirm('Are you sure you want to deactivate this supplier?')) {
+          return;
+        }
+        setLoading(true);
+        setError(null);
+        try {
+          const response = await fetch(`/admin/inventory/cutover/suppliers/${id}/delete`, {
+            method: 'POST',
+          });
+          const data = await response.json();
+          if (data.success) {
+            await fetchSuppliers();
+          } else {
+            setError(data.message || 'Failed to delete supplier');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to delete supplier');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const startEdit = (supplier) => {
+        setEditingId(supplier.id);
+        setFormData({
+          name: supplier.name,
+          initials: supplier.initials || '',
+          contactInfo: supplier.contactInfo || '',
+          isActive: supplier.isActive,
+        });
+        setShowAddForm(false);
+      };
+
+      const cancelEdit = () => {
+        setEditingId(null);
+        setFormData({ name: '', initials: '', contactInfo: '', isActive: true });
+        setShowAddForm(false);
+      };
+
+      const filteredSuppliers = filterActive 
+        ? suppliers.filter(s => s.isActive)
+        : suppliers;
+
+      return (
+        <div className="max-w-7xl mx-auto bg-white rounded-xl shadow-sm p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-900">Supplier Management</h2>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setFilterActive(!filterActive)}
+                className={`px-4 py-2 rounded-md text-sm font-medium ${
+                  filterActive
+                    ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    : 'bg-primary text-white hover:bg-primary-hover'
+                }`}
+              >
+                {filterActive ? 'Show All' : 'Show Active Only'}
+              </button>
+              <button
+                onClick={() => {
+                  cancelEdit();
+                  setShowAddForm(true);
+                }}
+                className="px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-primary-hover"
+                disabled={loading || editingId}
+              >
+                + Add Supplier
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+
+          {(showAddForm || editingId) && (
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                {editingId ? 'Edit Supplier' : 'Add New Supplier'}
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Supplier Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="e.g., Levi Pharmaceuticals"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Initials/Abbreviation
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.initials}
+                    onChange={(e) => setFormData({ ...formData, initials: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="e.g., L (for cost extraction)"
+                    maxLength={10}
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Used for cost extraction from product descriptions</p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Contact Info
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.contactInfo}
+                    onChange={(e) => setFormData({ ...formData, contactInfo: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="Email, phone, or address"
+                  />
+                </div>
+                {editingId && (
+                  <div>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.isActive}
+                        onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                        className="rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                      <span className="text-sm font-medium text-gray-700">Active</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={editingId ? () => handleUpdate(editingId) : handleCreate}
+                  disabled={loading || !formData.name.trim()}
+                  className="px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Saving...' : editingId ? 'Update' : 'Create'}
+                </button>
+                <button
+                  onClick={cancelEdit}
+                  disabled={loading}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-300 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {loading && !suppliers.length ? (
+            <div className="text-center py-12 text-gray-500">Loading suppliers...</div>
+          ) : filteredSuppliers.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              {filterActive ? 'No active suppliers found.' : 'No suppliers found.'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Initials
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Contact Info
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredSuppliers.map((supplier) => (
+                    <tr key={supplier.id} className={!supplier.isActive ? 'bg-gray-50 opacity-60' : ''}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-600">
+                          {supplier.initials ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                              {supplier.initials}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-600">{supplier.contactInfo || '—'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          supplier.isActive
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {supplier.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => startEdit(supplier)}
+                            disabled={loading || editingId || showAddForm}
+                            className="text-primary hover:text-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Edit
+                          </button>
+                          {supplier.isActive && (
+                            <button
+                              onClick={() => handleDelete(supplier.id)}
+                              disabled={loading || editingId}
+                              className="text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Deactivate
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="mt-4 text-sm text-gray-500">
+            Showing {filteredSuppliers.length} of {suppliers.length} supplier(s)
+          </div>
         </div>
       );
     }

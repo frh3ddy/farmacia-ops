@@ -4,6 +4,7 @@ import { InventoryMigrationService } from './inventory-migration.service';
 import { SquareInventoryService } from './square-inventory.service';
 import { CostExtractionService } from './cost-extraction.service';
 import { CatalogMapperService } from './catalog-mapper.service';
+import { SupplierService } from './supplier.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Module({
@@ -13,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
     SquareInventoryService,
     CostExtractionService,
     CatalogMapperService,
+    SupplierService,
     PrismaService,
   ],
   exports: [InventoryMigrationService],

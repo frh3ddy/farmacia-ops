@@ -40,8 +40,9 @@ model Product {
   sku        String? @unique
   categoryId String?
 
-  category        Category?         @relation(fields: [categoryId], references: [id])
+  category        Category?             @relation(fields: [categoryId], references: [id])
   suppliers       SupplierProduct[]
+  supplierCostHistory SupplierCostHistory[]
   inventories     Inventory[]
   placements      Placement[]
   saleItems       SaleItem[]
@@ -59,10 +60,16 @@ model Category {
 }
 
 model Supplier {
-  id   String @id @default(uuid())
-  name String
+  id          String   @id @default(uuid())
+  name        String
+  initials    String?  // Abbreviation or initials for cost extraction (e.g., "L" for "Levi")
+  contactInfo String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  products SupplierProduct[]
+  products         SupplierProduct[]
+  costHistory      SupplierCostHistory[]
 }
 
 model SupplierProduct {
@@ -72,6 +79,7 @@ model SupplierProduct {
 
   cost        Decimal
   isPreferred Boolean @default(false)
+  notes       String?
 
   supplier Supplier @relation(fields: [supplierId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
@@ -227,8 +235,14 @@ model Cutover {
   ownerApprovedAt DateTime?
   ownerApprovedBy String?
   completedAt     DateTime?
-  status          String   // "PENDING", "COMPLETED", "FAILED"
+  status          String   // "PENDING", "COMPLETED", "FAILED", "IN_PROGRESS"
   result          Json?    // Store MigrationResult
+  batchSize       Int?     // Number of items per batch
+  currentBatch    Int?     // Current batch being processed
+  totalBatches    Int?     // Total number of batches
+  processedItems  Int?     // Number of items processed so far
+  totalItems      Int?     // Total items to process
+  batchState      Json?    // Store state for resuming batches (processed product IDs, etc.)
   createdAt       DateTime @default(now())
 }
 
@@ -241,4 +255,21 @@ model CutoverLock {
   lockedBy   String?
 
   location Location? @relation(fields: [locationId], references: [id])
+}
+
+model SupplierCostHistory {
+  id         String   @id @default(uuid())
+  productId  String
+  supplierId String
+  unitCost   Decimal
+  effectiveAt DateTime
+  source     String   // "MIGRATION" | "INVENTORY_UPDATE" | "MANUAL"
+  isCurrent  Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  product  Product  @relation(fields: [productId], references: [id])
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([productId, supplierId])
+  @@index([isCurrent])
 }

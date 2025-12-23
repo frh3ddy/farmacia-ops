@@ -8,9 +8,11 @@ import {
 export class CostExtractionService {
   /**
    * Extract all cost entries from product name/description using comprehensive pattern matching
+   * Combines product name and description for extraction
    */
   extractCostFromDescription(
     productName: string,
+    productDescription?: string | null,
   ): Omit<CostExtractionResult, 'productId' | 'productName' | 'originalDescription'> {
     const result: Omit<
       CostExtractionResult,
@@ -22,35 +24,104 @@ export class CostExtractionService {
       selectedCost: null,
     };
 
-    if (!productName || productName.trim().length === 0) {
-      result.extractionErrors.push('Product name is empty');
+    // Combine product name and description for extraction
+    // Description often contains cost information (e.g., "Ba$13.50")
+    const combinedText = [
+      productName?.trim() || '',
+      productDescription?.trim() || '',
+    ]
+      .filter((text) => text.length > 0)
+      .join('\n');
+
+    if (!combinedText || combinedText.trim().length === 0) {
+      result.extractionErrors.push('Product name and description are empty');
       return result;
     }
 
-    // Month name mapping (Spanish)
+    // Month name mapping (Spanish to English) - includes common misspellings
     const monthMap: Record<string, string> = {
-      enero: 'enero',
-      febrero: 'febrero',
-      feb: 'febrero',
-      marzo: 'marzo',
-      abril: 'abril',
-      mayo: 'mayo',
-      junio: 'junio',
-      jun: 'junio',
-      junior: 'junio',
-      julio: 'julio',
-      jul: 'julio',
-      agosto: 'agosto',
-      ago: 'agosto',
-      septiembre: 'septiembre',
-      sept: 'septiembre',
-      sep: 'septiembre',
-      octubre: 'octubre',
-      oct: 'octubre',
-      noviembre: 'noviembre',
-      nov: 'noviembre',
-      diciembre: 'diciembre',
-      dic: 'diciembre',
+      // Enero variations
+      enero: 'January',
+      enro: 'January',
+      ennero: 'January',
+      
+      // Febrero variations
+      febrero: 'February',
+      feb: 'February',
+      febreo: 'February',
+      febero: 'February',
+      febre: 'February',
+      
+      // Marzo variations
+      marzo: 'March',
+      marso: 'March',
+      marozo: 'March',
+      
+      // Abril variations
+      abril: 'April',
+      abil: 'April',
+      abirl: 'April',
+      abri: 'April',
+      
+      // Mayo variations
+      mayo: 'May',
+      maio: 'May',
+      may: 'May',
+      
+      // Junio variations
+      junio: 'June',
+      jun: 'June',
+      junior: 'June',
+      juno: 'June',
+      junnio: 'June',
+      
+      // Julio variations
+      julio: 'July',
+      jul: 'July',
+      julho: 'July',
+      jullio: 'July',
+      juliyo: 'July',
+      
+      // Agosto variations
+      agosto: 'August',
+      ago: 'August',
+      agsto: 'August',
+      agost: 'August',
+      agoto: 'August',
+      
+      // Septiembre variations
+      septiembre: 'September',
+      sept: 'September',
+      sep: 'September',
+      setiembre: 'September',
+      septiempre: 'September',
+      septimbre: 'September',
+      setimbre: 'September',
+      setiempre: 'September',
+      setimpre: 'September',
+      septimpre: 'September',
+      
+      // Octubre variations
+      octubre: 'October',
+      oct: 'October',
+      otubre: 'October',
+      octubr: 'October',
+      
+      // Noviembre variations
+      noviembre: 'November',
+      nov: 'November',
+      noviempre: 'November',
+      novimbre: 'November',
+      noviemre: 'November',
+      novimpre: 'November',
+      novimre: 'November',
+      
+      // Diciembre variations
+      diciembre: 'December',
+      dic: 'December',
+      dicimbre: 'December',
+      dicimpre: 'December',
+      dicimre: 'December',
     };
 
     // Exclusion patterns (skip these lines)
@@ -63,20 +134,22 @@ export class CostExtractionService {
     ];
 
     // Regex patterns - more flexible to handle various formats
-    // Pattern 1: Provider at start, then $ and amount (e.g., "L $ 193 abril")
-    // Pattern 2: Provider with optional spaces before $ (e.g., "L$193", "L $193", "Rx $ 190")
+    // Pattern 1: Supplier at start, then $ and amount (e.g., "L $ 193 abril")
+    // Pattern 2: Supplier with optional spaces before $ (e.g., "L$193", "L $193", "Rx $ 190")
     // Pattern 3: Just amount with $ (e.g., "$193 abril")
-    // Note: Provider pattern doesn't require ^ anchor - can be anywhere in line
-    const providerPattern = /([A-Za-z][A-Za-z0-9\s'.-]{0,19})\s*[\$💲]/;
+    // Note: Supplier pattern doesn't require ^ anchor - can be anywhere in line
+    const supplierPattern = /([A-Za-z][A-Za-z0-9\s'.-]{0,19})\s*[\$💲]/;
     const amountPattern = /[\$💲]\s*(\d+[.,]?\d*)/; // Allow comma or dot as decimal separator
+    // More flexible month pattern - includes common misspellings
+    // Order matters: longer/more specific patterns first to avoid partial matches
     const monthPattern =
-      /(enero|febrero|feb|marzo|abril|mayo|junio|jun|julio|jul|agosto|ago|septiembre|sept|sep|octubre|oct|noviembre|nov|diciembre|dic)/i;
+      /(enero|enro|ennero|febrero|febreo|febro|febre|feb|marzo|marso|marozo|abril|abil|abirl|abri|mayo|maio|may|junio|juno|junnio|junior|jun|julio|jullio|juliyo|julho|jul|agosto|agsto|agost|agoto|ago|septiembre|setiembre|septiempre|setiempre|septimbre|setimbre|septimpre|setimpre|sept|sep|octubre|otubre|octubr|oct|noviembre|noviempre|novimbre|noviemre|novimpre|novimre|nov|diciembre|dicimbre|dicimpre|dicimre|dic)/i;
     
     // Alternative pattern: Look for $ followed by number anywhere in line
     const simpleAmountPattern = /[\$💲]\s*(\d+[.,]?\d*)/;
 
     // Step 1: Preprocessing - split by newlines
-    const lines = productName
+    const lines = combinedText
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
@@ -117,39 +190,93 @@ export class CostExtractionService {
         continue; // Invalid or suspicious amount, skip
       }
 
-      // Extract provider - look for text before the $ symbol
-      let provider = 'Unknown';
+      // Extract supplier - look for text before the $ symbol
+      let supplier = 'General';
       const beforeDollar = line.substring(0, dollarIndex).trim();
       
-      // Try strict pattern first (provider at start)
-      const providerMatch = line.match(providerPattern);
-      if (providerMatch) {
-        provider = providerMatch[1].trim();
+      // Try strict pattern first (supplier at start)
+      const supplierMatch = line.match(supplierPattern);
+      if (supplierMatch) {
+        supplier = supplierMatch[1].trim();
       } else if (beforeDollar.length > 0) {
-        // Extract provider from text before $
-        // Look for common provider patterns: single letter, short word, etc.
+        // Extract supplier from text before $
+        // Look for common supplier patterns: single letter, short word, etc.
         const words = beforeDollar.split(/\s+/);
-        // Common providers are usually 1-3 words, often starting with capital letter
+        // Common suppliers are usually 1-3 words, often starting with capital letter
         if (words.length > 0) {
-          // Take first word if it's short (likely provider like "L", "Rx", "Center")
+          // Take first word if it's short (likely supplier like "L", "Rx", "Center")
           if (words[0].length <= 20 && /^[A-Za-z]/.test(words[0])) {
-            provider = words[0];
+            supplier = words[0];
           } else if (words.length > 1 && words[0].length + words[1].length <= 20) {
             // Take first two words if combined they're short
-            provider = words.slice(0, 2).join(' ');
+            supplier = words.slice(0, 2).join(' ');
           } else {
             // Fallback: take first 20 chars
-            provider = beforeDollar.substring(0, 20).trim();
+            supplier = beforeDollar.substring(0, 20).trim();
           }
         }
       }
 
-      // Extract month (optional)
+      // Extract month (optional) - with fuzzy matching for typos
       const monthMatch = line.match(monthPattern);
       let month: string | null = null;
       if (monthMatch) {
-        const monthKey = monthMatch[1].toLowerCase();
-        month = monthMap[monthKey] || monthKey;
+        const monthKey = monthMatch[1].toLowerCase().trim();
+        
+        // First try exact match
+        if (monthMap[monthKey]) {
+          month = monthMap[monthKey];
+        } else {
+          // Try fuzzy matching for common typos
+          // Normalize common character substitutions and missing letters
+          const normalized = monthKey
+            .replace(/[í]/g, 'i')  // í -> i
+            .replace(/[é]/g, 'e')  // é -> e
+            .replace(/[ó]/g, 'o')  // ó -> o
+            .replace(/[ú]/g, 'u')  // ú -> u
+            .replace(/[bp]/g, 'b') // b/p confusion (normalize to b)
+            .replace(/[sz]/g, 's'); // s/z confusion (normalize to s)
+          
+          if (monthMap[normalized]) {
+            month = monthMap[normalized];
+          } else {
+            // Try matching by first 3-4 characters (common prefix matching)
+            const prefix = monthKey.substring(0, Math.min(4, monthKey.length));
+            const matchingKey = Object.keys(monthMap).find(key => 
+              key.startsWith(prefix) || prefix.startsWith(key.substring(0, Math.min(3, key.length)))
+            );
+            if (matchingKey) {
+              month = monthMap[matchingKey];
+            } else {
+              // Try Levenshtein-like similarity: find closest match
+              // Simple approach: find key with highest character overlap
+              let bestMatch: string | null = null;
+              let bestScore = 0;
+              
+              for (const key of Object.keys(monthMap)) {
+                // Calculate simple similarity score
+                const minLen = Math.min(key.length, monthKey.length);
+                let matches = 0;
+                for (let i = 0; i < minLen; i++) {
+                  if (key[i] === monthKey[i]) matches++;
+                }
+                const score = matches / Math.max(key.length, monthKey.length);
+                
+                if (score > bestScore && score > 0.6) { // At least 60% match
+                  bestScore = score;
+                  bestMatch = key;
+                }
+              }
+              
+              if (bestMatch) {
+                month = monthMap[bestMatch];
+              } else {
+                // Last resort: use original if no match found
+                month = monthKey;
+              }
+            }
+          }
+        }
       }
 
       // Determine confidence
@@ -157,13 +284,13 @@ export class CostExtractionService {
       if (!month) {
         confidence = 'MEDIUM'; // No month, but amount extracted
       }
-      if (provider === 'Unknown' || provider.length === 0) {
-        confidence = 'MEDIUM'; // No provider identified, but amount is valid
+      if (supplier === 'General' || supplier.length === 0) {
+        confidence = 'MEDIUM'; // No supplier identified, but amount is valid
       }
 
       // Add extracted entry
       result.extractedEntries.push({
-        provider: provider,
+        supplier: supplier,
         amount: amount,
         month: month,
         lineNumber: lineNumber,

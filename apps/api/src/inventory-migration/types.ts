@@ -11,12 +11,20 @@ export interface CutoverInput {
 }
 
 export interface ExtractedCostEntry {
-  provider: string;
+  supplier: string;
   amount: number;
   month?: string | null;
   lineNumber?: number | null;
   originalLine: string;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  supplierId?: string | null; // Linked supplier ID
+  isEditable?: boolean; // For UI
+  suggestedSuppliers?: Array<{id: string; name: string}>; // For autocomplete
+  addToHistory?: boolean; // Whether to add this entry to supplier cost history
+  editedSupplierName?: string | null; // User-edited supplier name for this entry
+  editedCost?: number | null; // User-edited cost for this entry
+  editedEffectiveDate?: string | null; // User-edited effective date (ISO string) for this entry
+  isSelected?: boolean; // Whether this entry is selected as the product cost
 }
 
 export interface CostExtractionResult {
@@ -25,6 +33,11 @@ export interface CostExtractionResult {
   originalDescription: string;
   extractedEntries: ExtractedCostEntry[];
   selectedCost?: number | null;
+  selectedSupplierId?: string | null; // Selected supplier ID
+  selectedSupplierName?: string | null; // Selected supplier name
+  isPreferredSupplier?: boolean; // Whether this supplier is preferred for the product
+  latestCostHistoryDate?: string | null; // Latest cost history date for selected supplier
+  imageUrl?: string | null; // Product image URL from Square catalog
   extractionErrors: string[];
   requiresManualReview: boolean;
 }
@@ -37,6 +50,14 @@ export interface CostApprovalRequest {
   totalProducts: number;
   productsWithExtraction: number;
   productsRequiringManualInput: number;
+  batchSize?: number | null;
+  currentBatch?: number | null;
+  totalBatches?: number | null;
+  processedItems?: number | null;
+  totalItems?: number | null;
+  isComplete?: boolean;
+  canContinue?: boolean;
+  extractionSessionId?: string | null;
 }
 
 export interface CostApprovalResponse {
@@ -62,6 +83,12 @@ export interface SquareCatalogObject {
     sku?: string | null;
     priceMoney?: any | null;
   } | null;
+  // Product name from related ITEM object
+  productName?: string | null;
+  // Product description from related ITEM object
+  productDescription?: string | null;
+  // Product image URL from Square catalog
+  imageUrl?: string | null;
 }
 
 export interface SquareInventoryCount {
@@ -117,6 +144,13 @@ export interface MigrationResult {
   warnings: MigrationWarning[];
   completedAt: Date;
   completedBy?: string | null;
+  batchSize?: number | null;
+  currentBatch?: number | null;
+  totalBatches?: number | null;
+  processedItems?: number | null;
+  totalItems?: number | null;
+  isComplete?: boolean;
+  canContinue?: boolean;
 }
 
 export interface CutoverLock {
