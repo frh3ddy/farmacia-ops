@@ -81,11 +81,31 @@ function getSquareClient(): SquareClient {
       throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
     }
 
-    const squareEnvironment =
-      (process.env.SQUARE_ENVIRONMENT as SquareEnvironment) ||
-      SquareEnvironment.Production;
+    // Determine Square environment: use Sandbox for staging/dev, Production otherwise
+    let squareEnvironment: SquareEnvironment;
+    const nodeEnv = process.env.NODE_ENV?.toLowerCase();
+    const railwayEnv = process.env.RAILWAY_ENVIRONMENT?.toLowerCase();
+    const squareEnv = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
+
+    if (
+      squareEnv === 'sandbox' ||
+      nodeEnv === 'development' ||
+      nodeEnv === 'dev' ||
+      railwayEnv === 'staging' ||
+      railwayEnv === 'development'
+    ) {
+      squareEnvironment = SquareEnvironment.Sandbox;
+    } else if (squareEnv === 'production') {
+      squareEnvironment = SquareEnvironment.Production;
+    } else {
+      // Default to Production for safety
+      squareEnvironment = SquareEnvironment.Production;
+    }
 
     console.log('[DEBUG] [SQUARE_CLIENT] Creating Square client with environment:', squareEnvironment);
+    console.log('[DEBUG] [SQUARE_CLIENT] NODE_ENV:', nodeEnv || 'not set');
+    console.log('[DEBUG] [SQUARE_CLIENT] RAILWAY_ENVIRONMENT:', railwayEnv || 'not set');
+    console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', squareEnv || 'not set');
     squareClient = new SquareClient({
       token: squareAccessToken,
       environment: squareEnvironment,
