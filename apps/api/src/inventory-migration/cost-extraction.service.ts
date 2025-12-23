@@ -62,11 +62,18 @@ export class CostExtractionService {
       /^\d+$/, // Lines with only numbers
     ];
 
-    // Regex patterns
-    const providerPattern = /^([A-Za-z][A-Za-z0-9\s'.-]{0,19})\s*[\$💲]/;
-    const amountPattern = /[\$💲]\s*(\d+\.?\d*)/;
+    // Regex patterns - more flexible to handle various formats
+    // Pattern 1: Provider at start, then $ and amount (e.g., "L $ 193 abril")
+    // Pattern 2: Provider with optional spaces before $ (e.g., "L$193", "L $193", "Rx $ 190")
+    // Pattern 3: Just amount with $ (e.g., "$193 abril")
+    // Note: Provider pattern doesn't require ^ anchor - can be anywhere in line
+    const providerPattern = /([A-Za-z][A-Za-z0-9\s'.-]{0,19})\s*[\$💲]/;
+    const amountPattern = /[\$💲]\s*(\d+[.,]?\d*)/; // Allow comma or dot as decimal separator
     const monthPattern =
       /(enero|febrero|feb|marzo|abril|mayo|junio|jun|julio|jul|agosto|ago|septiembre|sept|sep|octubre|oct|noviembre|nov|diciembre|dic)/i;
+    
+    // Alternative pattern: Look for $ followed by number anywhere in line
+    const simpleAmountPattern = /[\$💲]\s*(\d+[.,]?\d*)/;
 
     // Step 1: Preprocessing - split by newlines
     const lines = productName
@@ -89,29 +96,52 @@ export class CostExtractionService {
         continue;
       }
 
-      // Extract provider
-      const providerMatch = line.match(providerPattern);
-      if (!providerMatch) {
-        continue; // Not a cost entry line
+      // First, check if line contains a dollar sign (indicates potential cost entry)
+      const dollarIndex = line.indexOf('$') !== -1 ? line.indexOf('$') : line.indexOf('💲');
+      if (dollarIndex === -1) {
+        continue; // Skip lines without currency symbol
       }
-      const provider = providerMatch[1].trim();
 
-      // Extract amount
-      const amountMatch = line.match(amountPattern);
+      // Extract amount - look for $ followed by number
+      const amountMatch = line.match(simpleAmountPattern);
       if (!amountMatch) {
-        result.extractionErrors.push(
-          `Line ${lineNumber}: Could not extract amount from "${line}"`,
-        );
-        continue;
+        continue; // No amount found, skip this line
       }
-      const amountString = amountMatch[1];
+      
+      let amountString = amountMatch[1];
+      // Handle comma as decimal separator (e.g., "193,50" -> "193.50")
+      amountString = amountString.replace(',', '.');
       const amount = parseFloat(amountString);
 
-      if (isNaN(amount) || amount < 0) {
-        result.extractionErrors.push(
-          `Line ${lineNumber}: Invalid amount "${amountString}"`,
-        );
-        continue;
+      if (isNaN(amount) || amount < 0 || amount > 10000) {
+        continue; // Invalid or suspicious amount, skip
+      }
+
+      // Extract provider - look for text before the $ symbol
+      let provider = 'Unknown';
+      const beforeDollar = line.substring(0, dollarIndex).trim();
+      
+      // Try strict pattern first (provider at start)
+      const providerMatch = line.match(providerPattern);
+      if (providerMatch) {
+        provider = providerMatch[1].trim();
+      } else if (beforeDollar.length > 0) {
+        // Extract provider from text before $
+        // Look for common provider patterns: single letter, short word, etc.
+        const words = beforeDollar.split(/\s+/);
+        // Common providers are usually 1-3 words, often starting with capital letter
+        if (words.length > 0) {
+          // Take first word if it's short (likely provider like "L", "Rx", "Center")
+          if (words[0].length <= 20 && /^[A-Za-z]/.test(words[0])) {
+            provider = words[0];
+          } else if (words.length > 1 && words[0].length + words[1].length <= 20) {
+            // Take first two words if combined they're short
+            provider = words.slice(0, 2).join(' ');
+          } else {
+            // Fallback: take first 20 chars
+            provider = beforeDollar.substring(0, 20).trim();
+          }
+        }
       }
 
       // Extract month (optional)
@@ -127,8 +157,8 @@ export class CostExtractionService {
       if (!month) {
         confidence = 'MEDIUM'; // No month, but amount extracted
       }
-      if (amount <= 0 || amount > 10000) {
-        confidence = 'LOW'; // Suspicious amount
+      if (provider === 'Unknown' || provider.length === 0) {
+        confidence = 'MEDIUM'; // No provider identified, but amount is valid
       }
 
       // Add extracted entry

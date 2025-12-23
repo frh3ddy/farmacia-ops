@@ -133,17 +133,50 @@ export class InventoryMigrationService {
           }
 
           // Fetch catalog object for product name
-          const catalogObject =
-            await this.squareInventory.fetchSquareCatalogObject(
-              item.catalogObjectId,
+          let catalogObject;
+          try {
+            catalogObject =
+              await this.squareInventory.fetchSquareCatalogObject(
+                item.catalogObjectId,
+              );
+          } catch (error) {
+            console.warn(
+              `[COST_EXTRACTION] Failed to fetch catalog object for ${item.catalogObjectId}:`,
+              error,
             );
-          const productName =
-            catalogObject?.itemVariationData?.name || product.name;
+          }
 
-          // Extract costs
+          // Try Square name first, then fallback to DB product name
+          const squareName = catalogObject?.itemVariationData?.name || null;
+          const dbName = product.name;
+          const productName = squareName || dbName;
+
+          // Debug: Log first few product names to understand format
+          if (extractionResults.length < 5) {
+            console.log(`[COST_EXTRACTION] Product ${product.name}:`);
+            console.log(`[COST_EXTRACTION]   Square name: "${squareName || 'null'}"`);
+            console.log(`[COST_EXTRACTION]   DB name: "${dbName}"`);
+            console.log(`[COST_EXTRACTION]   Using: "${productName}"`);
+          }
+
+          // Extract costs from the product name
           const extractionResult = this.costExtraction.extractCostFromDescription(
             productName,
           );
+          
+          // Debug: Log extraction results for first few products
+          if (extractionResults.length < 5) {
+            console.log(`[COST_EXTRACTION]   Extracted entries: ${extractionResult.extractedEntries.length}`);
+            if (extractionResult.extractedEntries.length > 0) {
+              console.log(`[COST_EXTRACTION]   First entry:`, extractionResult.extractedEntries[0]);
+            } else {
+              console.log(`[COST_EXTRACTION]   Errors:`, extractionResult.extractionErrors);
+              console.log(`[COST_EXTRACTION]   Product name length: ${productName.length}`);
+              console.log(`[COST_EXTRACTION]   Contains $: ${productName.includes('$')}`);
+              console.log(`[COST_EXTRACTION]   Contains 💲: ${productName.includes('💲')}`);
+            }
+          }
+
           const fullResult: CostExtractionResult = {
             ...extractionResult,
             productId: productId,
