@@ -7,7 +7,9 @@ cmds = ["NODE_ENV= npm install"]
 [phases.build]
 cmds = [
   "npm run prisma:generate",
-  "npm run build",
-  "npm run prisma:migrate:deploy"
+  "npm run build"
 ]
+
+# Migrations run at startup to ensure DATABASE_URL is available
+# This is handled in apps/api/src/index.ts bootstrap function
 

@@ -30,6 +30,30 @@ let app: NestExpressApplication;
 async function bootstrap() {
   console.log(`🚀 Starting Farmacia Ops API on port ${port}...`);
 
+  // Run Prisma migrations before starting the app (ensures migrations run in Railway)
+  try {
+    console.log('🔄 Running database migrations...');
+    const { execSync } = require('child_process');
+    const { resolve } = require('path');
+    
+    // Ensure we're in the project root for Prisma commands
+    const projectRoot = resolve(__dirname, '../../..');
+    execSync('npx prisma migrate deploy', {
+      stdio: 'inherit',
+      env: { ...process.env, DATABASE_URL: connectionString },
+      cwd: projectRoot,
+    });
+    console.log('✅ Database migrations completed');
+  } catch (error) {
+    console.error('❌ Migration error:', error);
+    // In production, fail fast if migrations fail
+    if (process.env.NODE_ENV === 'production') {
+      throw error;
+    }
+    // In development, continue (migrations might have already run)
+    console.warn('⚠️ Continuing despite migration error (dev mode)');
+  }
+
   // Pass the NestExpressApplication type generic
    app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // This is crucial: it preserves the raw buffer for signature verification
