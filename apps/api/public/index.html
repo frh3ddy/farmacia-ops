@@ -714,29 +714,81 @@
 
     function Locations() {
       const [locations, setLocations] = useState([]);
-      const [loading, setLoading] = useState(true);
+      const [loadingLocations, setLoadingLocations] = useState(true);
       const [error, setError] = useState(null);
 
+      const fetchLocations = async () => {
+        setLoadingLocations(true);
+        setError(null);
+        try {
+          const response = await fetch('/locations');
+          const data = await response.json();
+          if (data.success) {
+            setLocations(data.data || []);
+          } else {
+            setError(data.message || 'Failed to fetch locations');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to fetch locations');
+          console.error('Failed to fetch locations:', err);
+        } finally {
+          setLoadingLocations(false);
+        }
+      };
+
+      const syncLocationsFromSquare = async () => {
+        setLoadingLocations(true);
+        setError(null);
+        try {
+          const response = await fetch('/locations/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          const data = await response.json();
+          if (data.success) {
+            // Refresh locations after sync
+            await fetchLocations();
+            alert(`Successfully synced locations: ${data.result.created} created, ${data.result.updated} updated`);
+          } else {
+            setError(data.message || 'Failed to sync locations from Square');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to sync locations from Square');
+          console.error('Failed to sync locations:', err);
+        } finally {
+          setLoadingLocations(false);
+        }
+      };
+
       useEffect(() => {
-        fetch('/locations')
-          .then(res => res.json())
-          .then(data => {
-            if (data.success) {
-              setLocations(data.data || []);
-            } else {
-              setError('Failed to fetch locations');
-            }
-          })
-          .catch(err => setError(err.message))
-          .finally(() => setLoading(false));
+        fetchLocations();
       }, []);
 
-      if (loading) return <div className="loading">Loading locations...</div>;
-      if (error) return <div className="error">{error}</div>;
+      if (loadingLocations && locations.length === 0) return <div className="loading">Loading locations...</div>;
+      if (error && locations.length === 0) return <div className="error">{error}</div>;
 
       return (
         <div>
-          <h2>Locations ({locations.length})</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+            <h2>Locations ({locations.length})</h2>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
+                onClick={syncLocationsFromSquare} 
+                disabled={loadingLocations}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loadingLocations ? 'Syncing...' : 'Sync from Square'}
+              </button>
+              <button 
+                onClick={fetchLocations} 
+                disabled={loadingLocations}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loadingLocations ? 'Loading...' : 'Refresh'}
+              </button>
+            </div>
+          </div>
+          {error && <div className="error">{error}</div>}
           <table>
             <thead>
               <tr>
@@ -1833,30 +1885,6 @@
         }
       };
 
-      const syncLocationsFromSquare = async () => {
-        setLoadingLocations(true);
-        setError(null);
-        try {
-          const response = await fetch('/locations/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-          });
-          const data = await response.json();
-          if (data.success) {
-            // Refresh locations after sync
-            await fetchLocations();
-            alert(`Successfully synced locations: ${data.result.created} created, ${data.result.updated} updated`);
-          } else {
-            setError(data.message || 'Failed to sync locations from Square');
-          }
-        } catch (err) {
-          setError(err.message || 'Failed to sync locations from Square');
-          console.error('Failed to sync locations:', err);
-        } finally {
-          setLoadingLocations(false);
-        }
-      };
-
       const handleExtractCosts = async (continueExtraction = false) => {
         if (!continueExtraction && selectedLocations.length === 0) {
           setError('Please select at least one location');
@@ -2226,13 +2254,6 @@
               <label className="block text-sm font-medium text-gray-700">Locations</label>
               <div className="flex gap-2">
                 <button 
-                  onClick={syncLocationsFromSquare} 
-                  disabled={loadingLocations}
-                  className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loadingLocations ? 'Syncing...' : 'Sync from Square'}
-                </button>
-                <button 
                   onClick={fetchLocations} 
                   disabled={loadingLocations}
                   className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -2243,7 +2264,7 @@
             </div>
             {locations.length === 0 ? (
               <div className="p-4 bg-gray-50 rounded-lg text-gray-600 text-center border border-gray-200">
-                No locations found. Click "Sync from Square" to fetch locations.
+                No locations found. Use the Locations module to sync locations from Square.
               </div>
             ) : (
               <div className="flex flex-col gap-2 max-h-72 overflow-y-auto p-3 border border-gray-200 rounded-lg bg-white">
