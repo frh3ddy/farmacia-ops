@@ -18,6 +18,7 @@ model Location {
   sales           Sale[]
   racks           Rack[]
   catalogMappings CatalogMapping[]
+  cutoverLocks    CutoverLock[]
 
   createdAt DateTime @default(now())
 }
@@ -45,6 +46,7 @@ model Product {
   placements      Placement[]
   saleItems       SaleItem[]
   catalogMappings CatalogMapping[]
+  costApprovals   CostApproval[]
 
   createdAt DateTime @default(now())
 }
@@ -85,6 +87,9 @@ model Inventory {
   quantity   Int
   receivedAt DateTime
   unitCost   Decimal
+  source     String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"
+  costSource String? // "SQUARE_COST", "DESCRIPTION", "MANUAL_INPUT", "AVERAGE_COST"
+  migrationId String? // Reference to cutover
 
   location Location @relation(fields: [locationId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
@@ -196,4 +201,44 @@ model CatalogMapping {
   @@index([productId])
   @@index([locationId])
   @@index([squareVariationId])
+}
+
+model CostApproval {
+  id          String   @id @default(uuid())
+  cutoverId   String
+  productId   String
+  approvedCost Decimal
+  source      String   // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE"
+  notes       String?
+  approvedAt  DateTime @default(now())
+  approvedBy  String?  // User ID
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([cutoverId, productId])
+  @@index([cutoverId])
+}
+
+model Cutover {
+  id              String   @id @default(uuid())
+  cutoverDate     DateTime
+  costBasis       String
+  ownerApproved   Boolean
+  ownerApprovedAt DateTime?
+  ownerApprovedBy String?
+  completedAt     DateTime?
+  status          String   // "PENDING", "COMPLETED", "FAILED"
+  result          Json?    // Store MigrationResult
+  createdAt       DateTime @default(now())
+}
+
+model CutoverLock {
+  id         String    @id @default(uuid())
+  locationId String?
+  cutoverDate DateTime
+  isLocked   Boolean   @default(true)
+  lockedAt   DateTime  @default(now())
+  lockedBy   String?
+
+  location Location? @relation(fields: [locationId], references: [id])
 }
