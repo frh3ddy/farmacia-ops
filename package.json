@@ -30,7 +30,12 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "prisma:migrate:create": "./scripts/create-migration.sh"
+    "prisma:migrate:create": "./scripts/create-migration.sh",
+    "db:up": "docker compose up -d",
+    "dev:api": "npm run start:dev --workspace=apps/api",
+    "dev:worker": "npm run start:dev --workspace=apps/worker",
+    "prisma:dev": "npx prisma migrate dev",
+    "db:down": "docker compose down"
   },
   "dependencies": {
     "@nestjs/config": "^4.0.2",
