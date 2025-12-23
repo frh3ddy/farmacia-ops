@@ -305,6 +305,9 @@
             <button className={`tab ${activeTab === 'inventory-aging' ? 'active' : ''}`} onClick={() => setActiveTab('inventory-aging')}>
               Inventory Aging
             </button>
+            <button className={`tab ${activeTab === 'inventory-migration' ? 'active' : ''}`} onClick={() => setActiveTab('inventory-migration')}>
+              Inventory Migration
+            </button>
           </div>
           <div className="content">
             {activeTab === 'catalog-sync' && <CatalogSync />}
@@ -315,6 +318,7 @@
             {activeTab === 'webhook-test' && <WebhookTest />}
             {activeTab === 'inventory' && <Inventory />}
             {activeTab === 'inventory-aging' && <InventoryAging />}
+            {activeTab === 'inventory-migration' && <InventoryMigration />}
           </div>
         </div>
       );
@@ -1509,6 +1513,343 @@
           ) && (
             <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
               No data available. Make sure you have inventory with quantity &gt; 0.
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function InventoryMigration() {
+      const [step, setStep] = useState('extract'); // 'extract', 'approve', 'migrate', 'preview'
+      const [locations, setLocations] = useState([]);
+      const [selectedLocations, setSelectedLocations] = useState([]);
+      const [cutoverDate, setCutoverDate] = useState(new Date().toISOString().split('T')[0]);
+      const [costBasis, setCostBasis] = useState('DESCRIPTION');
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [extractionResult, setExtractionResult] = useState(null);
+      const [approvedCosts, setApprovedCosts] = useState({});
+      const [migrationResult, setMigrationResult] = useState(null);
+      const [previewResult, setPreviewResult] = useState(null);
+
+      useEffect(() => {
+        fetchLocations();
+      }, []);
+
+      const fetchLocations = async () => {
+        try {
+          const response = await fetch('/locations');
+          const data = await response.json();
+          if (data.success) {
+            setLocations(data.data || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch locations:', err);
+        }
+      };
+
+      const handleExtractCosts = async () => {
+        if (selectedLocations.length === 0) {
+          setError('Please select at least one location');
+          return;
+        }
+
+        setLoading(true);
+        setError(null);
+        setExtractionResult(null);
+
+        try {
+          const response = await fetch('/admin/inventory/cutover/extract-costs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              locationIds: selectedLocations,
+              costBasis: 'DESCRIPTION',
+            }),
+          });
+
+          const data = await response.json();
+          if (response.ok && data.success) {
+            setExtractionResult(data.result);
+            setStep('approve');
+          } else {
+            setError(data.message || 'Failed to extract costs');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to extract costs');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleApproveCosts = async () => {
+        if (!extractionResult) return;
+
+        setLoading(true);
+        setError(null);
+
+        try {
+          const approvedCostsArray = extractionResult.extractionResults
+            .filter(r => r.selectedCost !== null && r.selectedCost !== undefined)
+            .map(r => ({
+              productId: r.productId,
+              cost: r.selectedCost,
+              source: r.extractedEntries.length > 0 ? 'EXTRACTED_SELECTED' : 'MANUAL_INPUT',
+            }));
+
+          const response = await fetch('/admin/inventory/cutover/approve-costs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cutoverId: extractionResult.cutoverId,
+              approvedCosts: approvedCostsArray,
+              rejectedProducts: [],
+            }),
+          });
+
+          const data = await response.json();
+          if (response.ok && data.success) {
+            setApprovedCosts(approvedCostsArray.reduce((acc, ac) => {
+              acc[ac.productId] = ac.cost;
+              return acc;
+            }, {}));
+            setStep('migrate');
+          } else {
+            setError(data.message || 'Failed to approve costs');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to approve costs');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handlePreview = async () => {
+        if (selectedLocations.length === 0) {
+          setError('Please select at least one location');
+          return;
+        }
+
+        setLoading(true);
+        setError(null);
+        setPreviewResult(null);
+
+        try {
+          const response = await fetch('/admin/inventory/cutover/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cutoverDate: cutoverDate + 'T00:00:00Z',
+              locationIds: selectedLocations,
+              costBasis: costBasis,
+              approvedCosts: Object.keys(approvedCosts).map(productId => ({
+                productId,
+                cost: approvedCosts[productId],
+              })),
+            }),
+          });
+
+          const data = await response.json();
+          if (response.ok) {
+            setPreviewResult(data);
+          } else {
+            setError(data.message || 'Failed to preview migration');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to preview migration');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleMigrate = async () => {
+        if (selectedLocations.length === 0) {
+          setError('Please select at least one location');
+          return;
+        }
+
+        if (!window.confirm('Are you sure you want to execute the inventory migration? This will create opening balances and lock the system.')) {
+          return;
+        }
+
+        setLoading(true);
+        setError(null);
+        setMigrationResult(null);
+
+        try {
+          const response = await fetch('/admin/inventory/cutover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cutoverDate: cutoverDate + 'T00:00:00Z',
+              locationIds: selectedLocations,
+              costBasis: costBasis,
+              ownerApproved: true,
+              approvalId: extractionResult?.cutoverId,
+              manualCosts: Object.keys(approvedCosts).map(productId => ({
+                productId,
+                cost: approvedCosts[productId],
+              })),
+            }),
+          });
+
+          const data = await response.json();
+          if (response.ok && data.success) {
+            setMigrationResult(data.result);
+            setStep('complete');
+          } else {
+            setError(data.message || 'Migration failed');
+          }
+        } catch (err) {
+          setError(err.message || 'Migration failed');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div>
+          <h2>Inventory Migration & Cutover</h2>
+          <p style={{ marginBottom: '20px', color: '#666' }}>
+            Migrate inventory from Square to the new FIFO-based system. This process creates opening balances and locks the system.
+          </p>
+
+          {error && (
+            <div style={{ padding: '15px', background: '#fee', color: '#c33', borderRadius: '4px', marginBottom: '20px' }}>
+              {error}
+            </div>
+          )}
+
+          <div className="form-group">
+            <label>Cutover Date</label>
+            <input
+              type="date"
+              value={cutoverDate}
+              onChange={(e) => setCutoverDate(e.target.value)}
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Locations</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {locations.map(loc => (
+                <label key={loc.id} style={{ display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedLocations.includes(loc.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedLocations([...selectedLocations, loc.id]);
+                      } else {
+                        setSelectedLocations(selectedLocations.filter(id => id !== loc.id));
+                      }
+                    }}
+                  />
+                  {loc.name} {loc.squareId && `(${loc.squareId})`}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Cost Basis</label>
+            <select
+              value={costBasis}
+              onChange={(e) => setCostBasis(e.target.value)}
+              style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px' }}
+            >
+              <option value="DESCRIPTION">Extract from Description</option>
+              <option value="SQUARE_COST">Square Cost</option>
+              <option value="MANUAL_INPUT">Manual Input</option>
+              <option value="AVERAGE_COST">Average Cost</option>
+            </select>
+          </div>
+
+          {step === 'extract' && (
+            <div>
+              <button onClick={handleExtractCosts} disabled={loading || selectedLocations.length === 0}>
+                {loading ? 'Extracting...' : 'Extract Costs'}
+              </button>
+            </div>
+          )}
+
+          {step === 'approve' && extractionResult && (
+            <div>
+              <h3>Review Extracted Costs</h3>
+              <p>Total Products: {extractionResult.totalProducts}</p>
+              <p>With Extraction: {extractionResult.productsWithExtraction}</p>
+              <p>Requiring Manual Input: {extractionResult.productsRequiringManualInput}</p>
+              
+              <div style={{ maxHeight: '400px', overflowY: 'auto', marginTop: '20px' }}>
+                {extractionResult.extractionResults.map(result => (
+                  <div key={result.productId} style={{ padding: '10px', border: '1px solid #ddd', marginBottom: '10px', borderRadius: '4px' }}>
+                    <strong>{result.productName}</strong>
+                    {result.extractedEntries.length > 0 && (
+                      <div style={{ marginTop: '8px' }}>
+                        {result.extractedEntries.map((entry, idx) => (
+                          <div key={idx} style={{ padding: '5px', background: idx === result.extractedEntries.length - 1 ? '#e7f3ff' : '#f5f5f5', marginTop: '5px', borderRadius: '3px' }}>
+                            {entry.provider} ${entry.amount} {entry.month || ''} ({entry.confidence})
+                            {idx === result.extractedEntries.length - 1 && ' ← Selected'}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {result.extractedEntries.length === 0 && (
+                      <div style={{ color: '#c33', marginTop: '5px' }}>No cost extracted - manual input required</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={handleApproveCosts} disabled={loading} style={{ marginTop: '20px' }}>
+                {loading ? 'Approving...' : 'Approve Costs'}
+              </button>
+            </div>
+          )}
+
+          {step === 'migrate' && (
+            <div>
+              <h3>Ready to Migrate</h3>
+              <p>Costs have been approved. You can preview the migration or proceed directly.</p>
+              
+              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                <button onClick={handlePreview} disabled={loading}>
+                  {loading ? 'Previewing...' : 'Preview Migration'}
+                </button>
+                <button onClick={handleMigrate} disabled={loading} style={{ background: '#28a745' }}>
+                  {loading ? 'Migrating...' : 'Execute Migration'}
+                </button>
+              </div>
+
+              {previewResult && (
+                <div style={{ marginTop: '20px', padding: '15px', background: '#f8f9fa', borderRadius: '4px' }}>
+                  <h4>Preview Results</h4>
+                  <p>Total Products: {previewResult.totalProducts}</p>
+                  <p>Products with Cost: {previewResult.productsWithCost}</p>
+                  <p>Products Missing Cost: {previewResult.productsMissingCost}</p>
+                  <p>Estimated Opening Balances: {previewResult.estimatedOpeningBalances}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 'complete' && migrationResult && (
+            <div style={{ padding: '20px', background: '#d4edda', borderRadius: '4px', color: '#155724' }}>
+              <h3>Migration Completed Successfully!</h3>
+              <p>Cutover Date: {new Date(migrationResult.cutoverDate).toLocaleString()}</p>
+              <p>Locations Processed: {migrationResult.locationsProcessed}</p>
+              <p>Products Processed: {migrationResult.productsProcessed}</p>
+              <p>Opening Balances Created: {migrationResult.openingBalancesCreated}</p>
+              {migrationResult.errors.length > 0 && (
+                <div style={{ marginTop: '15px', padding: '10px', background: '#fff', borderRadius: '4px' }}>
+                  <strong>Errors:</strong>
+                  <ul>
+                    {migrationResult.errors.map((err, idx) => (
+                      <li key={idx}>{err.message}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>
