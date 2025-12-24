@@ -40,14 +40,21 @@ model Product {
   sku        String? @unique
   categoryId String?
 
-  category        Category?             @relation(fields: [categoryId], references: [id])
-  suppliers       SupplierProduct[]
+  // Square catalog data (cached to avoid API calls during extraction)
+  squareProductName   String? // Product name from Square ITEM
+  squareDescription   String? // Product description from Square ITEM
+  squareImageUrl      String? // Product image URL from Square
+  squareVariationName String? // Variation name from Square
+  squareDataSyncedAt  DateTime? // When Square data was last synced
+
+  category            Category?             @relation(fields: [categoryId], references: [id])
+  suppliers           SupplierProduct[]
   supplierCostHistory SupplierCostHistory[]
-  inventories     Inventory[]
-  placements      Placement[]
-  saleItems       SaleItem[]
-  catalogMappings CatalogMapping[]
-  costApprovals   CostApproval[]
+  inventories         Inventory[]
+  placements          Placement[]
+  saleItems           SaleItem[]
+  catalogMappings     CatalogMapping[]
+  costApprovals       CostApproval[]
 
   createdAt DateTime @default(now())
 }
@@ -62,14 +69,14 @@ model Category {
 model Supplier {
   id          String   @id @default(uuid())
   name        String
-  initials    String?  // Abbreviation or initials for cost extraction (e.g., "L" for "Levi")
+  initials    String? // Abbreviation or initials for cost extraction (e.g., "L" for "Levi")
   contactInfo String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  products         SupplierProduct[]
-  costHistory      SupplierCostHistory[]
+  products    SupplierProduct[]
+  costHistory SupplierCostHistory[]
 }
 
 model SupplierProduct {
@@ -92,11 +99,11 @@ model Inventory {
   locationId String
   productId  String
 
-  quantity   Int
-  receivedAt DateTime
-  unitCost   Decimal
-  source     String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"
-  costSource String? // "SQUARE_COST", "DESCRIPTION", "MANUAL_INPUT", "AVERAGE_COST"
+  quantity    Int
+  receivedAt  DateTime
+  unitCost    Decimal
+  source      String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"
+  costSource  String? // "SQUARE_COST", "DESCRIPTION", "MANUAL_INPUT", "AVERAGE_COST"
   migrationId String? // Reference to cutover
 
   location Location @relation(fields: [locationId], references: [id])
@@ -193,10 +200,10 @@ model DemandSignal {
 }
 
 model CatalogMapping {
-  id                String   @id @default(uuid())
-  squareVariationId String   // ITEM_VARIATION.id from Square
+  id                String  @id @default(uuid())
+  squareVariationId String // ITEM_VARIATION.id from Square
   productId         String
-  locationId        String?  // Optional, null = global mapping
+  locationId        String? // Optional, null = global mapping
 
   product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -212,14 +219,14 @@ model CatalogMapping {
 }
 
 model CostApproval {
-  id          String   @id @default(uuid())
-  cutoverId   String
-  productId   String
+  id           String   @id @default(uuid())
+  cutoverId    String
+  productId    String
   approvedCost Decimal
-  source      String   // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE"
-  notes       String?
-  approvedAt  DateTime @default(now())
-  approvedBy  String?  // User ID
+  source       String // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE"
+  notes        String?
+  approvedAt   DateTime @default(now())
+  approvedBy   String? // User ID
 
   product Product @relation(fields: [productId], references: [id])
 
@@ -228,44 +235,44 @@ model CostApproval {
 }
 
 model Cutover {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   cutoverDate     DateTime
   costBasis       String
   ownerApproved   Boolean
   ownerApprovedAt DateTime?
   ownerApprovedBy String?
   completedAt     DateTime?
-  status          String   // "PENDING", "COMPLETED", "FAILED", "IN_PROGRESS"
-  result          Json?    // Store MigrationResult
-  batchSize       Int?     // Number of items per batch
-  currentBatch    Int?     // Current batch being processed
-  totalBatches    Int?     // Total number of batches
-  processedItems  Int?     // Number of items processed so far
-  totalItems      Int?     // Total items to process
-  batchState      Json?    // Store state for resuming batches (processed product IDs, etc.)
-  createdAt       DateTime @default(now())
+  status          String // "PENDING", "COMPLETED", "FAILED", "IN_PROGRESS"
+  result          Json? // Store MigrationResult
+  batchSize       Int? // Number of items per batch
+  currentBatch    Int? // Current batch being processed
+  totalBatches    Int? // Total number of batches
+  processedItems  Int? // Number of items processed so far
+  totalItems      Int? // Total items to process
+  batchState      Json? // Store state for resuming batches (processed product IDs, etc.)
+  createdAt       DateTime  @default(now())
 }
 
 model CutoverLock {
-  id         String    @id @default(uuid())
-  locationId String?
+  id          String   @id @default(uuid())
+  locationId  String?
   cutoverDate DateTime
-  isLocked   Boolean   @default(true)
-  lockedAt   DateTime  @default(now())
-  lockedBy   String?
+  isLocked    Boolean  @default(true)
+  lockedAt    DateTime @default(now())
+  lockedBy    String?
 
   location Location? @relation(fields: [locationId], references: [id])
 }
 
 model SupplierCostHistory {
-  id         String   @id @default(uuid())
-  productId  String
-  supplierId String
-  unitCost   Decimal
+  id          String   @id @default(uuid())
+  productId   String
+  supplierId  String
+  unitCost    Decimal
   effectiveAt DateTime
-  source     String   // "MIGRATION" | "INVENTORY_UPDATE" | "MANUAL"
-  isCurrent  Boolean  @default(true)
-  createdAt  DateTime @default(now())
+  source      String // "MIGRATION" | "INVENTORY_UPDATE" | "MANUAL"
+  isCurrent   Boolean  @default(true)
+  createdAt   DateTime @default(now())
 
   product  Product  @relation(fields: [productId], references: [id])
   supplier Supplier @relation(fields: [supplierId], references: [id])

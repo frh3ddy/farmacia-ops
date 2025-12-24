@@ -40,6 +40,11 @@ export interface CostExtractionResult {
   imageUrl?: string | null; // Product image URL from Square catalog
   extractionErrors: string[];
   requiresManualReview: boolean;
+  // Already approved cost metadata
+  isAlreadyApproved?: boolean; // Whether this product already has an approved cost
+  existingApprovedCost?: Prisma.Decimal; // The existing approved cost amount
+  existingApprovalDate?: Date; // When the cost was approved
+  existingCutoverId?: string; // Which cutover the approval is from
 }
 
 export interface CostApprovalRequest {

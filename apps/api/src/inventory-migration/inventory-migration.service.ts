@@ -36,7 +36,8 @@ export class InventoryMigrationService {
         squareInventoryItem: any;
       }>;
       extractionResults: CostExtractionResult[];
-      processedItemKeys: Set<string>;
+      processedItemKeys: Set<string>; // Track processed items (location:variation)
+      processedProductIds: Set<string>; // Track products we've extracted costs for (deduplication)
       batchSize: number;
       currentBatch: number;
       totalBatches: number;
@@ -115,6 +116,7 @@ export class InventoryMigrationService {
   /**
    * Extract costs from all products for migration preview and approval
    * Supports batch processing to avoid timeouts
+   * OPTIMIZED: Deduplicates cost extraction by productId (not by location)
    */
   async extractCostsForMigration(
     locationIds: string[],
@@ -173,6 +175,7 @@ export class InventoryMigrationService {
         allItems: allItems,
         extractionResults: [],
         processedItemKeys: new Set<string>(),
+        processedProductIds: new Set<string>(), // NEW: Track products we've extracted costs for
         batchSize: effectiveBatchSize,
         currentBatch: 0,
         totalBatches: totalBatches,
@@ -198,7 +201,7 @@ export class InventoryMigrationService {
       const { locationId, locationName, squareInventoryItem: item } = itemData;
       const itemKey = `${locationId}:${item.catalogObjectId}`;
 
-      // Skip if already processed
+      // Skip if already processed (for tracking purposes)
       if (session.processedItemKeys.has(itemKey)) {
         continue;
       }
@@ -212,51 +215,205 @@ export class InventoryMigrationService {
 
         const product = await this.prisma.product.findUnique({
           where: { id: productId },
+          select: {
+            id: true,
+            name: true,
+            squareProductName: true,
+            squareDescription: true,
+            squareImageUrl: true,
+            squareVariationName: true,
+            squareDataSyncedAt: true,
+          },
         });
 
         if (!product) {
+          // Still mark as processed to avoid retrying
+          session.processedItemKeys.add(itemKey);
           continue;
         }
 
-        // Fetch catalog object for product name
-        let catalogObject;
-        try {
-          catalogObject =
-            await this.squareInventory.fetchSquareCatalogObject(
-              item.catalogObjectId,
-            );
-        } catch (error) {
-          console.warn(
-            `[COST_EXTRACTION] Failed to fetch catalog object for ${item.catalogObjectId}:`,
-            error,
-          );
+        // OPTIMIZATION: Check if we've already extracted costs for this product
+        // If yes, skip extraction but still mark item as processed
+        if (session.processedProductIds.has(productId)) {
+          console.log(`[COST_EXTRACTION] Skipping duplicate extraction for product ${productId} (already extracted)`);
+          session.processedItemKeys.add(itemKey);
+          continue;
         }
 
-        // Try Square product name from related ITEM first, then variation name, then DB product name
-        // Filter out "Sin variación" (Spanish for "No variation") which Square uses as a default
-        const squareProductName = catalogObject?.productName || null;
-        const squareVariationName = catalogObject?.itemVariationData?.name || null;
-        const dbName = product.name;
-        
-        // Filter out "Sin variación" and similar default values
-        const filteredSquareName = squareProductName && 
-          !squareProductName.toLowerCase().includes('sin variación') && 
-          !squareProductName.toLowerCase().includes('no variation') &&
-          squareProductName.trim().length > 0
-          ? squareProductName : null;
-        
-        const filteredVariationName = squareVariationName && 
-          !squareVariationName.toLowerCase().includes('sin variación') && 
-          !squareVariationName.toLowerCase().includes('no variation') &&
-          squareVariationName.trim().length > 0
-          ? squareVariationName : null;
-        
-        const productName = filteredSquareName || filteredVariationName || dbName;
+        // Check if product already has approved costs from any previous cutover
+        const existingApproval = await this.prisma.costApproval.findFirst({
+          where: { productId: productId },
+          orderBy: { approvedAt: 'desc' }, // Get most recent approval
+        });
 
-        // Get description from Square catalog object (from related ITEM)
-        const productDescription = catalogObject?.productDescription || null;
+        if (existingApproval) {
+          console.log(`[COST_EXTRACTION] Product ${productId} already has approved cost from cutover ${existingApproval.cutoverId}`);
+          
+          // Use stored Square data first, fallback to Square API if missing
+          let productName = product.squareProductName || product.squareVariationName || product.name;
+          let productDescription = product.squareDescription || null;
+          let imageUrl = product.squareImageUrl || null;
+
+          // Only fetch from Square API if stored data is missing
+          if (!product.squareProductName || !product.squareDescription) {
+            try {
+              const catalogObject =
+                await this.squareInventory.fetchSquareCatalogObject(
+                  item.catalogObjectId,
+                );
+
+              if (catalogObject) {
+                // Use fetched data if stored data is missing
+                const squareProductName = catalogObject.productName || null;
+                const squareVariationName = catalogObject.itemVariationData?.name || null;
+
+                // Filter out "Sin variación"
+                const filteredSquareName =
+                  squareProductName &&
+                  !squareProductName.toLowerCase().includes('sin variación') &&
+                  !squareProductName.toLowerCase().includes('no variation') &&
+                  squareProductName.trim().length > 0
+                    ? squareProductName
+                    : null;
+
+                const filteredVariationName =
+                  squareVariationName &&
+                  !squareVariationName.toLowerCase().includes('sin variación') &&
+                  !squareVariationName.toLowerCase().includes('no variation') &&
+                  squareVariationName.trim().length > 0
+                    ? squareVariationName
+                    : null;
+
+                productName =
+                  filteredSquareName ||
+                  filteredVariationName ||
+                  product.squareProductName ||
+                  product.squareVariationName ||
+                  product.name;
+                productDescription =
+                  catalogObject.productDescription || product.squareDescription;
+                imageUrl = catalogObject.imageUrl || product.squareImageUrl;
+
+                // Update product with fetched data for next time
+                await this.prisma.product.update({
+                  where: { id: productId },
+                  data: {
+                    squareProductName: filteredSquareName || product.squareProductName,
+                    squareDescription:
+                      catalogObject.productDescription || product.squareDescription,
+                    squareImageUrl: catalogObject.imageUrl || product.squareImageUrl,
+                    squareVariationName:
+                      filteredVariationName || product.squareVariationName,
+                    squareDataSyncedAt: new Date(),
+                  },
+                });
+              }
+            } catch (error) {
+              console.warn(
+                `[COST_EXTRACTION] Failed to fetch catalog object for ${item.catalogObjectId}:`,
+                error,
+              );
+              // Continue with stored data or fallback
+            }
+          }
+
+          // Create result with approval metadata (skip actual extraction)
+          const fullResult: CostExtractionResult = {
+            productId: productId,
+            productName: productName,
+            originalDescription: productName,
+            extractedEntries: [], // No extraction needed
+            selectedCost: existingApproval.approvedCost.toNumber(),
+            extractionErrors: [],
+            requiresManualReview: false,
+            isAlreadyApproved: true,
+            existingApprovedCost: existingApproval.approvedCost,
+            existingApprovalDate: existingApproval.approvedAt,
+            existingCutoverId: existingApproval.cutoverId,
+            imageUrl: imageUrl,
+          };
+
+          session.extractionResults.push(fullResult);
+          session.processedProductIds.add(productId);
+          session.processedItemKeys.add(itemKey);
+          continue; // Skip extraction process
+        }
+
+        // Use stored Square data first, fallback to Square API if missing
+        let productName =
+          product.squareProductName ||
+          product.squareVariationName ||
+          product.name;
+        let productDescription = product.squareDescription || null;
+        let imageUrl = product.squareImageUrl || null;
+        let catalogObject = null;
+
+        // Only fetch from Square API if stored data is missing
+        if (!product.squareProductName || !product.squareDescription) {
+          try {
+            catalogObject =
+              await this.squareInventory.fetchSquareCatalogObject(
+                item.catalogObjectId,
+              );
+
+            if (catalogObject) {
+              // Use fetched data if stored data is missing
+              const squareProductName = catalogObject.productName || null;
+              const squareVariationName =
+                catalogObject.itemVariationData?.name || null;
+
+              // Filter out "Sin variación"
+              const filteredSquareName =
+                squareProductName &&
+                !squareProductName.toLowerCase().includes('sin variación') &&
+                !squareProductName.toLowerCase().includes('no variation') &&
+                squareProductName.trim().length > 0
+                  ? squareProductName
+                  : null;
+
+              const filteredVariationName =
+                squareVariationName &&
+                !squareVariationName.toLowerCase().includes('sin variación') &&
+                !squareVariationName.toLowerCase().includes('no variation') &&
+                squareVariationName.trim().length > 0
+                  ? squareVariationName
+                  : null;
+
+              productName =
+                filteredSquareName ||
+                filteredVariationName ||
+                product.squareProductName ||
+                product.squareVariationName ||
+                product.name;
+              productDescription =
+                catalogObject.productDescription || product.squareDescription;
+              imageUrl = catalogObject.imageUrl || product.squareImageUrl;
+
+              // Update product with fetched data for next time
+              await this.prisma.product.update({
+                where: { id: productId },
+                data: {
+                  squareProductName: filteredSquareName || product.squareProductName,
+                  squareDescription:
+                    catalogObject.productDescription || product.squareDescription,
+                  squareImageUrl: catalogObject.imageUrl || product.squareImageUrl,
+                  squareVariationName:
+                    filteredVariationName || product.squareVariationName,
+                  squareDataSyncedAt: new Date(),
+                },
+              });
+            }
+          } catch (error) {
+            console.warn(
+              `[COST_EXTRACTION] Failed to fetch catalog object for ${item.catalogObjectId}:`,
+              error,
+            );
+            // Continue with stored data or fallback
+          }
+        }
 
         // Extract costs from product name and description
+        // This is done ONCE per product, not per location
         const extractionResult = this.costExtraction.extractCostFromDescription(
           productName,
           productDescription,
@@ -330,13 +487,19 @@ export class InventoryMigrationService {
         const fullResult: CostExtractionResult = {
           ...extractionResult,
           productId: productId,
-          productName: productName, // Use calculated productName (from Square or DB), not just product.name
+          productName: productName, // Use calculated productName (from stored data, Square API, or DB)
           originalDescription: productName,
           extractedEntries: enrichedEntries,
-          imageUrl: catalogObject?.imageUrl || null, // Include image URL if available
+          imageUrl: imageUrl, // Use stored or fetched image URL
         };
 
+        // Add extraction result (once per product)
         session.extractionResults.push(fullResult);
+        
+        // Mark product as processed (so we don't extract costs again for this product)
+        session.processedProductIds.add(productId);
+        
+        // Mark item as processed (for tracking)
         session.processedItemKeys.add(itemKey);
 
         if (extractionResult.extractedEntries.length > 0) {
@@ -350,6 +513,8 @@ export class InventoryMigrationService {
           `[COST_EXTRACTION] Error processing item ${item.catalogObjectId}:`,
           error,
         );
+        // Still mark as processed to avoid infinite retries
+        session.processedItemKeys.add(itemKey);
         continue;
       }
     }
@@ -374,14 +539,14 @@ export class InventoryMigrationService {
       locationIds: session.locationIds,
       costBasis: costBasis,
       extractionResults: session.extractionResults,
-      totalProducts: session.extractionResults.length,
+      totalProducts: session.extractionResults.length, // This is now unique products, not total items
       productsWithExtraction: totalProductsWithExtraction,
       productsRequiringManualInput: totalProductsRequiringManualInput,
       batchSize: session.batchSize,
       currentBatch: session.currentBatch,
       totalBatches: session.totalBatches,
-      processedItems: session.extractionResults.length,
-      totalItems: session.totalItems,
+      processedItems: session.processedItemKeys.size, // Total items processed (for progress tracking)
+      totalItems: session.totalItems, // Total items across all locations
       isComplete: isComplete,
       canContinue: !isComplete,
       extractionSessionId: sessionId,
@@ -785,6 +950,13 @@ export class InventoryMigrationService {
 
             const product = await tx.product.findUnique({
               where: { id: productId },
+              select: {
+                id: true,
+                name: true,
+                squareProductName: true,
+                squareDescription: true,
+                squareVariationName: true,
+              },
             });
 
             if (!product) {
@@ -798,26 +970,94 @@ export class InventoryMigrationService {
               continue;
             }
 
-            productName = product.name;
+            productName =
+              product.squareProductName ||
+              product.squareVariationName ||
+              product.name;
 
             // Determine unit cost
             const approvedCost = approvedCostsMap.get(productId);
 
-            // Fetch catalog object for product name and description if needed
-            let productNameForExtraction = productName;
-            let productDescriptionForExtraction: string | null = null;
+            // Use stored data first, fallback to Square API if needed
+            let productNameForExtraction =
+              product.squareProductName ||
+              product.squareVariationName ||
+              product.name;
+            let productDescriptionForExtraction: string | null =
+              product.squareDescription || null;
+
             if (input.costBasis === 'DESCRIPTION') {
-              const catalogObject =
-                await this.squareInventory.fetchSquareCatalogObject(
-                  item.catalogObjectId,
-                );
-              // Use product name from related ITEM, fallback to variation name, then DB name
-              productNameForExtraction =
-                catalogObject?.productName ||
-                catalogObject?.itemVariationData?.name ||
-                productName;
-              // Get description for cost extraction (often contains cost info like "Ba$13.50")
-              productDescriptionForExtraction = catalogObject?.productDescription || null;
+              // Only fetch from Square if stored data is missing
+              if (!product.squareProductName || !product.squareDescription) {
+                try {
+                  const catalogObject =
+                    await this.squareInventory.fetchSquareCatalogObject(
+                      item.catalogObjectId,
+                    );
+
+                  if (catalogObject) {
+                    const squareProductName = catalogObject.productName || null;
+                    const squareVariationName =
+                      catalogObject.itemVariationData?.name || null;
+
+                    // Filter out "Sin variación"
+                    const filteredSquareName =
+                      squareProductName &&
+                      !squareProductName
+                        .toLowerCase()
+                        .includes('sin variación') &&
+                      !squareProductName
+                        .toLowerCase()
+                        .includes('no variation') &&
+                      squareProductName.trim().length > 0
+                        ? squareProductName
+                        : null;
+
+                    const filteredVariationName =
+                      squareVariationName &&
+                      !squareVariationName
+                        .toLowerCase()
+                        .includes('sin variación') &&
+                      !squareVariationName
+                        .toLowerCase()
+                        .includes('no variation') &&
+                      squareVariationName.trim().length > 0
+                        ? squareVariationName
+                        : null;
+
+                    productNameForExtraction =
+                      filteredSquareName ||
+                      filteredVariationName ||
+                      product.squareProductName ||
+                      product.squareVariationName ||
+                      product.name;
+                    productDescriptionForExtraction =
+                      catalogObject.productDescription ||
+                      product.squareDescription;
+
+                    // Update product with fetched data for next time
+                    await tx.product.update({
+                      where: { id: productId },
+                      data: {
+                        squareProductName:
+                          filteredSquareName || product.squareProductName,
+                        squareDescription:
+                          catalogObject.productDescription ||
+                          product.squareDescription,
+                        squareVariationName:
+                          filteredVariationName || product.squareVariationName,
+                        squareDataSyncedAt: new Date(),
+                      },
+                    });
+                  }
+                } catch (error) {
+                  console.warn(
+                    `[MIGRATION] Failed to fetch catalog object for ${item.catalogObjectId}:`,
+                    error,
+                  );
+                  // Continue with stored data or fallback
+                }
+              }
             }
 
             const unitCost = await this.determineUnitCost(
@@ -1138,6 +1378,13 @@ export class InventoryMigrationService {
 
           const product = await this.prisma.product.findUnique({
             where: { id: productId },
+            select: {
+              id: true,
+              name: true,
+              squareProductName: true,
+              squareDescription: true,
+              squareVariationName: true,
+            },
           });
 
           if (!product) {
@@ -1146,20 +1393,78 @@ export class InventoryMigrationService {
 
           const approvedCost = approvedCostsMap.get(productId);
 
-          let productNameForExtraction = product.name;
-          let productDescriptionForExtraction: string | null = null;
+          // Use stored data first, fallback to Square API if needed
+          let productNameForExtraction =
+            product.squareProductName ||
+            product.squareVariationName ||
+            product.name;
+          let productDescriptionForExtraction: string | null =
+            product.squareDescription || null;
+
           if (input.costBasis === 'DESCRIPTION') {
-            const catalogObject =
-              await this.squareInventory.fetchSquareCatalogObject(
-                item.catalogObjectId,
-              );
-            // Use product name from related ITEM, fallback to variation name, then DB name
-            productNameForExtraction =
-              catalogObject?.productName ||
-              catalogObject?.itemVariationData?.name ||
-              product.name;
-            // Get description for cost extraction
-            productDescriptionForExtraction = catalogObject?.productDescription || null;
+            // Only fetch from Square if stored data is missing
+            if (!product.squareProductName || !product.squareDescription) {
+              try {
+                const catalogObject =
+                  await this.squareInventory.fetchSquareCatalogObject(
+                    item.catalogObjectId,
+                  );
+
+                if (catalogObject) {
+                  const squareProductName = catalogObject.productName || null;
+                  const squareVariationName =
+                    catalogObject.itemVariationData?.name || null;
+
+                  // Filter out "Sin variación"
+                  const filteredSquareName =
+                    squareProductName &&
+                    !squareProductName.toLowerCase().includes('sin variación') &&
+                    !squareProductName.toLowerCase().includes('no variation') &&
+                    squareProductName.trim().length > 0
+                      ? squareProductName
+                      : null;
+
+                  const filteredVariationName =
+                    squareVariationName &&
+                    !squareVariationName.toLowerCase().includes('sin variación') &&
+                    !squareVariationName.toLowerCase().includes('no variation') &&
+                    squareVariationName.trim().length > 0
+                      ? squareVariationName
+                      : null;
+
+                  productNameForExtraction =
+                    filteredSquareName ||
+                    filteredVariationName ||
+                    product.squareProductName ||
+                    product.squareVariationName ||
+                    product.name;
+                  productDescriptionForExtraction =
+                    catalogObject.productDescription ||
+                    product.squareDescription;
+
+                  // Update product with fetched data for next time
+                  await this.prisma.product.update({
+                    where: { id: productId },
+                    data: {
+                      squareProductName:
+                        filteredSquareName || product.squareProductName,
+                      squareDescription:
+                        catalogObject.productDescription ||
+                        product.squareDescription,
+                      squareVariationName:
+                        filteredVariationName || product.squareVariationName,
+                      squareDataSyncedAt: new Date(),
+                    },
+                  });
+                }
+              } catch (error) {
+                console.warn(
+                  `[PREVIEW] Failed to fetch catalog object for ${item.catalogObjectId}:`,
+                  error,
+                );
+                // Continue with stored data or fallback
+              }
+            }
           }
 
           const unitCost = await this.determineUnitCost(

@@ -1664,7 +1664,7 @@
     function InventoryMigration() {
       const [step, setStep] = useState('extract'); // 'extract', 'approve', 'migrate', 'preview'
       const [locations, setLocations] = useState([]);
-      const [selectedLocations, setSelectedLocations] = useState([]);
+      const [selectedLocation, setSelectedLocation] = useState(null);
       const [cutoverDate, setCutoverDate] = useState(new Date().toISOString().split('T')[0]);
       const [costBasis, setCostBasis] = useState('DESCRIPTION');
       const [loading, setLoading] = useState(false);
@@ -1886,8 +1886,8 @@
       };
 
       const handleExtractCosts = async (continueExtraction = false) => {
-        if (!continueExtraction && selectedLocations.length === 0) {
-          setError('Please select at least one location');
+        if (!continueExtraction && !selectedLocation) {
+          setError('Please select a location');
           return;
         }
 
@@ -1903,7 +1903,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              locationIds: selectedLocations,
+              locationIds: selectedLocation ? [selectedLocation] : [],
               costBasis: 'DESCRIPTION',
               batchSize: continueExtraction ? null : (extractionBatchSize && extractionBatchSize > 0 ? extractionBatchSize : null),
               extractionSessionId: continueExtraction ? currentExtractionSessionId : null,
@@ -2037,10 +2037,31 @@
 
           const approvedCostsArray = resultsToUse
             .filter(r => {
+              // Include already-approved products (they pass through)
+              if (r.isAlreadyApproved) {
+                return true;
+              }
               const cost = r.selectedCost || (r.extractedEntries.length > 0 ? r.extractedEntries[r.extractedEntries.length - 1]?.amount : null);
               return cost !== null && cost !== undefined;
             })
             .map(r => {
+              // Handle already-approved products
+              if (r.isAlreadyApproved) {
+                const approvedCost = r.existingApprovedCost 
+                  ? (typeof r.existingApprovedCost === 'object' && r.existingApprovedCost.toNumber 
+                      ? r.existingApprovedCost.toNumber() 
+                      : r.existingApprovedCost)
+                  : r.selectedCost || 0;
+                return {
+                  productId: r.productId,
+                  cost: approvedCost,
+                  source: 'ALREADY_APPROVED', // Indicate this was already approved
+                  supplierId: null,
+                  supplierName: 'General',
+                  isPreferred: false,
+                };
+              }
+              
               const edited = editedExtractionResults[r.productId] || r;
               // Find the selected entry (marked with isSelected: true)
               const selectedEntry = edited.extractedEntries.find(e => e.isSelected) 
@@ -2119,8 +2140,8 @@
       };
 
       const handlePreview = async () => {
-        if (selectedLocations.length === 0) {
-          setError('Please select at least one location');
+        if (!selectedLocation) {
+          setError('Please select a location');
           return;
         }
 
@@ -2134,7 +2155,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               cutoverDate: cutoverDate + 'T00:00:00Z',
-              locationIds: selectedLocations,
+              locationIds: selectedLocation ? [selectedLocation] : [],
               costBasis: costBasis,
               approvedCosts: Object.keys(approvedCosts).map(productId => ({
                 productId,
@@ -2157,8 +2178,8 @@
       };
 
       const handleMigrate = async (continueMigration = false) => {
-        if (!continueMigration && selectedLocations.length === 0) {
-          setError('Please select at least one location');
+        if (!continueMigration && !selectedLocation) {
+          setError('Please select a location');
           return;
         }
 
@@ -2190,7 +2211,7 @@
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 cutoverDate: cutoverDate + 'T00:00:00Z',
-                locationIds: selectedLocations,
+                locationIds: selectedLocation ? [selectedLocation] : [],
                 costBasis: costBasis,
                 ownerApproved: true,
                 approvalId: extractionResult?.cutoverId,
@@ -2226,11 +2247,16 @@
 
       return (
         <div className="max-w-4xl mx-auto space-y-6">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Inventory Migration & Cutover</h2>
-            <p className="text-gray-600 mb-6">
-              Migrate inventory from Square to the new FIFO-based system. This process creates opening balances and locks the system.
-            </p>
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Inventory Migration & Cutover</h2>
+              <p className="text-gray-600">
+                Migrate inventory from Square to the new FIFO-based system. This process establishes opening balances and prepares the system for live operations.
+              </p>
+            </div>
+            <div className="ml-4 text-3xl text-gray-400">
+              <span style={{ fontSize: '2rem' }}>📥</span>
+            </div>
           </div>
 
           {error && (
@@ -2247,40 +2273,37 @@
               onChange={(e) => setCutoverDate(e.target.value)}
               className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              The date when the new system becomes the system of record.
+            </p>
           </div>
 
           <div className="space-y-1">
             <div className="flex justify-between items-center mb-2">
-              <label className="block text-sm font-medium text-gray-700">Locations</label>
-              <div className="flex gap-2">
-                <button 
-                  onClick={fetchLocations} 
-                  disabled={loadingLocations}
-                  className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loadingLocations ? 'Loading...' : 'Refresh'}
-                </button>
-              </div>
+              <label className="block text-sm font-medium text-gray-700">Target Locations</label>
+              <button 
+                onClick={fetchLocations} 
+                disabled={loadingLocations}
+                className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loadingLocations ? 'Loading...' : 'Refresh List'}
+              </button>
             </div>
             {locations.length === 0 ? (
               <div className="p-4 bg-gray-50 rounded-lg text-gray-600 text-center border border-gray-200">
                 No locations found. Use the Locations module to sync locations from Square.
               </div>
             ) : (
-              <div className="flex flex-col gap-2 max-h-72 overflow-y-auto p-3 border border-gray-200 rounded-lg bg-white">
+              <div className="flex flex-col gap-2 p-3 border border-gray-200 rounded-lg bg-white">
                 {locations.map(loc => (
                   <label key={loc.id} className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer">
                     <input
-                      type="checkbox"
-                      checked={selectedLocations.includes(loc.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedLocations([...selectedLocations, loc.id]);
-                        } else {
-                          setSelectedLocations(selectedLocations.filter(id => id !== loc.id));
-                        }
-                      }}
-                      className="rounded text-primary border-gray-300 focus:ring-primary"
+                      type="radio"
+                      name="location"
+                      value={loc.id}
+                      checked={selectedLocation === loc.id}
+                      onChange={(e) => setSelectedLocation(e.target.value)}
+                      className="text-primary border-gray-300 focus:ring-primary"
                     />
                     <span className="ml-2 text-sm text-gray-700">
                       {loc.name} {loc.squareId && <span className="text-gray-500">({loc.squareId})</span>}
@@ -2298,31 +2321,101 @@
               onChange={(e) => setCostBasis(e.target.value)}
               className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
             >
-              <option value="DESCRIPTION">Extract from Description</option>
+              <option value="DESCRIPTION">$ Extract from Description</option>
               <option value="SQUARE_COST">Square Cost</option>
               <option value="MANUAL_INPUT">Manual Input</option>
               <option value="AVERAGE_COST">Average Cost</option>
             </select>
-          </div>
-
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">Batch Size (items per batch, leave empty for no batching)</label>
-            <input
-              type="number"
-              value={batchSize || ''}
-              onChange={(e) => {
-                const value = e.target.value;
-                setBatchSize(value === '' ? '' : (parseInt(value) || ''));
-              }}
-              placeholder="e.g., 100"
-              min="1"
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
-            />
             <p className="text-xs text-gray-500 mt-1">
-              Process migration in batches to avoid timeouts. Leave empty to process all items at once.
+              Method used to determine the initial cost of inventory items.
             </p>
           </div>
 
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-gray-900">Processing Settings</h3>
+            
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-700">Migration Batch Size (items per batch)</label>
+              <input
+                type="number"
+                value={batchSize || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setBatchSize(value === '' ? '' : (parseInt(value) || ''));
+                }}
+                placeholder="100"
+                min="1"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Process migration in batches to avoid server timeouts. Leave empty for all at once.
+              </p>
+            </div>
+
+            {costBasis === 'DESCRIPTION' && (
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-gray-700">Cost Extraction Batch Size (items per batch)</label>
+                <input
+                  type="number"
+                  value={extractionBatchSize || ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setExtractionBatchSize(value === '' ? '' : (parseInt(value) || ''));
+                  }}
+                  placeholder="100"
+                  min="1"
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Required for 'Extract from Description'. Processes products to extract embedded costs.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Main Action Buttons - Only show on main form (extract step) */}
+          {step === 'extract' && (
+            <div className="flex justify-end gap-3 pt-4">
+              <button
+                onClick={() => {
+                  setSelectedLocation(null);
+                  setCutoverDate(new Date().toISOString().split('T')[0]);
+                  setCostBasis('DESCRIPTION');
+                  setBatchSize(100);
+                  setExtractionBatchSize(100);
+                  setExtractionResult(null);
+                  setError(null);
+                }}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (costBasis === 'DESCRIPTION') {
+                    handleExtractCosts(false);
+                  } else {
+                    setStep('migrate');
+                    setApprovedCosts({});
+                  }
+                }}
+                disabled={loading || !selectedLocation}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <span>►</span> Start Migration
+              </button>
+            </div>
+          )}
+
+          {/* Warning Banner */}
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
+            <span className="text-yellow-600 text-xl">⚠️</span>
+            <p className="text-sm text-yellow-800">
+              System will be locked for editing during the migration process.
+            </p>
+          </div>
+
+          {/* Step-based content */}
           {step === 'extract' && (
             <div className="space-y-6">
               {costBasis === 'DESCRIPTION' ? (
@@ -2332,24 +2425,6 @@
                     This will process all products to extract costs from their descriptions.
                   </p>
                   
-                  <div className="space-y-1">
-                    <label className="block text-sm font-medium text-gray-700">Extraction Batch Size (items per batch, leave empty for no batching)</label>
-                    <input
-                      type="number"
-                      value={extractionBatchSize || ''}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setExtractionBatchSize(value === '' ? '' : (parseInt(value) || ''));
-                      }}
-                      placeholder="e.g., 100"
-                      min="1"
-                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Process extraction in batches to avoid timeouts. Leave empty to process all items at once.
-                    </p>
-                  </div>
-
                   {extractionResult && !extractionResult.isComplete && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                       <h4 className="font-semibold text-yellow-800 mb-2">Extraction Batch Progress</h4>
@@ -2372,7 +2447,7 @@
                     {!extractionResult && (
                       <button 
                         onClick={() => handleExtractCosts(false)} 
-                        disabled={loading || selectedLocations.length === 0}
+                        disabled={loading || !selectedLocation}
                         className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {loading ? 'Extracting Costs...' : 'Extract Costs from Descriptions'}
@@ -2418,7 +2493,7 @@
                       setStep('migrate');
                       setApprovedCosts({});
                     }} 
-                    disabled={loading || selectedLocations.length === 0}
+                    disabled={loading || !selectedLocation}
                     className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Skip Extraction & Proceed to Migration
@@ -2516,18 +2591,74 @@
                 {extractionResult.extractionResults.filter(result => {
                   // Filter based on active tab
                   if (activeTab === 'WITH_EXTRACTION') {
-                    // Show only items with extraction
-                    return (result.extractedEntries || []).length > 0;
+                    // Show only items with extraction (including already-approved)
+                    return (result.extractedEntries || []).length > 0 || result.isAlreadyApproved;
                   } else if (activeTab === 'MANUAL_INPUT') {
-                    // Show only items requiring manual input (no extraction)
-                    return (result.extractedEntries || []).length === 0;
+                    // Show only items requiring manual input (no extraction, not already approved)
+                    return (result.extractedEntries || []).length === 0 && !result.isAlreadyApproved;
                   } else if (activeTab === 'TOTAL_PRODUCTS') {
-                    // Show all items (both extracted and manual input)
+                    // Show all items (both extracted and manual input, including already-approved)
                     return true;
                   }
                   return false;
                 }).map(result => {
                   const editedResult = editedExtractionResults[result.productId] || result;
+                  
+                  // Handle already-approved products with minimal UI
+                  if (result.isAlreadyApproved) {
+                    const approvalDate = result.existingApprovalDate 
+                      ? new Date(result.existingApprovalDate).toLocaleDateString('en-US', { 
+                          year: 'numeric', 
+                          month: 'short', 
+                          day: 'numeric' 
+                        })
+                      : 'Unknown date';
+                    
+                    // Safely convert approved cost to number
+                    let approvedCostNum = 0;
+                    if (result.existingApprovedCost) {
+                      if (typeof result.existingApprovedCost === 'object' && result.existingApprovedCost.toNumber) {
+                        approvedCostNum = result.existingApprovedCost.toNumber();
+                      } else if (typeof result.existingApprovedCost === 'number') {
+                        approvedCostNum = result.existingApprovedCost;
+                      } else if (typeof result.existingApprovedCost === 'string') {
+                        approvedCostNum = parseFloat(result.existingApprovedCost) || 0;
+                      }
+                    } else if (result.selectedCost !== null && result.selectedCost !== undefined) {
+                      approvedCostNum = typeof result.selectedCost === 'number' ? result.selectedCost : parseFloat(result.selectedCost) || 0;
+                    }
+                    
+                    return (
+                      <div key={result.productId} className="bg-gray-50 rounded-xl border border-gray-300 shadow-sm overflow-hidden opacity-75">
+                        <div className="p-6">
+                          <div className="flex items-start justify-between mb-4">
+                            <div className="flex-1">
+                              <h3 className="text-lg font-semibold text-gray-700">{result.productName}</h3>
+                              <div className="mt-2 flex items-center gap-3">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  ✓ Already Approved
+                                </span>
+                                <span className="text-sm text-gray-500">
+                                  Approved on {approvalDate}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-sm text-gray-500">Approved Cost</div>
+                              <div className="text-xl font-bold text-gray-700">
+                                ${approvedCostNum.toFixed(2)}
+                              </div>
+                            </div>
+                          </div>
+                          {result.existingCutoverId && (
+                            <div className="text-xs text-gray-400 mt-2">
+                              Cutover ID: {result.existingCutoverId}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
                   // Find the selected entry (the one with isSelected = true)
                   const selectedEntry = editedResult.extractedEntries.find(e => e.isSelected) 
                     || (editedResult.extractedEntries.length > 0 ? editedResult.extractedEntries[editedResult.extractedEntries.length - 1] : null);
