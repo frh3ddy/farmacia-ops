@@ -5,6 +5,35 @@ import { PrismaService } from '../prisma/prisma.service';
 export class DataController {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Normalize product name by filtering out "Sin variación" and using proper fallback logic
+   */
+  private normalizeProductName(product: {
+    squareProductName?: string | null;
+    squareVariationName?: string | null;
+    name: string;
+  }): string {
+    const cleanSquareName = product.squareProductName && 
+      !product.squareProductName.toLowerCase().includes('sin variación') && 
+      !product.squareProductName.toLowerCase().includes('no variation') &&
+      product.squareProductName.trim().length > 0 
+      ? product.squareProductName 
+      : null;
+
+    const cleanVarName = product.squareVariationName && 
+      !product.squareVariationName.toLowerCase().includes('sin variación') && 
+      !product.squareVariationName.toLowerCase().includes('no variation') &&
+      product.squareVariationName.trim().length > 0 
+      ? product.squareVariationName 
+      : null;
+
+    const fallbackName = product.name && product.name.trim().length > 0
+      ? product.name
+      : 'Unknown Product';
+
+    return cleanSquareName || cleanVarName || fallbackName;
+  }
+
   @Get('catalog/mappings')
   async getCatalogMappings() {
     const mappings = await this.prisma.catalogMapping.findMany({
@@ -82,10 +111,19 @@ export class DataController {
       },
     });
 
+    // Normalize product names to filter out "Sin variación" and use proper fallback
+    const normalizedInventory = inventory.map(item => ({
+      ...item,
+      product: item.product ? {
+        ...item.product,
+        name: this.normalizeProductName(item.product),
+      } : item.product,
+    }));
+
     return {
       success: true,
-      data: inventory,
-      count: inventory.length,
+      data: normalizedInventory,
+      count: normalizedInventory.length,
     };
   }
 
