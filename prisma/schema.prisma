@@ -67,13 +67,14 @@ model Category {
 }
 
 model Supplier {
-  id          String   @id @default(uuid())
-  name        String
-  initials    String? // Abbreviation or initials for cost extraction (e.g., "L" for "Levi")
-  contactInfo String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String   @id @default(uuid())
+  name           String
+  normalizedName String   @unique // Normalized name for race-free matching
+  initials       String[] @default([]) // Array of initials for cost extraction (e.g., ["L", "Lev", "Levi"])
+  contactInfo    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   products    SupplierProduct[]
   costHistory SupplierCostHistory[]
@@ -221,17 +222,20 @@ model CatalogMapping {
 model CostApproval {
   id           String   @id @default(uuid())
   cutoverId    String
+  batchId      String?  // Reference to ExtractionBatch
   productId    String
   approvedCost Decimal
-  source       String // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE"
+  source       String // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE", "BATCH_APPROVED"
   notes        String?
   approvedAt   DateTime @default(now())
   approvedBy   String? // User ID
 
-  product Product @relation(fields: [productId], references: [id])
+  product Product        @relation(fields: [productId], references: [id])
+  batch   ExtractionBatch? @relation(fields: [batchId], references: [id])
 
   @@unique([cutoverId, productId])
   @@index([cutoverId])
+  @@index([batchId])
 }
 
 model Cutover {
@@ -279,4 +283,73 @@ model SupplierCostHistory {
 
   @@index([productId, supplierId])
   @@index([isCurrent])
+}
+
+model ExtractionSession {
+  id                    String   @id @default(uuid())
+  cutoverId             String?  // Optional link to cutover
+  locationIds           String[] // Array of location IDs
+
+  // Session state
+  currentBatch          Int      @default(1)
+  totalBatches          Int?
+  totalItems            Int
+  processedItems        Int      @default(0)
+  batchSize             Int
+
+  // Last approved tracking
+  lastApprovedBatchId   String?  // Last batch that was fully approved
+  lastApprovedProductId String?  // Last product ID that was approved across all batches
+
+  // Supplier initials learned from user corrections
+  learnedSupplierInitials Json?  // Map of supplier names to their initials arrays
+  // Format: { "Levic": ["L", "Lev", "Levi"], "Center": ["C", "Cent"] }
+
+  status                String   @default("IN_PROGRESS") // "IN_PROGRESS", "COMPLETED", "CANCELLED"
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  batches               ExtractionBatch[]
+
+  @@index([cutoverId])
+  @@index([status])
+}
+
+model ExtractionBatch {
+  id                    String   @id @default(uuid())
+  extractionSessionId   String   // Links to extraction session
+  batchNumber           Int      // Sequential batch number (1, 2, 3, ...)
+  cutoverId             String?  // Optional link to cutover
+  locationIds           String[] // Array of location IDs
+
+  // Batch status
+  status                String   @default("EXTRACTED") // "EXTRACTED", "APPROVED", "REJECTED"
+  extractedAt           DateTime @default(now())
+  approvedAt            DateTime?
+  approvedBy            String?  // User ID
+
+  // Product tracking
+  productIds            String[] // Array of product IDs in this batch
+  totalProducts         Int
+  productsWithExtraction Int
+  productsRequiringManualInput Int
+
+  // Approval tracking
+  extractionApproved    Boolean  @default(false) // Checkbox for extraction approval
+  manualInputApproved   Boolean  @default(false) // Checkbox for manual input approval
+  isFullyApproved       Boolean  @default(false) // Both checkboxes must be true
+
+  // Last approved item tracking
+  lastApprovedProductId String?  // Last product ID that was approved in this batch
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  session               ExtractionSession @relation(fields: [extractionSessionId], references: [id])
+  approvals             CostApproval[]
+
+  @@index([extractionSessionId])
+  @@index([cutoverId])
+  @@index([status])
 }

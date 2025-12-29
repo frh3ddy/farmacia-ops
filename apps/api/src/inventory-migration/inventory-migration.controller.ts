@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpStatus,
   HttpException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InventoryMigrationService } from './inventory-migration.service';
 import { SupplierService } from './supplier.service';
@@ -16,57 +17,16 @@ import { Prisma } from '@prisma/client';
 import {
   CutoverInput,
   CostApprovalRequest,
-  CostApprovalResponse,
   MigrationResult,
   LocationPreview,
 } from './types';
-
-interface ExtractCostsRequest {
-  locationIds: string[];
-  costBasis: 'DESCRIPTION';
-  batchSize?: number | string | null;
-  extractionSessionId?: string | null; // For continuing batch extraction
-}
-
-interface ApproveCostsRequest {
-  cutoverId: string;
-  approvedCosts: Array<{
-    productId: string;
-    cost: number;
-    source: string;
-    notes?: string | null;
-    supplierId?: string | null;
-    supplierName?: string | null;
-    isPreferred?: boolean;
-  }>;
-  entriesToAddToHistory?: Array<{
-    productId: string;
-    supplierName: string;
-    supplierId?: string | null;
-    cost: number;
-    effectiveAt?: string | null; // ISO datetime, defaults to cutover date
-  }> | null;
-  rejectedProducts?: string[] | null;
-  effectiveAt?: string | null; // ISO datetime for cost history
-}
-
-interface InitiateCutoverRequest {
-  cutoverDate: string; // ISO datetime
-  locationIds: string[];
-  costBasis: 'SQUARE_COST' | 'DESCRIPTION' | 'MANUAL_INPUT' | 'AVERAGE_COST';
-  ownerApproved: boolean;
-  approvalId?: string | null;
-  manualCosts?: Array<{ productId: string; cost: number }> | null;
-  batchSize?: number | string | null; // Number of items per batch (can be number or string from form)
-  cutoverId?: string | null; // For continuing existing migration
-}
-
-interface PreviewCutoverRequest {
-  cutoverDate: string;
-  locationIds: string[];
-  costBasis: 'SQUARE_COST' | 'DESCRIPTION' | 'MANUAL_INPUT' | 'AVERAGE_COST';
-  approvedCosts?: Array<{ productId: string; cost: number }> | null;
-}
+import {
+  ExtractCostsRequest,
+  ApproveBatchRequest,
+  ApproveCostsRequest,
+  InitiateCutoverRequest,
+  PreviewCutoverRequest,
+} from './inventory-migration.dto';
 
 @Controller('admin/inventory/cutover')
 export class InventoryMigrationController {
@@ -77,316 +37,179 @@ export class InventoryMigrationController {
   ) {}
 
   /**
-   * Suggest suppliers by search term
-   * GET /admin/inventory/suppliers/suggest?q={searchTerm}
+   * Helper to normalize batch size from various inputs (string/number)
    */
+  private parseBatchSize(input?: number | string | null): number | null {
+    if (input === null || input === undefined) return null;
+    if (typeof input === 'number') return input > 0 ? input : null;
+    if (typeof input === 'string') {
+      const parsed = parseInt(input.trim(), 10);
+      return !isNaN(parsed) && parsed > 0 ? parsed : null;
+    }
+    return null;
+  }
+
+  /**
+   * Helper to safely parse dates
+   */
+  private parseDate(dateStr?: string | null): Date | null {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? null : date;
+  }
+
+  // --- SUPPLIER ENDPOINTS ---
+
   @Get('suppliers/suggest')
-  @HttpCode(HttpStatus.OK)
   async suggestSuppliers(
     @Query('q') searchTerm?: string,
     @Query('limit') limit?: string,
-  ): Promise<{
-    success: boolean;
-    suppliers: Array<{
-      id: string;
-      name: string;
-      contactInfo: string | null;
-    }>;
-  }> {
-    try {
-      const limitNum = limit ? parseInt(limit, 10) : 10;
-      const suppliers = await this.supplierService.suggestSuppliers(
-        searchTerm || '',
-        limitNum,
-      );
-
-      return {
-        success: true,
-        suppliers: suppliers,
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      throw new HttpException(
-        {
-          success: false,
-          message: `Failed to suggest suppliers: ${errorMessage}`,
-          error: errorMessage,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+  ) {
+    const limitNum = limit ? parseInt(limit, 10) : 10;
+    const suppliers = await this.supplierService.suggestSuppliers(
+      searchTerm || '',
+      limitNum,
+    );
+    return { success: true, suppliers };
   }
 
-  /**
-   * Get all suppliers
-   * GET /admin/inventory/suppliers
-   */
   @Get('suppliers')
-  @HttpCode(HttpStatus.OK)
-  async getAllSuppliers(): Promise<{
-    success: boolean;
-    suppliers: Array<{
-      id: string;
-      name: string;
-      initials: string | null;
-      contactInfo: string | null;
-      isActive: boolean;
-      createdAt: string;
-      updatedAt: string;
-    }>;
-  }> {
-    try {
-      const suppliers = await this.prisma.supplier.findMany({
-        orderBy: { name: 'asc' },
-      });
+  async getAllSuppliers() {
+    // Optimization: Select only needed fields
+    const suppliers = await this.prisma.supplier.findMany({
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        initials: true,
+        contactInfo: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
-      return {
-        success: true,
-        suppliers: suppliers.map(s => ({
-          id: s.id,
-          name: s.name,
-          initials: (s as any).initials,
-          contactInfo: (s as any).contactInfo,
-          isActive: (s as any).isActive,
-          createdAt: (s as any).createdAt.toISOString(),
-          updatedAt: (s as any).updatedAt.toISOString(),
-        })),
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      throw new HttpException(
-        {
-          success: false,
-          message: `Failed to get suppliers: ${errorMessage}`,
-          error: errorMessage,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return {
+      success: true,
+      suppliers: suppliers.map((s) => ({
+        ...s,
+        initials: Array.isArray(s.initials) ? s.initials : (s.initials ? [s.initials] : []),
+        createdAt: s.createdAt.toISOString(),
+        updatedAt: s.updatedAt.toISOString(),
+      })),
+    };
   }
 
-  /**
-   * Update a supplier
-   * POST /admin/inventory/cutover/suppliers/:id/update
-   */
   @Post('suppliers/:id/update')
-  @HttpCode(HttpStatus.OK)
   async updateSupplier(
     @Param('id') id: string,
-    @Body() body: { name?: string; initials?: string | null; contactInfo?: string | null; isActive?: boolean },
-  ): Promise<{
-    success: boolean;
-    supplier: {
-      id: string;
-      name: string;
-      initials: string | null;
-      contactInfo: string | null;
-      isActive: boolean;
-    };
-  }> {
-    try {
-      const updateData: any = {};
-      if (body.name !== undefined) updateData.name = body.name.trim();
-      if (body.initials !== undefined) updateData.initials = body.initials?.trim() || null;
-      if (body.contactInfo !== undefined) updateData.contactInfo = body.contactInfo?.trim() || null;
-      if (body.isActive !== undefined) updateData.isActive = body.isActive;
+    @Body() body: { name?: string; initials?: string[] | string | null; contactInfo?: string | null; isActive?: boolean },
+  ) {
+    const updateData: Prisma.SupplierUpdateInput = {};
+    
+    if (body.name !== undefined) updateData.name = body.name.trim();
+    if (body.contactInfo !== undefined) updateData.contactInfo = body.contactInfo?.trim() || null;
+    if (body.isActive !== undefined) updateData.isActive = body.isActive;
 
-      await this.prisma.supplier.update({
-        where: { id },
-        data: updateData as any,
-      });
-
-      const supplier = await this.prisma.supplier.findUnique({
-        where: { id },
-      });
-
-      if (!supplier) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Supplier not found',
-          },
-          HttpStatus.NOT_FOUND,
-        );
+    // Robust initials handling
+    if (body.initials !== undefined) {
+      if (Array.isArray(body.initials)) {
+        updateData.initials = body.initials
+          .filter(i => i && typeof i === 'string' && i.trim().length > 0)
+          .map(i => i.trim());
+      } else if (typeof body.initials === 'string' && body.initials.trim()) {
+        updateData.initials = [body.initials.trim()];
+      } else {
+        updateData.initials = [];
       }
+    }
 
-      return {
-        success: true,
-        supplier: {
-          id: supplier.id,
-          name: supplier.name,
-          initials: (supplier as any).initials,
-          contactInfo: (supplier as any).contactInfo,
-          isActive: (supplier as any).isActive,
-        },
-      };
+    try {
+      const supplier = await this.prisma.supplier.update({
+        where: { id },
+        data: updateData,
+      });
+
+      return { success: true, supplier };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      throw new HttpException(
-        {
-          success: false,
-          message: `Failed to update supplier: ${errorMessage}`,
-          error: errorMessage,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      if ((error as any).code === 'P2025') {
+        throw new HttpException({ success: false, message: 'Supplier not found' }, HttpStatus.NOT_FOUND);
+      }
+      throw new HttpException({ success: false, message: 'Update failed' }, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
-  /**
-   * Create a new supplier
-   * POST /admin/inventory/suppliers
-   */
   @Post('suppliers')
-  @HttpCode(HttpStatus.OK)
   async createSupplier(
-    @Body() body: { name: string; initials?: string | null; contactInfo?: string | null },
-  ): Promise<{
-    success: boolean;
-    supplier: {
-      id: string;
-      name: string;
-      initials: string | null;
-      contactInfo: string | null;
-      isActive: boolean;
-    };
-  }> {
+    @Body() body: { name: string; initials?: string[] | string | null; contactInfo?: string | null },
+  ) {
     try {
-      const supplier = await this.supplierService.findOrCreateSupplier(
-        body.name,
-      );
+      // 1. Find or create basic supplier
+      const supplier = await this.supplierService.findOrCreateSupplier(body.name);
 
-      // Update initials and contact info if provided
-      const updateData: any = {};
-      if (body.initials !== undefined) updateData.initials = body.initials?.trim() || null;
-      if (body.contactInfo !== undefined) updateData.contactInfo = body.contactInfo?.trim() || null;
+      // 2. If we need to add extra details, update immediately
+      const hasUpdates = body.initials || body.contactInfo;
+      let finalSupplier = supplier;
 
-      if (Object.keys(updateData).length > 0) {
-        await this.prisma.supplier.update({
-          where: { id: supplier.id },
-          data: updateData,
-        });
-      }
+      if (hasUpdates) {
+        const updateData: Prisma.SupplierUpdateInput = {};
+        
+        if (body.contactInfo !== undefined) {
+          updateData.contactInfo = body.contactInfo?.trim() || null;
+        }
 
-      const updatedSupplier = await this.prisma.supplier.findUnique({
-        where: { id: supplier.id },
-      });
-
-      if (!updatedSupplier) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Supplier not found after creation',
-          },
-          HttpStatus.INTERNAL_SERVER_ERROR,
-        );
-      }
-
-      return {
-        success: true,
-        supplier: {
-          id: updatedSupplier.id,
-          name: updatedSupplier.name,
-          initials: (updatedSupplier as any).initials,
-          contactInfo: (updatedSupplier as any).contactInfo,
-          isActive: (updatedSupplier as any).isActive,
-        },
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      throw new HttpException(
-        {
-          success: false,
-          message: `Failed to create supplier: ${errorMessage}`,
-          error: errorMessage,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Delete (deactivate) a supplier
-   * POST /admin/inventory/cutover/suppliers/:id/delete
-   */
-  @Post('suppliers/:id/delete')
-  @HttpCode(HttpStatus.OK)
-  async deleteSupplier(
-    @Param('id') id: string,
-  ): Promise<{
-    success: boolean;
-    message: string;
-  }> {
-    try {
-      // Soft delete by setting isActive to false
-      await this.prisma.supplier.update({
-        where: { id },
-        data: { isActive: false } as any,
-      });
-
-      return {
-        success: true,
-        message: 'Supplier deactivated successfully',
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      throw new HttpException(
-        {
-          success: false,
-          message: `Failed to delete supplier: ${errorMessage}`,
-          error: errorMessage,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Extract costs from product descriptions for owner review and approval
-   * POST /admin/inventory/cutover/extract-costs
-   */
-  @Post('extract-costs')
-  @HttpCode(HttpStatus.OK)
-  async extractCostsForApproval(
-    @Body() body: ExtractCostsRequest,
-  ): Promise<{
-    success: boolean;
-    result: CostApprovalRequest;
-    message: string;
-  }> {
-    // TODO: Add authentication guard (owner/admin only)
-    try {
-      if (body.costBasis !== 'DESCRIPTION') {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Cost basis must be DESCRIPTION for cost extraction',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      // Validate and normalize batch size
-      let batchSize: number | null = null;
-      if (body.batchSize != null) {
-        if (typeof body.batchSize === 'number' && body.batchSize > 0) {
-          batchSize = body.batchSize;
-        } else if (typeof body.batchSize === 'string') {
-          const trimmed = body.batchSize.trim();
-          if (trimmed !== '') {
-            const parsed = parseInt(trimmed, 10);
-            if (!isNaN(parsed) && parsed > 0) {
-              batchSize = parsed;
-            }
+        if (body.initials !== undefined) {
+          if (Array.isArray(body.initials)) {
+            updateData.initials = body.initials
+              .filter(i => i && typeof i === 'string' && i.trim().length > 0)
+              .map(i => i.trim());
+          } else if (typeof body.initials === 'string' && body.initials.trim()) {
+            updateData.initials = [body.initials.trim()];
           }
+        }
+        
+        // Only run update if we generated data to update
+        if (Object.keys(updateData).length > 0) {
+          finalSupplier = await this.prisma.supplier.update({
+            where: { id: supplier.id },
+            data: updateData,
+          });
         }
       }
 
+      return { success: true, supplier: finalSupplier };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to create supplier: ${error}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('suppliers/:id/delete')
+  async deleteSupplier(@Param('id') id: string) {
+    try {
+      await this.prisma.supplier.update({
+        where: { id },
+        data: { isActive: false },
+      });
+      return { success: true, message: 'Supplier deactivated successfully' };
+    } catch (e) {
+       throw new HttpException({ success: false, message: 'Failed to deactivate supplier' }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // --- CUTOVER / MIGRATION ENDPOINTS ---
+
+  @Post('extract-costs')
+  async extractCostsForApproval(@Body() body: ExtractCostsRequest) {
+    if (body.costBasis !== 'DESCRIPTION') {
+      throw new BadRequestException('Cost basis must be DESCRIPTION for cost extraction');
+    }
+
+    const batchSize = this.parseBatchSize(body.batchSize);
+
+    try {
       const result = await this.migrationService.extractCostsForMigration(
         body.locationIds,
         body.costBasis,
@@ -396,40 +219,19 @@ export class InventoryMigrationController {
 
       return {
         success: true,
-        result: result,
+        result,
         message: 'Cost extraction completed. Please review and approve.',
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-
       throw new HttpException(
-        {
-          success: false,
-          message: `Cost extraction failed: ${errorMessage}`,
-          error: errorMessage,
-        },
+        { success: false, message: `Cost extraction failed: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
-  /**
-   * Owner endpoint to approve or override extracted costs
-   * POST /admin/inventory/cutover/approve-costs
-   */
-  @Post('approve-costs')
-  @HttpCode(HttpStatus.OK)
-  async approveExtractedCosts(
-    @Body() body: ApproveCostsRequest,
-  ): Promise<{
-    success: boolean;
-    approvedCount: number;
-    rejectedCount: number;
-    approvalId: string;
-    message: string;
-  }> {
-    // TODO: Add authentication guard (owner/admin only)
+  @Post('approve-batch')
+  async approveBatch(@Body() body: ApproveBatchRequest) {
     try {
       const approvedCosts = body.approvedCosts.map((ac) => ({
         productId: ac.productId,
@@ -441,29 +243,105 @@ export class InventoryMigrationController {
         isPreferred: ac.isPreferred || false,
       }));
 
-      // Parse effective date if provided
-      const effectiveAt = body.effectiveAt
-        ? new Date(body.effectiveAt)
-        : null;
+      const entriesToAddToHistory = body.entriesToAddToHistory?.map((entry) => ({
+        productId: entry.productId,
+        supplierName: entry.supplierName,
+        supplierId: entry.supplierId || null,
+        cost: entry.cost,
+        effectiveAt: this.parseDate(entry.effectiveAt) || undefined,
+      })) || null;
 
-      // Process entries to add to supplier history
-      const entriesToAddToHistory = body.entriesToAddToHistory
-        ? body.entriesToAddToHistory.map((entry) => ({
-            productId: entry.productId,
-            supplierName: entry.supplierName,
-            supplierId: entry.supplierId || null,
-            cost: entry.cost,
-            effectiveAt: entry.effectiveAt
-              ? new Date(entry.effectiveAt)
-              : undefined, // undefined means use default (one week ago)
-          }))
-        : null;
+      const result = await this.migrationService.approveBatch(
+        body.batchId,
+        body.extractionApproved,
+        body.manualInputApproved,
+        approvedCosts,
+        body.supplierInitialsUpdates || null,
+        entriesToAddToHistory,
+        null, // approvedBy placeholder
+        null, // effectiveAt placeholder
+      );
 
-      // Store approval in database (includes supplier creation and cost history)
+      return {
+        success: true,
+        batchId: body.batchId,
+        nextBatchAvailable: result.nextBatchAvailable,
+        lastApprovedProductId: result.lastApprovedProductId,
+        message: 'Batch approved successfully',
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Batch approval failed: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Get('extraction-session/:sessionId')
+  async getExtractionSession(@Param('sessionId') sessionId: string) {
+    try {
+      const session = await this.migrationService.getExtractionSession(sessionId);
+      
+      if (!session) {
+        throw new HttpException(
+          { success: false, message: 'Extraction session not found' },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      // Safe access to properties with 'any' cast for complex nested structure
+      const sessionData = session as any;
+
+      return {
+        success: true,
+        session: {
+          ...sessionData,
+          createdAt: sessionData.createdAt.toISOString(),
+          updatedAt: sessionData.updatedAt.toISOString(),
+          batches: sessionData.batches?.map((b: any) => ({
+            ...b,
+            extractedAt: b.extractedAt?.toISOString(),
+            approvedAt: b.approvedAt?.toISOString() || null,
+            createdAt: b.createdAt.toISOString(),
+            updatedAt: b.updatedAt.toISOString(),
+          })) || [],
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to get extraction session: ${error}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('approve-costs')
+  async approveExtractedCosts(@Body() body: ApproveCostsRequest) {
+    try {
+      const approvedCosts = body.approvedCosts.map((ac) => ({
+        productId: ac.productId,
+        cost: new Prisma.Decimal(ac.cost),
+        source: ac.source,
+        notes: ac.notes || null,
+        supplierId: ac.supplierId || null,
+        supplierName: ac.supplierName || null,
+        isPreferred: ac.isPreferred || false,
+      }));
+
+      const effectiveAt = this.parseDate(body.effectiveAt);
+
+      const entriesToAddToHistory = body.entriesToAddToHistory?.map((entry) => ({
+        productId: entry.productId,
+        supplierName: entry.supplierName,
+        supplierId: entry.supplierId || null,
+        cost: entry.cost,
+        effectiveAt: this.parseDate(entry.effectiveAt) || undefined,
+      })) || null;
+
       await this.migrationService.storeCostApprovals(
         body.cutoverId,
         approvedCosts,
-        null, // TODO: Get from auth context
+        null, // approvedBy
         effectiveAt,
         entriesToAddToHistory,
       );
@@ -476,62 +354,95 @@ export class InventoryMigrationController {
         message: 'Costs approved successfully',
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-
       throw new HttpException(
-        {
-          success: false,
-          message: `Cost approval failed: ${errorMessage}`,
-          error: errorMessage,
-        },
+        { success: false, message: `Cost approval failed: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
   }
 
-  /**
-   * Continue batch migration
-   * POST /admin/inventory/cutover/continue
-   */
-  @Post('continue')
+  @Post()
   @HttpCode(HttpStatus.OK)
-  async continueCutover(
-    @Body() body: { cutoverId: string },
-  ): Promise<{
-    success: boolean;
-    result: MigrationResult;
-    message: string;
-  }> {
+  async cutover(@Body() body: InitiateCutoverRequest) {
+    return this.initiateCutover(body);
+  }
+
+  @Post('initiate')
+  async initiateCutover(@Body() body: InitiateCutoverRequest) {
+    const cutoverDate = this.parseDate(body.cutoverDate);
+    if (!cutoverDate) {
+      throw new BadRequestException('Invalid cutover date format');
+    }
+
+    let approvedCosts: { productId: string; cost: Prisma.Decimal }[] = [];
+
+    // 1. Resolve Costs
+    if (body.costBasis === 'DESCRIPTION' && body.approvalId) {
+      approvedCosts = await this.migrationService.getCostApprovals(body.approvalId);
+    } else if (body.manualCosts) {
+      approvedCosts = body.manualCosts.map((mc) => ({
+        productId: mc.productId,
+        cost: new Prisma.Decimal(mc.cost),
+      }));
+    }
+
+    const input = {
+      cutoverDate,
+      locationIds: body.locationIds,
+      costBasis: body.costBasis,
+      ownerApproved: body.ownerApproved,
+      ownerApprovedAt: new Date(),
+      ownerApprovedBy: null,
+      approvedCosts: approvedCosts.length > 0 ? approvedCosts : null,
+    };
+
+    const batchSize = this.parseBatchSize(body.batchSize);
+
     try {
-      // Get cutover record to retrieve approved costs
-      const cutoverRecord = await this.prisma.cutover.findUnique({
-        where: { id: body.cutoverId },
-      });
-      
-      if (!cutoverRecord) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Cutover not found',
-          },
-          HttpStatus.NOT_FOUND,
-        );
-      }
+      const result = await this.migrationService.executeInventoryMigration(
+        input,
+        approvedCosts,
+        batchSize,
+        body.cutoverId || null,
+      );
 
-      // Reconstruct approved costs from result or approvalId
-      let approvedCosts: { productId: string; cost: Prisma.Decimal }[] = [];
-      const result = cutoverRecord.result as any;
-      if (result?.approvedCosts) {
-        approvedCosts = result.approvedCosts.map((ac: any) => ({
-          productId: ac.productId,
-          cost: new Prisma.Decimal(ac.cost),
-        }));
-      } else if (cutoverRecord.costBasis === 'DESCRIPTION') {
-        // Try to get from CostApproval table
-        approvedCosts = await this.migrationService.getCostApprovals(body.cutoverId);
-      }
+      return {
+        success: true,
+        result,
+        message: 'Inventory cutover initiated successfully',
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Cutover failed: ${error}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 
+  @Post('continue')
+  async continueCutover(@Body() body: { cutoverId: string }) {
+    const cutoverRecord = await this.prisma.cutover.findUnique({
+      where: { id: body.cutoverId },
+    });
+
+    if (!cutoverRecord) {
+      throw new HttpException({ success: false, message: 'Cutover not found' }, HttpStatus.NOT_FOUND);
+    }
+
+    // Resolve approved costs (Prioritize JSON snapshot, fallback to DB table)
+    let approvedCosts: { productId: string; cost: Prisma.Decimal }[] = [];
+    const result = cutoverRecord.result as any;
+    
+    if (result?.approvedCosts) {
+      approvedCosts = result.approvedCosts.map((ac: any) => ({
+        productId: ac.productId,
+        cost: new Prisma.Decimal(ac.cost),
+      }));
+    } else if (cutoverRecord.costBasis === 'DESCRIPTION') {
+      approvedCosts = await this.migrationService.getCostApprovals(body.cutoverId);
+    }
+
+    try {
       const migrationResult = await this.migrationService.continueBatchMigration(
         body.cutoverId,
         approvedCosts,
@@ -545,224 +456,35 @@ export class InventoryMigrationController {
           : `Batch ${migrationResult.currentBatch}/${migrationResult.totalBatches} completed`,
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
       throw new HttpException(
-        {
-          success: false,
-          message: `Failed to continue migration: ${errorMessage}`,
-          error: errorMessage,
-        },
+        { success: false, message: `Failed to continue migration: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
   }
 
-  /**
-   * Owner endpoint to initiate inventory cutover and migration
-   * POST /admin/inventory/cutover
-   */
-  @Post()
-  @HttpCode(HttpStatus.OK)
-  async initiateCutover(
-    @Body() body: InitiateCutoverRequest,
-  ): Promise<{
-    success: boolean;
-    result: MigrationResult;
-    message: string;
-  }> {
-    // TODO: Add authentication guard (owner/admin only)
-    try {
-      const cutoverDate = new Date(body.cutoverDate);
-      if (isNaN(cutoverDate.getTime())) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Invalid cutover date format',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      // Build approved costs
-      let approvedCosts: { productId: string; cost: Prisma.Decimal }[] = [];
-      
-      // If DESCRIPTION cost basis, retrieve from CostApproval table
-      if (body.costBasis === 'DESCRIPTION' && body.approvalId) {
-        approvedCosts = await this.migrationService.getCostApprovals(
-          body.approvalId,
-        );
-      } else if (body.manualCosts) {
-        // Use manual costs if provided
-        for (const mc of body.manualCosts) {
-          approvedCosts.push({
-            productId: mc.productId,
-            cost: new Prisma.Decimal(mc.cost),
-          });
-        }
-      }
-
-      const input: CutoverInput = {
-        cutoverDate: cutoverDate,
-        locationIds: body.locationIds,
-        costBasis: body.costBasis,
-        ownerApproved: body.ownerApproved,
-        ownerApprovedAt: new Date(),
-        ownerApprovedBy: null, // TODO: Get from auth context
-        approvedCosts: approvedCosts.length > 0 ? approvedCosts : null,
-      };
-
-      // Validate and normalize batch size
-      let batchSize: number | null = null;
-      if (body.batchSize != null) {
-        if (typeof body.batchSize === 'number' && body.batchSize > 0) {
-          batchSize = body.batchSize;
-        } else if (typeof body.batchSize === 'string') {
-          const trimmed = body.batchSize.trim();
-          if (trimmed !== '') {
-            const parsed = parseInt(trimmed, 10);
-            if (!isNaN(parsed) && parsed > 0) {
-              batchSize = parsed;
-            }
-          }
-        }
-      }
-
-      const result = await this.migrationService.executeInventoryMigration(
-        input,
-        approvedCosts,
-        batchSize,
-        body.cutoverId || null,
-      );
-
-      return {
-        success: true,
-        result: result,
-        message: 'Inventory cutover completed successfully',
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-
-      // Check if it's a validation error
-      if (error instanceof HttpException) {
-        throw error;
-      }
-
-      throw new HttpException(
-        {
-          success: false,
-          message: `Cutover failed: ${errorMessage}`,
-          error: errorMessage,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Get status of cutover for a location or all locations
-   * GET /admin/inventory/cutover/status
-   */
-  @Get('status')
-  @HttpCode(HttpStatus.OK)
-  async getCutoverStatus(
-    @Query('locationId') locationId?: string,
-  ): Promise<{
-    isLocked: boolean;
-    cutoverDate?: string | null;
-    lockedAt?: string | null;
-    locations: Array<{
-      locationId: string;
-      locationName: string;
-      isLocked: boolean;
-      cutoverDate?: string | null;
-    }>;
-  }> {
-    // TODO: Add authentication guard
-    try {
-      const status = await this.migrationService.getCutoverStatus(locationId);
-
-      return {
-        isLocked: status.isLocked,
-        cutoverDate: status.cutoverDate?.toISOString() || null,
-        lockedAt: status.lockedAt?.toISOString() || null,
-        locations: status.locations.map((loc) => ({
-          locationId: loc.locationId,
-          locationName: loc.locationName,
-          isLocked: loc.isLocked,
-          cutoverDate: loc.cutoverDate?.toISOString() || null,
-        })),
-      };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-
-      throw new HttpException(
-        {
-          success: false,
-          message: `Failed to get cutover status: ${errorMessage}`,
-          error: errorMessage,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
-   * Preview what would be migrated without executing (dry run)
-   * POST /admin/inventory/cutover/preview
-   */
   @Post('preview')
-  @HttpCode(HttpStatus.OK)
-  async previewCutover(
-    @Body() body: PreviewCutoverRequest,
-  ): Promise<{
-    locations: LocationPreview[];
-    totalProducts: number;
-    productsWithCost: number;
-    productsMissingCost: number;
-    estimatedOpeningBalances: number;
-    warnings: Array<{
-      productId?: string | null;
-      locationId?: string | null;
-      message: string;
-      recommendation?: string | null;
-    }>;
-  }> {
-    // TODO: Add authentication guard (owner/admin only)
+  async previewCutover(@Body() body: PreviewCutoverRequest) {
+    const cutoverDate = this.parseDate(body.cutoverDate);
+    if (!cutoverDate) throw new BadRequestException('Invalid cutover date');
+
+    const approvedCosts = body.approvedCosts?.map((ac) => ({
+      productId: ac.productId,
+      cost: new Prisma.Decimal(ac.cost),
+    }));
+
     try {
-      const cutoverDate = new Date(body.cutoverDate);
-      if (isNaN(cutoverDate.getTime())) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Invalid cutover date format',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const approvedCosts = body.approvedCosts
-        ? body.approvedCosts.map((ac) => ({
-            productId: ac.productId,
-            cost: new Prisma.Decimal(ac.cost),
-          }))
-        : undefined;
-
-      const input: CutoverInput = {
-        cutoverDate: cutoverDate,
-        locationIds: body.locationIds,
-        costBasis: body.costBasis,
-        ownerApproved: false, // Preview doesn't require approval
-        approvedCosts: approvedCosts || null,
-      };
-
       const preview = await this.migrationService.previewCutover(
-        input,
+        {
+          cutoverDate,
+          locationIds: body.locationIds,
+          costBasis: body.costBasis,
+          ownerApproved: false,
+          approvedCosts: approvedCosts || null,
+        },
         approvedCosts,
       );
-
+      
       return {
         locations: preview.locations,
         totalProducts: preview.totalProducts,
@@ -772,18 +494,24 @@ export class InventoryMigrationController {
         warnings: preview.warnings,
       };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-
       throw new HttpException(
-        {
-          success: false,
-          message: `Preview failed: ${errorMessage}`,
-          error: errorMessage,
-        },
+        { success: false, message: `Preview failed: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
-}
 
+  @Get('status')
+  async getCutoverStatus(@Query('locationId') locationId?: string) {
+    const status = await this.migrationService.getCutoverStatus(locationId);
+    return {
+      ...status,
+      cutoverDate: status.cutoverDate?.toISOString() || null,
+      lockedAt: status.lockedAt?.toISOString() || null,
+      locations: status.locations.map((loc) => ({
+        ...loc,
+        cutoverDate: loc.cutoverDate?.toISOString() || null,
+      })),
+    };
+  }
+}

@@ -89,6 +89,100 @@ export class DataController {
     };
   }
 
+  @Post('catalog/cleanup')
+  async cleanupCatalog(@Body() body?: { deleteProducts?: boolean }) {
+    try {
+      const deleteProducts = body?.deleteProducts ?? true; // Default to true for fresh start
+      
+      // Delete in correct order to handle foreign key constraints
+      // 1. Delete CostApproval (references products)
+      const deletedCostApprovals = await this.prisma.costApproval.deleteMany({});
+      
+      // 2. Delete catalog mappings (references products)
+      const deletedMappings = await this.prisma.catalogMapping.deleteMany({});
+      
+      // 3. Delete SupplierProduct (references products)
+      const deletedSupplierProducts = await this.prisma.supplierProduct.deleteMany({});
+      
+      // 4. Delete SupplierCostHistory (references products)
+      const deletedCostHistory = await this.prisma.supplierCostHistory.deleteMany({});
+      
+      // 5. Delete Inventory (references products)
+      const deletedInventory = await this.prisma.inventory.deleteMany({});
+      
+      // 6. Delete SaleItem (references products) - need to delete sales first or sale items
+      const deletedSaleItems = await this.prisma.saleItem.deleteMany({});
+      
+      // 7. Delete Placement (references products)
+      const deletedPlacements = await this.prisma.placement.deleteMany({});
+      
+      let productsDeleted = 0;
+      let productsUpdated = 0;
+
+      if (deleteProducts) {
+        // Now try to delete all products (should work after deleting all relationships)
+        try {
+          const deleted = await this.prisma.product.deleteMany({});
+          productsDeleted = deleted.count;
+        } catch (deleteError: any) {
+          // If deletion still fails, fall back to clearing fields
+          console.warn('[CATALOG_CLEANUP] Could not delete products, clearing Square fields instead:', deleteError.message);
+          const updated = await this.prisma.product.updateMany({
+            data: {
+              squareProductName: null,
+              squareDescription: null,
+              squareImageUrl: null,
+              squareVariationName: null,
+              squareDataSyncedAt: null,
+            },
+          });
+          productsUpdated = updated.count;
+        }
+      } else {
+        // Just clear Square-related fields from all products
+        const updated = await this.prisma.product.updateMany({
+          data: {
+            squareProductName: null,
+            squareDescription: null,
+            squareImageUrl: null,
+            squareVariationName: null,
+            squareDataSyncedAt: null,
+          },
+        });
+        productsUpdated = updated.count;
+      }
+
+      return {
+        success: true,
+        message: deleteProducts && productsDeleted > 0 
+          ? 'Catalog cleanup completed - all related records and products deleted'
+          : 'Catalog cleanup completed - related records deleted, Square fields cleared from products',
+        data: {
+          costApprovalsDeleted: deletedCostApprovals.count,
+          mappingsDeleted: deletedMappings.count,
+          supplierProductsDeleted: deletedSupplierProducts.count,
+          costHistoryDeleted: deletedCostHistory.count,
+          inventoryDeleted: deletedInventory.count,
+          saleItemsDeleted: deletedSaleItems.count,
+          placementsDeleted: deletedPlacements.count,
+          productsDeleted,
+          productsUpdated,
+        },
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      
+      console.error('[CATALOG_CLEANUP] Error cleaning up catalog:', errorMessage);
+
+      return {
+        success: false,
+        message: `Catalog cleanup failed: ${errorMessage}`,
+        error: errorMessage,
+      };
+    }
+  }
+
   @Post('inventory/test')
   async createTestInventory(@Body() body: { squareVariationIds?: string[] }) {
     // Create test inventory for specified products

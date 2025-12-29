@@ -186,5 +186,79 @@ export interface ProductPreview {
   hasCost: boolean;
 }
 
+export interface ExtractionSession {
+  id: string;
+  cutoverId?: string | null;
+  locationIds: string[];
+  currentBatch: number;
+  totalBatches?: number | null;
+  totalItems: number;
+  processedItems: number;
+  batchSize: number;
+  lastApprovedBatchId?: string | null;
+  lastApprovedProductId?: string | null;
+  learnedSupplierInitials?: Record<string, string[]> | null;
+  status: 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ExtractionBatch {
+  id: string;
+  extractionSessionId: string;
+  batchNumber: number;
+  cutoverId?: string | null;
+  locationIds: string[];
+  status: 'EXTRACTED' | 'APPROVED' | 'REJECTED';
+  extractedAt: Date;
+  approvedAt?: Date | null;
+  approvedBy?: string | null;
+  productIds: string[];
+  totalProducts: number;
+  productsWithExtraction: number;
+  productsRequiringManualInput: number;
+  extractionApproved: boolean;
+  manualInputApproved: boolean;
+  isFullyApproved: boolean;
+  lastApprovedProductId?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface BatchApprovalRequest {
+  extractionSessionId: string;
+  batchId: string;
+  extractionApproved: boolean;
+  manualInputApproved: boolean;
+  approvedCosts: Array<{
+    productId: string;
+    cost: number;
+    source: string;
+    notes?: string | null;
+    supplierId?: string | null;
+    supplierName?: string | null;
+    isPreferred?: boolean;
+  }>;
+  entriesToAddToHistory?: Array<{
+    productId: string;
+    supplierName: string;
+    supplierId?: string | null;
+    cost: number;
+    effectiveAt?: string | null;
+  }> | null;
+  supplierInitialsUpdates?: Array<{
+    supplierName: string;
+    initials: string[];
+  }> | null;
+}
+
+export interface BatchApprovalResponse {
+  success: boolean;
+  batchId: string;
+  nextBatchAvailable: boolean;
+  lastApprovedProductId: string;
+  message: string;
+}
+
 
 

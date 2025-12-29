@@ -288,7 +288,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     function App() {
       const [activeTab, setActiveTab] = useState('catalog-sync');
@@ -420,6 +420,39 @@
       const [loading, setLoading] = useState(false);
       const [result, setResult] = useState(null);
       const [error, setError] = useState(null);
+      const [cleaningUp, setCleaningUp] = useState(false);
+      const [cleanupResult, setCleanupResult] = useState(null);
+
+      const handleCleanup = async () => {
+        if (!confirm('This will delete all catalog mappings and ALL products. Are you sure? This cannot be undone!')) {
+          return;
+        }
+
+        setCleaningUp(true);
+        setError(null);
+        setCleanupResult(null);
+
+        try {
+          const response = await fetch('/api/catalog/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deleteProducts: true }),
+          });
+
+          const data = await response.json();
+          if (response.ok) {
+            setCleanupResult(data);
+            // Clear sync result since mappings are gone
+            setResult(null);
+          } else {
+            setError(data.message || 'Cleanup failed');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to cleanup catalog');
+        } finally {
+          setCleaningUp(false);
+        }
+      };
 
       const handleSync = async () => {
         setLoading(true);
@@ -452,6 +485,31 @@
       return (
         <div>
           <h2>Catalog Sync</h2>
+          <div style={{ marginBottom: '20px', padding: '15px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '4px' }}>
+            <strong>⚠️ Cleanup Option:</strong> Use the cleanup button below to delete ALL related records (cost approvals, catalog mappings, supplier products, cost history, inventory, sale items, placements) and ALL products to start completely fresh. This will remove all products and their relationships from the database.
+          </div>
+          <div style={{ marginBottom: '20px' }}>
+            <button 
+              onClick={handleCleanup} 
+              disabled={cleaningUp}
+              style={{ 
+                background: cleaningUp ? '#6c757d' : '#dc3545', 
+                color: 'white',
+                padding: '10px 20px',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: cleaningUp ? 'not-allowed' : 'pointer',
+                marginRight: '10px'
+              }}
+            >
+              {cleaningUp ? 'Cleaning Up...' : '🧹 Cleanup Catalog (Delete Mappings & Clear Square Data)'}
+            </button>
+            {cleanupResult && (
+              <div className="success" style={{ marginTop: '10px' }}>
+                <strong>Cleanup Complete:</strong> Deleted {cleanupResult.data?.costApprovalsDeleted || 0} cost approvals, {cleanupResult.data?.mappingsDeleted || 0} mappings, {cleanupResult.data?.supplierProductsDeleted || 0} supplier products, {cleanupResult.data?.costHistoryDeleted || 0} cost history records, {cleanupResult.data?.inventoryDeleted || 0} inventory records, {cleanupResult.data?.saleItemsDeleted || 0} sale items, {cleanupResult.data?.placementsDeleted || 0} placements, {cleanupResult.data?.productsDeleted || 0} products deleted, {cleanupResult.data?.productsUpdated || 0} products updated
+              </div>
+            )}
+          </div>
           <div className="form-group">
             <label>Location ID (optional):</label>
             <input
@@ -590,6 +648,7 @@
               <tr>
                 <th>ID</th>
                 <th>Name</th>
+                <th>Square Product Name</th>
                 <th>SKU</th>
                 <th>Category</th>
                 <th>Mappings</th>
@@ -601,6 +660,7 @@
                 <tr key={product.id}>
                   <td><code>{product.id.substring(0, 8)}...</code></td>
                   <td>{product.name}</td>
+                  <td>{product.squareProductName || '-'}</td>
                   <td>{product.sku || '-'}</td>
                   <td>{product.category?.name || '-'}</td>
                   <td><span className="badge badge-info">{product.catalogMappings?.length || 0}</span></td>
@@ -1683,7 +1743,17 @@
       const [openAutocomplete, setOpenAutocomplete] = useState({});
       const [supplierNameMappings, setSupplierNameMappings] = useState([]); // Track supplier name changes: [{ supplierOriginal: 'L', new: 'Levi' }]
       const [allSuppliers, setAllSuppliers] = useState([]); // All suppliers with initials for autocomplete
-      const [activeTab, setActiveTab] = useState('WITH_EXTRACTION'); // Active tab: 'WITH_EXTRACTION', 'TOTAL_PRODUCTS', 'REMAINING'
+      const [activeTab, setActiveTab] = useState('EXTRACTED'); // Active tab: 'EXTRACTED', 'WITH_EXTRACTION', 'MANUAL_INPUT', 'TOTAL_PRODUCTS', 'REMAINING'
+      const [migrationSectionTab, setMigrationSectionTab] = useState('configuration'); // Active migration section tab: 'configuration', 'cost-extraction', 'migration'
+      
+      // Batch approval state
+      const [extractionApproved, setExtractionApproved] = useState(false);
+      const [manualInputApproved, setManualInputApproved] = useState(false);
+      const [currentBatchId, setCurrentBatchId] = useState(null);
+      const [supplierInitialsMap, setSupplierInitialsMap] = useState({});
+      
+      // Track when dropdown selection is made to prevent onBlur from using wrong value
+      const dropdownSelectionRef = useRef({});
 
       // Close autocomplete when clicking outside
       useEffect(() => {
@@ -1724,7 +1794,10 @@
 
         // 1. First, check if input matches a supplier initial (case-insensitive) - EXACT match
         const initialMatches = allSuppliers
-          .filter(s => s.initials && s.initials.toLowerCase() === searchTerm && s.isActive)
+          .filter(s => {
+            const initials = Array.isArray(s.initials) ? s.initials : (s.initials ? [s.initials] : []);
+            return initials.some(init => init.toLowerCase() === searchTerm.toLowerCase()) && s.isActive;
+          })
           .map(s => ({ id: s.id, name: s.name, contactInfo: s.contactInfo, matchType: 'initial', isExactMatch: true }));
 
         if (initialMatches.length > 0) {
@@ -1930,7 +2003,10 @@
                       // First, try to match by supplier initial (case-insensitive)
                       const supplierInitial = originalSupplier.trim().toLowerCase();
                       const matchedByInitial = allSuppliers.find(s => 
-                        s.initials && s.initials.toLowerCase() === supplierInitial && s.isActive
+                        (() => {
+                          const initials = Array.isArray(s.initials) ? s.initials : (s.initials ? [s.initials] : []);
+                          return initials.some(init => init.toLowerCase() === supplierInitial.toLowerCase()) && s.isActive;
+                        })()
                       );
                       
                       if (matchedByInitial) {
@@ -2010,7 +2086,28 @@
             setExtractionResult(result);
             if (result.extractionSessionId) {
               setCurrentExtractionSessionId(result.extractionSessionId);
+              
+              // Fetch session to get current batch ID
+              try {
+                const sessionResponse = await fetch(`/admin/inventory/cutover/extraction-session/${result.extractionSessionId}`);
+                const sessionData = await sessionResponse.json();
+                if (sessionData.success && sessionData.session.batches && sessionData.session.batches.length > 0) {
+                  // Get the latest batch (current batch)
+                  const latestBatch = sessionData.session.batches[sessionData.session.batches.length - 1];
+                  setCurrentBatchId(latestBatch.id);
+                  
+                  // Load learned supplier initials
+                  if (sessionData.session.learnedSupplierInitials) {
+                    setSupplierInitialsMap(sessionData.session.learnedSupplierInitials);
+                  }
+                }
+              } catch (err) {
+                console.warn('Failed to fetch session details:', err);
+              }
             }
+            // Reset approval checkboxes for new batch
+            setExtractionApproved(false);
+            setManualInputApproved(false);
             // Allow moving to approve step even if incomplete
             // User can choose to review partial results or continue extraction
           } else {
@@ -2023,7 +2120,152 @@
         }
       };
 
+      const handleApproveBatch = async () => {
+        if (!extractionResult || !currentBatchId || !currentExtractionSessionId) {
+          setError('Missing batch or session information');
+          return;
+        }
+
+        // Validate both checkboxes are checked
+        if (!extractionApproved || !manualInputApproved) {
+          setError('Both extraction and manual input items must be approved to continue');
+          return;
+        }
+
+        setLoading(true);
+        setError(null);
+
+        try {
+          // Use edited results if available, otherwise use original
+          const resultsToUse = Object.keys(editedExtractionResults).length > 0
+            ? extractionResult.extractionResults.map(r => editedExtractionResults[r.productId] || r)
+            : extractionResult.extractionResults;
+
+          const approvedCostsArray = resultsToUse
+            .filter(r => {
+              // Include already-approved products (they pass through)
+              if (r.isAlreadyApproved) {
+                return true;
+              }
+              const cost = r.selectedCost || (r.extractedEntries.length > 0 ? r.extractedEntries[r.extractedEntries.length - 1]?.amount : null);
+              return cost !== null && cost !== undefined;
+            })
+            .map(r => {
+              // Handle already-approved products
+              if (r.isAlreadyApproved) {
+                const approvedCost = r.existingApprovedCost 
+                  ? (typeof r.existingApprovedCost === 'object' && r.existingApprovedCost.toNumber 
+                      ? r.existingApprovedCost.toNumber() 
+                      : r.existingApprovedCost)
+                  : r.selectedCost || 0;
+                return {
+                  productId: r.productId,
+                  cost: approvedCost,
+                  source: 'ALREADY_APPROVED',
+                  supplierId: null,
+                  supplierName: 'General',
+                  isPreferred: false,
+                };
+              }
+              
+              const edited = editedExtractionResults[r.productId] || r;
+              const selectedEntry = edited.extractedEntries.find(e => e.isSelected) 
+                || (edited.extractedEntries.length > 0 ? edited.extractedEntries[edited.extractedEntries.length - 1] : null);
+              const cost = edited.selectedCost !== null && edited.selectedCost !== undefined 
+                ? edited.selectedCost 
+                : (selectedEntry ? (selectedEntry.editedCost !== null && selectedEntry.editedCost !== undefined ? selectedEntry.editedCost : selectedEntry.amount) : null);
+              const supplierId = edited.selectedSupplierId || selectedEntry?.supplierId || null;
+              const supplierName = edited.selectedSupplierName || (selectedEntry ? (selectedEntry.editedSupplierName || selectedEntry.supplier) : null) || 'General';
+              const preferredSupplierName = edited.preferredSupplierName !== undefined ? edited.preferredSupplierName : supplierName;
+              const isPreferred = preferredSupplierName === supplierName;
+
+              return {
+                productId: r.productId,
+                cost: cost,
+                source: edited.extractedEntries.length > 0 ? 'EXTRACTED_SELECTED' : 'MANUAL_INPUT',
+                supplierId: supplierId,
+                supplierName: supplierName,
+                isPreferred: isPreferred,
+              };
+            });
+
+          // Collect entries to add to supplier history
+          const entriesToAddToHistory = [];
+          resultsToUse.forEach(r => {
+            const edited = editedExtractionResults[r.productId] || r;
+            edited.extractedEntries.forEach((entry, idx) => {
+              const shouldAdd = entry.addToHistory !== undefined 
+                ? entry.addToHistory 
+                : (idx === edited.extractedEntries.length - 1);
+              
+              if (shouldAdd && entry.amount) {
+                const supplierName = entry.editedSupplierName || entry.supplier;
+                if (supplierName && supplierName.trim() && supplierName !== 'General') {
+                  entriesToAddToHistory.push({
+                    productId: r.productId,
+                    supplierName: supplierName.trim(),
+                    supplierId: entry.supplierId || null,
+                    cost: entry.amount,
+                    effectiveAt: null,
+                  });
+                }
+              }
+            });
+          });
+
+          // Collect supplier initials updates
+          const supplierInitialsUpdates = Object.entries(supplierInitialsMap).map(([supplierName, initials]) => ({
+            supplierName,
+            initials: Array.isArray(initials) ? initials : [initials],
+          }));
+
+          const response = await fetch('/admin/inventory/cutover/approve-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              extractionSessionId: currentExtractionSessionId,
+              batchId: currentBatchId,
+              extractionApproved: extractionApproved,
+              manualInputApproved: manualInputApproved,
+              approvedCosts: approvedCostsArray,
+              entriesToAddToHistory: entriesToAddToHistory.length > 0 ? entriesToAddToHistory : null,
+              supplierInitialsUpdates: supplierInitialsUpdates.length > 0 ? supplierInitialsUpdates : null,
+            }),
+          });
+
+          const data = await response.json();
+          if (response.ok && data.success) {
+            setApprovedCosts(approvedCostsArray.reduce((acc, ac) => {
+              acc[ac.productId] = ac.cost;
+              return acc;
+            }, {}));
+            
+            // If next batch is available, extract it; otherwise proceed to migration
+            if (data.nextBatchAvailable) {
+              // Continue extraction for next batch
+              await handleExtractCosts(true);
+              setStep('approve');
+            } else {
+              // All batches approved, proceed to migration
+              setStep('migrate');
+            }
+          } else {
+            setError(data.message || 'Failed to approve batch');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to approve batch');
+        } finally {
+          setLoading(false);
+        }
+      };
+
       const handleApproveCosts = async () => {
+        // Legacy function - redirect to batch approval if batch ID is available
+        if (currentBatchId && currentExtractionSessionId) {
+          return handleApproveBatch();
+        }
+        
+        // Fallback to old approval flow if no batch
         if (!extractionResult) return;
 
         setLoading(true);
@@ -2265,170 +2507,208 @@
             </div>
           )}
 
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">Cutover Date</label>
-            <input
-              type="date"
-              value={cutoverDate}
-              onChange={(e) => setCutoverDate(e.target.value)}
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              The date when the new system becomes the system of record.
-            </p>
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex justify-between items-center mb-2">
-              <label className="block text-sm font-medium text-gray-700">Target Locations</label>
-              <button 
-                onClick={fetchLocations} 
-                disabled={loadingLocations}
-                className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loadingLocations ? 'Loading...' : 'Refresh List'}
-              </button>
-            </div>
-            {locations.length === 0 ? (
-              <div className="p-4 bg-gray-50 rounded-lg text-gray-600 text-center border border-gray-200">
-                No locations found. Use the Locations module to sync locations from Square.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2 p-3 border border-gray-200 rounded-lg bg-white">
-                {locations.map(loc => (
-                  <label key={loc.id} className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer">
-                    <input
-                      type="radio"
-                      name="location"
-                      value={loc.id}
-                      checked={selectedLocation === loc.id}
-                      onChange={(e) => setSelectedLocation(e.target.value)}
-                      className="text-primary border-gray-300 focus:ring-primary"
-                    />
-                    <span className="ml-2 text-sm text-gray-700">
-                      {loc.name} {loc.squareId && <span className="text-gray-500">({loc.squareId})</span>}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">Cost Basis</label>
-            <select
-              value={costBasis}
-              onChange={(e) => setCostBasis(e.target.value)}
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
-            >
-              <option value="DESCRIPTION">$ Extract from Description</option>
-              <option value="SQUARE_COST">Square Cost</option>
-              <option value="MANUAL_INPUT">Manual Input</option>
-              <option value="AVERAGE_COST">Average Cost</option>
-            </select>
-            <p className="text-xs text-gray-500 mt-1">
-              Method used to determine the initial cost of inventory items.
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-gray-900">Processing Settings</h3>
-            
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">Migration Batch Size (items per batch)</label>
-              <input
-                type="number"
-                value={batchSize || ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setBatchSize(value === '' ? '' : (parseInt(value) || ''));
-                }}
-                placeholder="100"
-                min="1"
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Process migration in batches to avoid server timeouts. Leave empty for all at once.
-              </p>
-            </div>
-
-            {costBasis === 'DESCRIPTION' && (
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-gray-700">Cost Extraction Batch Size (items per batch)</label>
-                <input
-                  type="number"
-                  value={extractionBatchSize || ''}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setExtractionBatchSize(value === '' ? '' : (parseInt(value) || ''));
-                  }}
-                  placeholder="100"
-                  min="1"
-                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Required for 'Extract from Description'. Processes products to extract embedded costs.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Main Action Buttons - Only show on main form (extract step) */}
+          {/* Tab Navigation */}
           {step === 'extract' && (
-            <div className="flex justify-end gap-3 pt-4">
-              <button
-                onClick={() => {
-                  setSelectedLocation(null);
-                  setCutoverDate(new Date().toISOString().split('T')[0]);
-                  setCostBasis('DESCRIPTION');
-                  setBatchSize(100);
-                  setExtractionBatchSize(100);
-                  setExtractionResult(null);
-                  setError(null);
-                }}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+            <div className="flex gap-2 mb-6 border-b-2 border-gray-200">
+              <button 
+                className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                  migrationSectionTab === 'configuration' 
+                    ? 'border-primary text-primary font-semibold' 
+                    : 'border-transparent text-gray-600 hover:text-primary'
+                }`}
+                onClick={() => setMigrationSectionTab('configuration')}
               >
-                Cancel
+                Configuration
               </button>
-              <button
-                onClick={() => {
-                  if (costBasis === 'DESCRIPTION') {
-                    handleExtractCosts(false);
-                  } else {
-                    setStep('migrate');
-                    setApprovedCosts({});
-                  }
-                }}
-                disabled={loading || !selectedLocation}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              <button 
+                className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors relative ${
+                  migrationSectionTab === 'cost-extraction' 
+                    ? 'border-primary text-primary font-semibold' 
+                    : 'border-transparent text-gray-600 hover:text-primary'
+                } ${costBasis === 'DESCRIPTION' ? '' : 'opacity-60'}`}
+                onClick={() => setMigrationSectionTab('cost-extraction')}
+                title={costBasis !== 'DESCRIPTION' ? 'Cost extraction is only required for "Extract from Description" cost basis' : ''}
               >
-                <span>►</span> Start Migration
+                Cost Extraction
+                {costBasis === 'DESCRIPTION' && (
+                  <span className="ml-2 text-xs font-semibold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
+                    Required
+                  </span>
+                )}
+              </button>
+              <button 
+                className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                  migrationSectionTab === 'migration' 
+                    ? 'border-primary text-primary font-semibold' 
+                    : 'border-transparent text-gray-600 hover:text-primary'
+                }`}
+                onClick={() => setMigrationSectionTab('migration')}
+              >
+                Migration
               </button>
             </div>
           )}
 
-          {/* Warning Banner */}
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
-            <span className="text-yellow-600 text-xl">⚠️</span>
-            <p className="text-sm text-yellow-800">
-              System will be locked for editing during the migration process.
-            </p>
-          </div>
+          {/* Configuration Tab */}
+          {step === 'extract' && migrationSectionTab === 'configuration' && (
+            <div className="space-y-6">
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-gray-700">Cutover Date</label>
+                <input
+                  type="date"
+                  value={cutoverDate}
+                  onChange={(e) => setCutoverDate(e.target.value)}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  The date when the new system becomes the system of record.
+                </p>
+              </div>
 
-          {/* Step-based content */}
-          {step === 'extract' && (
+              <div className="space-y-1">
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Target Locations</label>
+                  <button 
+                    onClick={fetchLocations} 
+                    disabled={loadingLocations}
+                    className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loadingLocations ? 'Loading...' : 'Refresh List'}
+                  </button>
+                </div>
+                {locations.length === 0 ? (
+                  <div className="p-4 bg-gray-50 rounded-lg text-gray-600 text-center border border-gray-200">
+                    No locations found. Use the Locations module to sync locations from Square.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2 p-3 border border-gray-200 rounded-lg bg-white">
+                    {locations.map(loc => (
+                      <label key={loc.id} className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <input
+                          type="radio"
+                          name="location"
+                          value={loc.id}
+                          checked={selectedLocation === loc.id}
+                          onChange={(e) => setSelectedLocation(e.target.value)}
+                          className="text-primary border-gray-300 focus:ring-primary"
+                        />
+                        <span className="ml-2 text-sm text-gray-700">
+                          {loc.name} {loc.squareId && <span className="text-gray-500">({loc.squareId})</span>}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-sm font-medium text-gray-700">Cost Basis</label>
+                <select
+                  value={costBasis}
+                  onChange={(e) => {
+                    setCostBasis(e.target.value);
+                    // Auto-switch to cost extraction tab if DESCRIPTION is selected
+                    if (e.target.value === 'DESCRIPTION') {
+                      setMigrationSectionTab('cost-extraction');
+                    }
+                  }}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+                >
+                  <option value="DESCRIPTION">$ Extract from Description</option>
+                  <option value="SQUARE_COST">Square Cost</option>
+                  <option value="MANUAL_INPUT">Manual Input</option>
+                  <option value="AVERAGE_COST">Average Cost</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Method used to determine the initial cost of inventory items.
+                </p>
+                {costBasis === 'DESCRIPTION' && (
+                  <p className="text-xs text-red-600 mt-1 font-medium">
+                    ⚠️ Cost extraction is required for this cost basis. Please complete the Cost Extraction step before proceeding.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-gray-900">Processing Settings</h3>
+                
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">Migration Batch Size (items per batch)</label>
+                  <input
+                    type="number"
+                    value={batchSize || ''}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setBatchSize(value === '' ? '' : (parseInt(value) || ''));
+                    }}
+                    placeholder="100"
+                    min="1"
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Process migration in batches to avoid server timeouts. Leave empty for all at once.
+                  </p>
+                </div>
+
+                {costBasis === 'DESCRIPTION' && (
+                  <div className="space-y-1">
+                    <label className="block text-sm font-medium text-gray-700">Cost Extraction Batch Size (items per batch)</label>
+                    <input
+                      type="number"
+                      value={extractionBatchSize || ''}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setExtractionBatchSize(value === '' ? '' : (parseInt(value) || ''));
+                      }}
+                      placeholder="100"
+                      min="1"
+                      className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Required for 'Extract from Description'. Processes products to extract embedded costs.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Warning Banner */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
+                <span className="text-yellow-600 text-xl">⚠️</span>
+                <p className="text-sm text-yellow-800">
+                  System will be locked for editing during the migration process.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Cost Extraction Tab */}
+          {step === 'extract' && migrationSectionTab === 'cost-extraction' && (
             <div className="space-y-6">
               {costBasis === 'DESCRIPTION' ? (
                 <div className="space-y-4">
-                  <p className="text-gray-600">
-                    Cost extraction is required for "Extract from Description" cost basis.
-                    This will process all products to extract costs from their descriptions.
-                  </p>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+                    <span className="text-blue-600 text-xl">ℹ️</span>
+                    <div>
+                      <h3 className="font-semibold text-blue-800 mb-1">Cost Extraction Required</h3>
+                      <p className="text-sm text-blue-700">
+                        Cost extraction is required for "Extract from Description" cost basis.
+                        This will process all products to extract costs from their descriptions.
+                        You must complete this step before proceeding to migration.
+                      </p>
+                    </div>
+                  </div>
                   
-                  {extractionResult && !extractionResult.isComplete && (
+                  {extractionResult && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                       <h4 className="font-semibold text-yellow-800 mb-2">Extraction Batch Progress</h4>
-                      <p className="text-sm text-yellow-700 mb-1"><strong>Batch:</strong> {extractionResult.currentBatch} / {extractionResult.totalBatches}</p>
+                      <p className="text-sm text-yellow-700 mb-1">
+                        <strong>Batch:</strong> {extractionResult.currentBatch} / {extractionResult.totalBatches}
+                        {currentBatchId && (
+                          <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                            Batch ID: {currentBatchId.substring(0, 8)}...
+                          </span>
+                        )}
+                      </p>
                       <p className="text-sm text-yellow-700 mb-3"><strong>Processed:</strong> {extractionResult.processedItems} / {extractionResult.totalItems} items</p>
                       <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
                         <div 
@@ -2440,6 +2720,13 @@
                         Products Extracted: {extractionResult.productsWithExtraction} | 
                         Requiring Manual Input: {extractionResult.productsRequiringManualInput}
                       </p>
+                      {extractionApproved && manualInputApproved && currentBatchId && (
+                        <div className="mt-3 pt-3 border-t border-yellow-300">
+                          <p className="text-sm font-medium text-green-700">
+                            ✓ Batch approval ready - Both checkboxes checked
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2484,22 +2771,86 @@
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <p className="text-gray-600">
-                    Cost extraction is not required for "{costBasis}" cost basis.
-                    You can proceed directly to migration.
-                  </p>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <p className="text-gray-600">
+                      Cost extraction is not required for "{costBasis}" cost basis.
+                      You can proceed directly to migration.
+                    </p>
+                  </div>
                   <button 
                     onClick={() => {
+                      setMigrationSectionTab('migration');
                       setStep('migrate');
                       setApprovedCosts({});
                     }} 
                     disabled={loading || !selectedLocation}
                     className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Skip Extraction & Proceed to Migration
+                    Proceed to Migration
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Migration Tab */}
+          {step === 'extract' && migrationSectionTab === 'migration' && (
+            <div className="space-y-6">
+              {costBasis === 'DESCRIPTION' && !extractionResult && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                  <span className="text-red-600 text-xl">⚠️</span>
+                  <div>
+                    <h3 className="font-semibold text-red-800 mb-1">Cost Extraction Required</h3>
+                    <p className="text-sm text-red-700">
+                      You must complete the Cost Extraction step before proceeding with migration.
+                      Please go to the "Cost Extraction" tab and extract costs first.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {costBasis === 'DESCRIPTION' && extractionResult && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
+                  <span className="text-green-600 text-xl">✓</span>
+                  <div>
+                    <h3 className="font-semibold text-green-800 mb-1">Cost Extraction Complete</h3>
+                    <p className="text-sm text-green-700">
+                      Cost extraction has been completed. You can now proceed with the migration.
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setSelectedLocation(null);
+                    setCutoverDate(new Date().toISOString().split('T')[0]);
+                    setCostBasis('DESCRIPTION');
+                    setBatchSize(100);
+                    setExtractionBatchSize(100);
+                    setExtractionResult(null);
+                    setError(null);
+                    setMigrationSectionTab('configuration');
+                  }}
+                  className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (costBasis === 'DESCRIPTION' && !extractionResult) {
+                      setError('Please complete cost extraction before proceeding with migration.');
+                      setMigrationSectionTab('cost-extraction');
+                      return;
+                    }
+                    setStep('migrate');
+                    setApprovedCosts({});
+                  }}
+                  disabled={loading || !selectedLocation || (costBasis === 'DESCRIPTION' && !extractionResult)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <span>►</span> Start Migration
+                </button>
+              </div>
             </div>
           )}
 
@@ -2534,8 +2885,132 @@
                   </div>
                 )}
 
+                {/* Batch Approval Checkboxes */}
+                {currentBatchId && (
+                  <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6 shadow-sm">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Batch Approval</h3>
+                    <div className="space-y-4">
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          id="extractionApproved"
+                          checked={extractionApproved}
+                          onChange={(e) => setExtractionApproved(e.target.checked)}
+                          className="mt-1 h-5 w-5 text-primary focus:ring-primary border-gray-300 rounded"
+                        />
+                        <label htmlFor="extractionApproved" className="flex-1 cursor-pointer">
+                          <span className="font-medium text-gray-900">Approve Extracted Items</span>
+                          <p className="text-sm text-gray-600 mt-1">
+                            Approve all items with extracted costs ({extractionResult.productsWithExtraction} products)
+                          </p>
+                        </label>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          id="manualInputApproved"
+                          checked={manualInputApproved}
+                          onChange={(e) => setManualInputApproved(e.target.checked)}
+                          className="mt-1 h-5 w-5 text-primary focus:ring-primary border-gray-300 rounded"
+                        />
+                        <label htmlFor="manualInputApproved" className="flex-1 cursor-pointer">
+                          <span className="font-medium text-gray-900">Approve Manual Input Items</span>
+                          <p className="text-sm text-gray-600 mt-1">
+                            Approve all items requiring manual input ({extractionResult.productsRequiringManualInput} products)
+                          </p>
+                        </label>
+                      </div>
+                      {extractionApproved && manualInputApproved && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-3 mt-4">
+                          <p className="text-sm text-green-800">
+                            ✓ Both approval checkboxes are checked. You can now approve the batch and continue.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Supplier Initials Management */}
+                {Object.keys(supplierInitialsMap).length > 0 && (
+                  <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6 shadow-sm">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Supplier Initials Management</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      These initials will be used to infer supplier names in future extraction batches.
+                    </p>
+                    <div className="space-y-3">
+                      {Object.entries(supplierInitialsMap).map(([supplierName, initials]) => (
+                        <div key={supplierName} className="border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium text-gray-900">{supplierName}</span>
+                            <button
+                              onClick={() => {
+                                const initial = prompt(`Enter a new initial for "${supplierName}":`);
+                                if (initial && initial.trim()) {
+                                  setSupplierInitialsMap(prev => {
+                                    const current = prev[supplierName] || [];
+                                    if (!current.includes(initial.trim())) {
+                                      return {
+                                        ...prev,
+                                        [supplierName]: [...current, initial.trim()]
+                                      };
+                                    }
+                                    return prev;
+                                  });
+                                }
+                              }}
+                              className="text-xs px-2 py-1 bg-primary text-white rounded hover:bg-primary-hover"
+                            >
+                              + Add Initial
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {Array.isArray(initials) ? initials.map((initial, idx) => (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm"
+                              >
+                                {initial}
+                                <button
+                                  onClick={() => {
+                                    setSupplierInitialsMap(prev => {
+                                      const current = prev[supplierName] || [];
+                                      return {
+                                        ...prev,
+                                        [supplierName]: current.filter((_, i) => i !== idx)
+                                      };
+                                    });
+                                  }}
+                                  className="text-gray-500 hover:text-red-600"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            )) : (
+                              <span className="text-sm text-gray-500">No initials yet</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Tab Navigation */}
                 <div className="flex gap-4 mb-6 border-b border-gray-200">
+                  <button
+                    onClick={() => setActiveTab('EXTRACTED')}
+                    className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${
+                      activeTab === 'EXTRACTED'
+                        ? 'border-purple-600 text-purple-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Approved
+                    <span className="ml-2 text-xs font-semibold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                      {extractionResult.extractionResults.filter(r => r.isAlreadyApproved).length}
+                    </span>
+                  </button>
                   <button
                     onClick={() => setActiveTab('WITH_EXTRACTION')}
                     className={`px-6 py-3 font-medium text-sm transition-colors border-b-2 ${
@@ -2546,7 +3021,7 @@
                   >
                     With Extraction
                     <span className="ml-2 text-xs font-semibold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                      {extractionResult.productsWithExtraction}
+                      {extractionResult.extractionResults.filter(r => (r.extractedEntries || []).length > 0 && !r.isAlreadyApproved).length}
                     </span>
                   </button>
                   <button
@@ -2590,9 +3065,12 @@
               <div className="space-y-6 max-h-[600px] overflow-y-auto">
                 {extractionResult.extractionResults.filter(result => {
                   // Filter based on active tab
-                  if (activeTab === 'WITH_EXTRACTION') {
-                    // Show only items with extraction (including already-approved)
-                    return (result.extractedEntries || []).length > 0 || result.isAlreadyApproved;
+                  if (activeTab === 'EXTRACTED') {
+                    // Show only approved items
+                    return result.isAlreadyApproved === true;
+                  } else if (activeTab === 'WITH_EXTRACTION') {
+                    // Show only new items with extraction (excluding already-approved)
+                    return (result.extractedEntries || []).length > 0 && !result.isAlreadyApproved;
                   } else if (activeTab === 'MANUAL_INPUT') {
                     // Show only items requiring manual input (no extraction, not already approved)
                     return (result.extractedEntries || []).length === 0 && !result.isAlreadyApproved;
@@ -2845,20 +3323,24 @@
                               <span className="text-xs text-gray-500">Select the correct extraction below</span>
                             </div>
                             <div className="space-y-3">
-                              {editedResult.extractedEntries.map((entry, idx) => {
-                                const editedEntry = editedResult.extractedEntries[idx];
-                                const isSelected = editedEntry.isSelected !== undefined ? editedEntry.isSelected : (idx === editedResult.extractedEntries.length - 1);
+                              {(activeTab === 'EXTRACTED' ? [...editedResult.extractedEntries].reverse() : editedResult.extractedEntries).map((entry, idx) => {
+                                // Calculate original index for proper reference
+                                const originalIdx = activeTab === 'EXTRACTED' 
+                                  ? editedResult.extractedEntries.length - 1 - idx 
+                                  : idx;
+                                const editedEntry = editedResult.extractedEntries[originalIdx];
+                                const isSelected = editedEntry.isSelected !== undefined ? editedEntry.isSelected : (originalIdx === editedResult.extractedEntries.length - 1);
                                 const entrySupplierName = editedEntry.editedSupplierName !== undefined && editedEntry.editedSupplierName !== null 
                                   ? editedEntry.editedSupplierName 
-                                  : (entry.supplier || 'General');
-                                const entryCost = editedEntry.editedCost !== null && editedEntry.editedCost !== undefined ? editedEntry.editedCost : entry.amount;
+                                  : (editedEntry.supplier || 'General');
+                                const entryCost = editedEntry.editedCost !== null && editedEntry.editedCost !== undefined ? editedEntry.editedCost : editedEntry.amount;
                                 
                                 // Calculate default date: use extracted month if available, otherwise one week ago
                                 let defaultDateString;
-                                if (entry.month) {
+                                if (editedEntry.month) {
                                   // Convert month name to date (use first day of that month)
                                   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-                                  const monthIndex = monthNames.indexOf(entry.month);
+                                  const monthIndex = monthNames.indexOf(editedEntry.month);
                                   if (monthIndex !== -1) {
                                     const now = new Date();
                                     const currentYear = now.getFullYear();
@@ -2914,7 +3396,7 @@
                                 
                                 return (
                                   <div 
-                                    key={idx} 
+                                    key={`${result.productId}-${originalIdx}`} 
                                     className={`relative border rounded-lg p-4 transition-colors cursor-pointer group ${
                                       isSelected 
                                         ? 'border-2 border-primary bg-blue-50/50 shadow-sm ring-1 ring-primary/10' 
@@ -2944,7 +3426,7 @@
                                             // Unselect all entries for this product
                                             newResults[result.productId].extractedEntries = newResults[result.productId].extractedEntries.map((e, i) => ({
                                               ...e,
-                                              isSelected: i === idx,
+                                              isSelected: i === originalIdx,
                                             }));
                                             // Update selected cost and supplier
                                             newResults[result.productId].selectedCost = entryCost;
@@ -2970,11 +3452,11 @@
                                                 if (!newResults[result.productId]) {
                                                   newResults[result.productId] = { ...result };
                                                 }
-                                                if (!newResults[result.productId].extractedEntries[idx]) {
+                                                if (!newResults[result.productId].extractedEntries[originalIdx]) {
                                                   newResults[result.productId].extractedEntries = [...result.extractedEntries];
                                                 }
-                                                newResults[result.productId].extractedEntries[idx] = {
-                                                  ...newResults[result.productId].extractedEntries[idx],
+                                                newResults[result.productId].extractedEntries[originalIdx] = {
+                                                  ...newResults[result.productId].extractedEntries[originalIdx],
                                                   addToHistory: e.target.checked,
                                                 };
                                                 setEditedExtractionResults(newResults);
@@ -3005,11 +3487,11 @@
                                                     if (!newResults[result.productId].extractedEntries) {
                                                       newResults[result.productId].extractedEntries = [...result.extractedEntries];
                                                     }
-                                                    if (!newResults[result.productId].extractedEntries[idx]) {
-                                                      newResults[result.productId].extractedEntries[idx] = { ...result.extractedEntries[idx] };
+                                                    if (!newResults[result.productId].extractedEntries[originalIdx]) {
+                                                      newResults[result.productId].extractedEntries[originalIdx] = { ...result.extractedEntries[originalIdx] };
                                                     }
-                                                    newResults[result.productId].extractedEntries[idx] = {
-                                                      ...newResults[result.productId].extractedEntries[idx],
+                                                    newResults[result.productId].extractedEntries[originalIdx] = {
+                                                      ...newResults[result.productId].extractedEntries[originalIdx],
                                                       editedSupplierName: newSupplierName,
                                                       supplierId: null,
                                                     };
@@ -3038,21 +3520,21 @@
                                                     const localSuggestions = getSupplierSuggestions(inputValue, originalSupplierName);
                                                     
                                                     if (localSuggestions.length > 0) {
-                                                      setOpenAutocomplete(prev => ({ ...prev, [`${result.productId}_${idx}`]: true }));
+                                                      setOpenAutocomplete(prev => ({ ...prev, [`${result.productId}_${originalIdx}`]: true }));
                                                       setSupplierSuggestions(prev => ({
                                                         ...prev,
-                                                        [`${result.productId}_${idx}`]: localSuggestions
+                                                        [`${result.productId}_${originalIdx}`]: localSuggestions
                                                       }));
                                                     } else if (inputValue.length > 1) {
                                                       // Fallback to API call if no local matches
-                                                      setOpenAutocomplete(prev => ({ ...prev, [`${result.productId}_${idx}`]: true }));
+                                                      setOpenAutocomplete(prev => ({ ...prev, [`${result.productId}_${originalIdx}`]: true }));
                                                       fetch(`/admin/inventory/cutover/suppliers/suggest?q=${encodeURIComponent(inputValue)}`)
                                                         .then(res => res.json())
                                                         .then(data => {
                                                           if (data.success) {
                                                             setSupplierSuggestions(prev => ({
                                                               ...prev,
-                                                              [`${result.productId}_${idx}`]: data.suppliers
+                                                              [`${result.productId}_${originalIdx}`]: data.suppliers
                                                             }));
                                                           }
                                                         })
@@ -3060,16 +3542,56 @@
                                                     } else {
                                                       setOpenAutocomplete(prev => {
                                                         const newState = { ...prev };
-                                                        delete newState[`${result.productId}_${idx}`];
+                                                        delete newState[`${result.productId}_${originalIdx}`];
                                                         return newState;
                                                       });
                                                     }
                                                   } else {
                                                     setOpenAutocomplete(prev => {
                                                       const newState = { ...prev };
-                                                      delete newState[`${result.productId}_${idx}`];
+                                                      delete newState[`${result.productId}_${originalIdx}`];
                                                       return newState;
                                                     });
+                                                  }
+                                                }}
+                                                onBlur={(e) => {
+                                                  const inputKey = `${result.productId}_${originalIdx}`;
+                                                  
+                                                  // Skip if dropdown selection was just made (it handles the prompt)
+                                                  if (dropdownSelectionRef.current[inputKey]) {
+                                                    delete dropdownSelectionRef.current[inputKey];
+                                                    return;
+                                                  }
+                                                  
+                                                  // Prompt to add initial when user finishes editing (on blur)
+                                                  const originalSupplierName = entry.supplier;
+                                                  const newSupplierName = e.target.value.trim();
+                                                  
+                                                  // Only prompt if supplier name changed from original and both are valid
+                                                  if (originalSupplierName && newSupplierName && 
+                                                      originalSupplierName !== newSupplierName &&
+                                                      originalSupplierName.trim().length > 0 &&
+                                                      newSupplierName.trim().length > 0) {
+                                                    // Check if initial already exists to avoid duplicate prompts
+                                                    const currentInitials = supplierInitialsMap[newSupplierName] || [];
+                                                    if (!currentInitials.includes(originalSupplierName)) {
+                                                      // Prompt to add initial
+                                                      const shouldAdd = window.confirm(
+                                                        `Add "${originalSupplierName}" as an initial for "${newSupplierName}"?`
+                                                      );
+                                                      if (shouldAdd) {
+                                                        setSupplierInitialsMap(prev => {
+                                                          const current = prev[newSupplierName] || [];
+                                                          if (!current.includes(originalSupplierName)) {
+                                                            return {
+                                                              ...prev,
+                                                              [newSupplierName]: [...current, originalSupplierName]
+                                                            };
+                                                          }
+                                                          return prev;
+                                                        });
+                                                      }
+                                                    }
                                                   }
                                                 }}
                                                 className={`block w-full rounded-md border shadow-sm focus:border-primary focus:ring-primary sm:text-sm ${
@@ -3078,24 +3600,39 @@
                                                     : 'border-gray-300 bg-white'
                                                 }`}
                                               />
-                                              {openAutocomplete[`${result.productId}_${idx}`] && supplierSuggestions[`${result.productId}_${idx}`] && supplierSuggestions[`${result.productId}_${idx}`].length > 0 && (
+                                              {openAutocomplete[`${result.productId}_${originalIdx}`] && supplierSuggestions[`${result.productId}_${originalIdx}`] && supplierSuggestions[`${result.productId}_${originalIdx}`].length > 0 && (
                                                 <div className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md mt-1 z-50 max-h-32 overflow-y-auto shadow-lg">
-                                                  {supplierSuggestions[`${result.productId}_${idx}`].map((supplier, suggestionIdx) => (
+                                                  {supplierSuggestions[`${result.productId}_${originalIdx}`].map((supplier, suggestionIdx) => (
                                                     <div
                                                       key={supplier.id || `suggestion-${suggestionIdx}`}
-                                                      onClick={() => {
+                                                      onMouseDown={(e) => {
+                                                        // Prevent input blur when clicking dropdown
+                                                        e.preventDefault();
+                                                      }}
+                                                      onClick={(e) => {
                                                         const originalSupplierName = entry.supplier;
                                                         const newSupplierName = supplier.name;
+                                                        const inputKey = `${result.productId}_${originalIdx}`;
+                                                        
+                                                        // Find the input element and update its value immediately
+                                                        // This ensures onBlur (if it fires) reads the correct value
+                                                        const inputElement = e.target.closest('.autocomplete-container')?.querySelector('input[type="text"]');
+                                                        if (inputElement) {
+                                                          inputElement.value = newSupplierName;
+                                                        }
+                                                        
+                                                        // Mark that dropdown selection was made to prevent onBlur from using wrong value
+                                                        dropdownSelectionRef.current[inputKey] = true;
                                                         
                                                         const newResults = { ...editedExtractionResults };
                                                         if (!newResults[result.productId]) {
                                                           newResults[result.productId] = { ...result };
                                                         }
-                                                        if (!newResults[result.productId].extractedEntries[idx]) {
+                                                        if (!newResults[result.productId].extractedEntries[originalIdx]) {
                                                           newResults[result.productId].extractedEntries = [...result.extractedEntries];
                                                         }
-                                                        newResults[result.productId].extractedEntries[idx] = {
-                                                          ...newResults[result.productId].extractedEntries[idx],
+                                                        newResults[result.productId].extractedEntries[originalIdx] = {
+                                                          ...newResults[result.productId].extractedEntries[originalIdx],
                                                           supplierId: supplier.id,
                                                           editedSupplierName: supplier.name,
                                                         };
@@ -3117,14 +3654,41 @@
                                                             return [...filtered, { supplierOriginal: originalSupplierName, new: newSupplierName }];
                                                           });
                                                         }
+                                                        
+                                                        // Prompt for initial confirmation immediately (no debounce) when selecting from dropdown
+                                                        // Use the selected supplier name, not the input value
+                                                        if (originalSupplierName && newSupplierName && 
+                                                            originalSupplierName !== newSupplierName &&
+                                                            originalSupplierName.trim().length > 0 &&
+                                                            newSupplierName.trim().length > 0) {
+                                                          const currentInitials = supplierInitialsMap[newSupplierName] || [];
+                                                          if (!currentInitials.includes(originalSupplierName)) {
+                                                            const shouldAdd = window.confirm(
+                                                              `Add "${originalSupplierName}" as an initial for "${newSupplierName}"?`
+                                                            );
+                                                            if (shouldAdd) {
+                                                              setSupplierInitialsMap(prev => {
+                                                                const current = prev[newSupplierName] || [];
+                                                                if (!current.includes(originalSupplierName)) {
+                                                                  return {
+                                                                    ...prev,
+                                                                    [newSupplierName]: [...current, originalSupplierName]
+                                                                  };
+                                                                }
+                                                                return prev;
+                                                              });
+                                                            }
+                                                          }
+                                                        }
+                                                        
                                                         setOpenAutocomplete(prev => {
                                                           const newState = { ...prev };
-                                                          delete newState[`${result.productId}_${idx}`];
+                                                          delete newState[`${result.productId}_${originalIdx}`];
                                                           return newState;
                                                         });
                                                         setSupplierSuggestions(prev => {
                                                           const newSuggestions = { ...prev };
-                                                          delete newSuggestions[`${result.productId}_${idx}`];
+                                                          delete newSuggestions[`${result.productId}_${originalIdx}`];
                                                           return newSuggestions;
                                                         });
                                                       }}
@@ -3464,11 +4028,11 @@
                   </button>
                 )}
                 <button 
-                  onClick={handleApproveCosts} 
-                  disabled={loading} 
+                  onClick={currentBatchId && currentExtractionSessionId ? handleApproveBatch : handleApproveCosts}
+                  disabled={loading || (currentBatchId && (!extractionApproved || !manualInputApproved))} 
                   className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {loading ? 'Approving...' : extractionResult.isComplete ? 'Approve All Costs' : `Approve Extracted Costs (${extractionResult.processedItems} items)`}
+                  {loading ? 'Approving...' : currentBatchId ? 'Approve Batch & Continue' : (extractionResult.isComplete ? 'Approve All Costs' : `Approve Extracted Costs (${extractionResult.processedItems} items)`)}
                 </button>
               </div>
             </div>
@@ -3589,11 +4153,13 @@
     }
 
     function Suppliers() {
+      const [activeSubsection, setActiveSubsection] = useState('management'); // 'management', 'products', 'cost-history'
       const [suppliers, setSuppliers] = useState([]);
       const [loading, setLoading] = useState(false);
       const [error, setError] = useState(null);
       const [editingId, setEditingId] = useState(null);
-      const [formData, setFormData] = useState({ name: '', initials: '', contactInfo: '', isActive: true });
+      const [formData, setFormData] = useState({ name: '', initials: [], contactInfo: '', isActive: true });
+      const [newInitial, setNewInitial] = useState('');
       const [showAddForm, setShowAddForm] = useState(false);
       const [filterActive, setFilterActive] = useState(true);
 
@@ -3632,14 +4198,15 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: formData.name.trim(),
-              initials: formData.initials.trim() || null,
+              initials: formData.initials.filter(i => i && i.trim().length > 0).map(i => i.trim()),
               contactInfo: formData.contactInfo.trim() || null,
             }),
           });
           const data = await response.json();
           if (data.success) {
             await fetchSuppliers();
-            setFormData({ name: '', initials: '', contactInfo: '', isActive: true });
+            setFormData({ name: '', initials: [], contactInfo: '', isActive: true });
+            setNewInitial('');
             setShowAddForm(false);
           } else {
             setError(data.message || 'Failed to create supplier');
@@ -3664,7 +4231,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: formData.name.trim(),
-              initials: formData.initials.trim() || null,
+              initials: formData.initials.filter(i => i && i.trim().length > 0).map(i => i.trim()),
               contactInfo: formData.contactInfo.trim() || null,
               isActive: formData.isActive,
             }),
@@ -3673,7 +4240,8 @@
           if (data.success) {
             await fetchSuppliers();
             setEditingId(null);
-            setFormData({ name: '', initials: '', contactInfo: '', isActive: true });
+            setFormData({ name: '', initials: [], contactInfo: '', isActive: true });
+            setNewInitial('');
           } else {
             setError(data.message || 'Failed to update supplier');
           }
@@ -3711,16 +4279,18 @@
         setEditingId(supplier.id);
         setFormData({
           name: supplier.name,
-          initials: supplier.initials || '',
+          initials: Array.isArray(supplier.initials) ? supplier.initials : (supplier.initials ? [supplier.initials] : []),
           contactInfo: supplier.contactInfo || '',
           isActive: supplier.isActive,
         });
+        setNewInitial('');
         setShowAddForm(false);
       };
 
       const cancelEdit = () => {
         setEditingId(null);
-        setFormData({ name: '', initials: '', contactInfo: '', isActive: true });
+        setFormData({ name: '', initials: [], contactInfo: '', isActive: true });
+        setNewInitial('');
         setShowAddForm(false);
       };
 
@@ -3730,8 +4300,47 @@
 
       return (
         <div className="max-w-7xl mx-auto bg-white rounded-xl shadow-sm p-6">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Suppliers</h2>
+            {/* Submenu Navigation */}
+            <div className="flex gap-2 border-b-2 border-gray-200">
+              <button
+                onClick={() => setActiveSubsection('management')}
+                className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                  activeSubsection === 'management'
+                    ? 'border-primary text-primary font-semibold'
+                    : 'border-transparent text-gray-600 hover:text-primary'
+                }`}
+              >
+                Management
+              </button>
+              <button
+                onClick={() => setActiveSubsection('products')}
+                className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                  activeSubsection === 'products'
+                    ? 'border-primary text-primary font-semibold'
+                    : 'border-transparent text-gray-600 hover:text-primary'
+                }`}
+              >
+                Supplier Products
+              </button>
+              <button
+                onClick={() => setActiveSubsection('cost-history')}
+                className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
+                  activeSubsection === 'cost-history'
+                    ? 'border-primary text-primary font-semibold'
+                    : 'border-transparent text-gray-600 hover:text-primary'
+                }`}
+              >
+                Supplier Cost History
+              </button>
+            </div>
+          </div>
+
+          {activeSubsection === 'management' && (
+            <>
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-900">Supplier Management</h2>
+            <h3 className="text-xl font-semibold text-gray-900">Supplier Management</h3>
             <div className="flex gap-3">
               <button
                 onClick={() => setFilterActive(!filterActive)}
@@ -3782,17 +4391,67 @@
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Initials/Abbreviation
+                    Initials/Abbreviations
                   </label>
-                  <input
-                    type="text"
-                    value={formData.initials}
-                    onChange={(e) => setFormData({ ...formData, initials: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                    placeholder="e.g., L (for cost extraction)"
-                    maxLength={10}
-                  />
-                  <p className="mt-1 text-xs text-gray-500">Used for cost extraction from product descriptions</p>
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={newInitial}
+                      onChange={(e) => setNewInitial(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const trimmed = newInitial.trim();
+                          if (trimmed && !formData.initials.includes(trimmed)) {
+                            setFormData({ ...formData, initials: [...formData.initials, trimmed] });
+                            setNewInitial('');
+                          }
+                        }
+                      }}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      placeholder="e.g., L, Lev, Levi"
+                      maxLength={20}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const trimmed = newInitial.trim();
+                        if (trimmed && !formData.initials.includes(trimmed)) {
+                          setFormData({ ...formData, initials: [...formData.initials, trimmed] });
+                          setNewInitial('');
+                        }
+                      }}
+                      className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-colors"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {formData.initials.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {formData.initials.map((initial, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium"
+                        >
+                          {initial}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData({
+                                ...formData,
+                                initials: formData.initials.filter((_, i) => i !== idx),
+                              });
+                            }}
+                            className="ml-1 text-blue-600 hover:text-blue-800 focus:outline-none"
+                            aria-label={`Remove ${initial}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="mt-1 text-xs text-gray-500">Add multiple initials used for cost extraction (e.g., L, Lev, Levi)</p>
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -3925,6 +4584,337 @@
 
           <div className="mt-4 text-sm text-gray-500">
             Showing {filteredSuppliers.length} of {suppliers.length} supplier(s)
+          </div>
+            </>
+          )}
+
+          {activeSubsection === 'products' && (
+            <SupplierProducts />
+          )}
+
+          {activeSubsection === 'cost-history' && (
+            <SupplierCostHistory />
+          )}
+        </div>
+      );
+    }
+
+    function SupplierProducts() {
+      const [supplierProducts, setSupplierProducts] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [selectedSupplier, setSelectedSupplier] = useState('');
+      const [suppliers, setSuppliers] = useState([]);
+
+      useEffect(() => {
+        fetchSuppliers();
+      }, []);
+
+      const fetchSuppliers = async () => {
+        try {
+          const response = await fetch('/admin/inventory/cutover/suppliers');
+          const data = await response.json();
+          if (data.success) {
+            setSuppliers(data.suppliers || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch suppliers:', err);
+        }
+      };
+
+      const fetchSupplierProducts = async (supplierId) => {
+        if (!supplierId) {
+          setSupplierProducts([]);
+          return;
+        }
+        setLoading(true);
+        setError(null);
+        try {
+          // TODO: Replace with actual API endpoint
+          const response = await fetch(`/admin/inventory/cutover/suppliers/${supplierId}/products`);
+          const data = await response.json();
+          if (data.success) {
+            setSupplierProducts(data.products || []);
+          } else {
+            setError(data.message || 'Failed to fetch supplier products');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to fetch supplier products');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        if (selectedSupplier) {
+          fetchSupplierProducts(selectedSupplier);
+        }
+      }, [selectedSupplier]);
+
+      return (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h3 className="text-xl font-semibold text-gray-900">Supplier Products</h3>
+          </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Select Supplier
+              </label>
+              <select
+                value={selectedSupplier}
+                onChange={(e) => setSelectedSupplier(e.target.value)}
+                className="w-full md:w-64 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              >
+                <option value="">-- Select a supplier --</option>
+                {suppliers.filter(s => s.isActive).map(supplier => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {loading && (
+              <div className="text-center py-8 text-gray-500">
+                Loading supplier products...
+              </div>
+            )}
+
+            {!loading && selectedSupplier && supplierProducts.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No products found for this supplier.
+              </div>
+            )}
+
+            {!loading && selectedSupplier && supplierProducts.length > 0 && (
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Product Name
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        SKU
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Cost
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Last Updated
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {supplierProducts.map((product) => (
+                      <tr key={product.id}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {product.productName || product.name || 'N/A'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {product.sku || '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          ${product.cost ? parseFloat(product.cost).toFixed(2) : '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {product.updatedAt ? new Date(product.updatedAt).toLocaleDateString() : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function SupplierCostHistory() {
+      const [costHistory, setCostHistory] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [selectedSupplier, setSelectedSupplier] = useState('');
+      const [selectedProduct, setSelectedProduct] = useState('');
+      const [suppliers, setSuppliers] = useState([]);
+      const [products, setProducts] = useState([]);
+
+      useEffect(() => {
+        fetchSuppliers();
+      }, []);
+
+      const fetchSuppliers = async () => {
+        try {
+          const response = await fetch('/admin/inventory/cutover/suppliers');
+          const data = await response.json();
+          if (data.success) {
+            setSuppliers(data.suppliers || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch suppliers:', err);
+        }
+      };
+
+      const fetchProducts = async (supplierId) => {
+        if (!supplierId) {
+          setProducts([]);
+          return;
+        }
+        try {
+          // TODO: Replace with actual API endpoint
+          const response = await fetch(`/admin/inventory/cutover/suppliers/${supplierId}/products`);
+          const data = await response.json();
+          if (data.success) {
+            setProducts(data.products || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch products:', err);
+        }
+      };
+
+      const fetchCostHistory = async (supplierId, productId) => {
+        if (!supplierId || !productId) {
+          setCostHistory([]);
+          return;
+        }
+        setLoading(true);
+        setError(null);
+        try {
+          // TODO: Replace with actual API endpoint
+          const response = await fetch(`/admin/inventory/cutover/suppliers/${supplierId}/products/${productId}/cost-history`);
+          const data = await response.json();
+          if (data.success) {
+            setCostHistory(data.costHistory || []);
+          } else {
+            setError(data.message || 'Failed to fetch cost history');
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to fetch cost history');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        if (selectedSupplier) {
+          fetchProducts(selectedSupplier);
+          setSelectedProduct('');
+          setCostHistory([]);
+        }
+      }, [selectedSupplier]);
+
+      useEffect(() => {
+        if (selectedSupplier && selectedProduct) {
+          fetchCostHistory(selectedSupplier, selectedProduct);
+        }
+      }, [selectedSupplier, selectedProduct]);
+
+      return (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h3 className="text-xl font-semibold text-gray-900">Supplier Cost History</h3>
+          </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Supplier
+                </label>
+                <select
+                  value={selectedSupplier}
+                  onChange={(e) => setSelectedSupplier(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                >
+                  <option value="">-- Select a supplier --</option>
+                  {suppliers.filter(s => s.isActive).map(supplier => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Product
+                </label>
+                <select
+                  value={selectedProduct}
+                  onChange={(e) => setSelectedProduct(e.target.value)}
+                  disabled={!selectedSupplier}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                >
+                  <option value="">-- Select a product --</option>
+                  {products.map(product => (
+                    <option key={product.id} value={product.id}>
+                      {product.productName || product.name || 'N/A'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {loading && (
+              <div className="text-center py-8 text-gray-500">
+                Loading cost history...
+              </div>
+            )}
+
+            {!loading && selectedSupplier && selectedProduct && costHistory.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No cost history found for this product.
+              </div>
+            )}
+
+            {!loading && selectedSupplier && selectedProduct && costHistory.length > 0 && (
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Effective Date
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Cost
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Created At
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {costHistory.map((history, idx) => (
+                      <tr key={idx}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {history.effectiveAt ? new Date(history.effectiveAt).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          ${history.cost ? parseFloat(history.cost).toFixed(2) : '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          {history.createdAt ? new Date(history.createdAt).toLocaleDateString() : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       );
