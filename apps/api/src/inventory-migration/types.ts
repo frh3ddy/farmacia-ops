@@ -1,5 +1,7 @@
 import { Prisma } from '@prisma/client';
 
+export type MigrationStatus = 'PENDING' | 'APPROVED' | 'SKIPPED';
+
 export interface CutoverInput {
   cutoverDate: Date;
   locationIds: string[];
@@ -40,6 +42,7 @@ export interface CostExtractionResult {
   imageUrl?: string | null; // Product image URL from Square catalog
   extractionErrors: string[];
   requiresManualReview: boolean;
+  migrationStatus?: MigrationStatus; // Migration status: PENDING, APPROVED, SKIPPED
   // Already approved cost metadata
   isAlreadyApproved?: boolean; // Whether this product already has an approved cost
   existingApprovedCost?: Prisma.Decimal; // The existing approved cost amount
@@ -154,6 +157,7 @@ export interface MigrationResult {
   totalBatches?: number | null;
   processedItems?: number | null;
   totalItems?: number | null;
+  skippedItems?: number; // Count of items that were SKIPPED and excluded from migration
   isComplete?: boolean;
   canContinue?: boolean;
 }
@@ -258,6 +262,28 @@ export interface BatchApprovalResponse {
   nextBatchAvailable: boolean;
   lastApprovedProductId: string;
   message: string;
+}
+
+export interface ExtractionSessionWithItems {
+  id: string;
+  cutoverId?: string | null;
+  locationIds: string[];
+  currentBatch: number;
+  totalBatches?: number | null;
+  totalItems: number;
+  processedItems: number;
+  batchSize: number;
+  lastApprovedBatchId?: string | null;
+  lastApprovedProductId?: string | null;
+  learnedSupplierInitials?: Record<string, string[]> | null;
+  status: 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  createdAt: Date;
+  updatedAt: Date;
+  itemsByStatus: {
+    pending: CostExtractionResult[];
+    approved: CostExtractionResult[];
+    skipped: CostExtractionResult[];
+  };
 }
 
 

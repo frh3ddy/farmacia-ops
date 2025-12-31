@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import {
   CutoverInput,
   CostExtractionResult,
@@ -101,6 +102,7 @@ export class InventoryMigrationService {
     costBasis: 'DESCRIPTION',
     batchSize?: number | null,
     extractionSessionId?: string | null,
+    newBatchSize?: number | null, // For resuming with different batch size
   ): Promise<CostApprovalRequest> {
     interface ItemToProcess {
       locationId: string;
@@ -142,12 +144,26 @@ export class InventoryMigrationService {
       }
     }
 
+    // Get SKIPPED product IDs to filter out
+    const skippedProductIds = new Set<string>();
+    if (dbSession) {
+      const skippedApprovals = await this.prisma.costApproval.findMany({
+        where: {
+          cutoverId: dbSession.cutoverId || sessionId,
+          migrationStatus: 'SKIPPED',
+        },
+        select: { productId: true },
+      });
+      skippedApprovals.forEach(a => skippedProductIds.add(a.productId));
+    }
+
     // Initialize Session if needed
     if (!dbSession) {
       const effectiveBatchSize = batchSize && batchSize > 0 ? batchSize : allItems.length;
       dbSession = await this.prisma.extractionSession.create({
         data: {
           id: sessionId,
+          cutoverId: sessionId, // Set cutoverId to sessionId for consistency
           locationIds,
           currentBatch: 1,
           totalBatches: Math.ceil(allItems.length / effectiveBatchSize),
@@ -159,7 +175,24 @@ export class InventoryMigrationService {
       });
     }
 
-    const effectiveBatchSize = dbSession.batchSize;
+    // Update batch size if resuming with new batch size
+    let effectiveBatchSize = dbSession.batchSize;
+    if (newBatchSize && newBatchSize > 0 && dbSession) {
+      effectiveBatchSize = newBatchSize;
+      // Recalculate total batches based on remaining items
+      const remainingItems = dbSession.totalItems - dbSession.processedItems;
+      const newTotalBatches = Math.ceil(remainingItems / effectiveBatchSize);
+      
+      await this.prisma.extractionSession.update({
+        where: { id: sessionId },
+        data: {
+          batchSize: effectiveBatchSize,
+          totalBatches: newTotalBatches,
+        },
+      });
+      dbSession.batchSize = effectiveBatchSize;
+      dbSession.totalBatches = newTotalBatches;
+    }
     // Simple pagination: Skip items based on processed count from DB
     const startIndex = (dbSession.currentBatch - 1) * effectiveBatchSize;
     const itemsToProcess = allItems.slice(startIndex, startIndex + effectiveBatchSize);
@@ -198,6 +231,9 @@ export class InventoryMigrationService {
       })
     ]);
 
+    // Filter out SKIPPED items from resolvedItems
+    const nonSkippedResolvedItems = resolvedItems.filter(item => !skippedProductIds.has(item.productId));
+
     const productMap = new Map(products.map(p => [p.id, p]));
     const approvalMap = new Map(); // Store only latest approval
     existingApprovals.forEach(a => {
@@ -235,7 +271,7 @@ export class InventoryMigrationService {
     let batchProductsWithExtraction = 0;
     let batchProductsRequiringManualInput = 0;
 
-    for (const item of resolvedItems) {
+    for (const item of nonSkippedResolvedItems) {
       const product = productMap.get(item.productId);
       if (!product) continue;
 
@@ -276,6 +312,15 @@ export class InventoryMigrationService {
       }
 
       if (existingApproval) {
+        // Extract supplier name from notes if available (format: "Supplier: {name}")
+        let supplierName = null;
+        if (existingApproval.notes) {
+          const match = existingApproval.notes.match(/Supplier:\s*(.+)/i);
+          if (match && match[1]) {
+            supplierName = match[1].trim();
+          }
+        }
+        
         // Already approved logic...
         extractionResults.push({
             productId: item.productId,
@@ -283,13 +328,15 @@ export class InventoryMigrationService {
             originalDescription: productName,
             extractedEntries: [],
             selectedCost: existingApproval.approvedCost.toNumber(),
+            selectedSupplierName: supplierName, // Include supplier name from notes
             extractionErrors: [],
             requiresManualReview: false,
             isAlreadyApproved: true,
             existingApprovedCost: existingApproval.approvedCost,
             existingApprovalDate: existingApproval.approvedAt,
             existingCutoverId: existingApproval.cutoverId,
-            imageUrl
+            imageUrl,
+            migrationStatus: (existingApproval as any).migrationStatus || 'PENDING',
         });
       } else {
         // Extraction logic
@@ -329,7 +376,8 @@ export class InventoryMigrationService {
           productName,
           originalDescription: productName,
           extractedEntries: enrichedEntries,
-          imageUrl
+          imageUrl,
+          migrationStatus: 'PENDING' as const,
         });
 
         if (extractionResult.extractedEntries.length > 0) batchProductsWithExtraction++;
@@ -339,28 +387,44 @@ export class InventoryMigrationService {
       batchProductIds.push(item.productId);
     }
 
-    // 7. Save State
-    const [batch] = await this.prisma.$transaction([
-      this.prisma.extractionBatch.create({
-        data: {
-          extractionSessionId: sessionId,
-          batchNumber: dbSession.currentBatch,
-          locationIds,
-          productIds: batchProductIds,
-          totalProducts: extractionResults.length,
-          productsWithExtraction: batchProductsWithExtraction,
-          productsRequiringManualInput: batchProductsRequiringManualInput,
-          status: 'EXTRACTED',
-        },
-      }),
-      this.prisma.extractionSession.update({
-        where: { id: sessionId },
-        data: {
-          processedItems: dbSession.processedItems + extractionResults.length,
-          status: (dbSession.totalBatches !== null && dbSession.currentBatch >= dbSession.totalBatches) ? 'COMPLETED' : 'IN_PROGRESS',
-        }
-      })
-    ]);
+    // 7. Check if batch already exists for current batch number (to avoid duplicates when resuming)
+    const existingBatch = await this.prisma.extractionBatch.findFirst({
+      where: {
+        extractionSessionId: sessionId,
+        batchNumber: dbSession.currentBatch,
+      },
+    });
+
+    let batch;
+    if (existingBatch) {
+      // Batch already exists, use it instead of creating a new one
+      batch = existingBatch;
+      // Don't update processedItems since this batch was already counted
+    } else {
+      // Create new batch
+      [batch] = await this.prisma.$transaction([
+        this.prisma.extractionBatch.create({
+          data: {
+            extractionSessionId: sessionId,
+            cutoverId: dbSession.cutoverId || sessionId, // Set cutoverId from session or fallback to sessionId
+            batchNumber: dbSession.currentBatch,
+            locationIds,
+            productIds: batchProductIds,
+            totalProducts: extractionResults.length,
+            productsWithExtraction: batchProductsWithExtraction,
+            productsRequiringManualInput: batchProductsRequiringManualInput,
+            status: 'EXTRACTED',
+          },
+        }),
+        this.prisma.extractionSession.update({
+          where: { id: sessionId },
+          data: {
+            processedItems: dbSession.processedItems + extractionResults.length,
+            status: (dbSession.totalBatches !== null && dbSession.currentBatch >= dbSession.totalBatches) ? 'COMPLETED' : 'IN_PROGRESS',
+          }
+        })
+      ]);
+    }
 
     return {
       cutoverId: sessionId,
@@ -423,6 +487,16 @@ export class InventoryMigrationService {
     if (!cutoverRecord) throw new CutoverValidationError('Cutover not found', []);
     if (cutoverRecord.status === 'COMPLETED') throw new CutoverValidationError('Cutover already completed', []);
 
+    // 2. Get SKIPPED product IDs to exclude from migration
+      const skippedApprovals = await this.prisma.costApproval.findMany({
+        where: {
+          cutoverId: cutoverRecord.id,
+          migrationStatus: 'SKIPPED',
+        },
+        select: { productId: true },
+      });
+    const skippedProductIds = new Set(skippedApprovals.map(a => a.productId));
+
     // 2. Fetch Square Inventory (Cached/Snapshot)
     // Optimization: Don't fetch everything if we are deep in batches. 
     // Ideally, we'd persist the square snapshot. 
@@ -469,6 +543,7 @@ export class InventoryMigrationService {
       totalBatches: Math.ceil(itemsToProcess.length / effectiveBatchSize),
       processedItems: cutoverRecord.processedItems || 0,
       totalItems: itemsToProcess.length,
+      skippedItems: skippedProductIds.size,
       isComplete: false,
       canContinue: false,
     };
@@ -495,7 +570,10 @@ export class InventoryMigrationService {
       return { ...item, productId: pid };
     }));
 
-    const uniquePids = [...new Set(resolvedBatch.map(i => i.productId))];
+    // Filter out SKIPPED items before processing
+    const nonSkippedBatch = resolvedBatch.filter(item => !skippedProductIds.has(item.productId));
+
+    const uniquePids = [...new Set(nonSkippedBatch.map(i => i.productId))];
 
     // B. Bulk Fetch Products
     const products = await this.prisma.product.findMany({
@@ -527,7 +605,7 @@ export class InventoryMigrationService {
     // We calculate costs NOW. If manual input is needed, we fail fast or collect errors.
     const calculatedCosts = new Map<string, Prisma.Decimal>(); // Key: `${locationId}:${productId}`
 
-    for (const item of resolvedBatch) {
+    for (const item of nonSkippedBatch) {
       const p = productMap.get(item.productId);
       if (!p) continue; // Will be handled in transaction error logic
 
@@ -558,7 +636,7 @@ export class InventoryMigrationService {
     // 5. TRANSACTION (Write Only)
     try {
       await this.prisma.$transaction(async (tx) => {
-        for (const item of resolvedBatch) {
+        for (const item of nonSkippedBatch) {
           const product = productMap.get(item.productId);
           if (!product) {
             result.errors.push({
@@ -781,6 +859,464 @@ export class InventoryMigrationService {
   // For previewCutover, similar optimizations regarding bulk fetch can be applied, but since it's "preview" and usually on-demand for specific subset or just logical check, standard loop is "okay" but better if bulk.
   
   // IMPORTANT: Placeholder implementations for methods not fully rewritten above to ensure file validity
+  /**
+   * Discard an item by marking it as SKIPPED
+   */
+  async discardItem(
+    cutoverId: string,
+    productId: string,
+  ): Promise<{ success: boolean }> {
+    try {
+      // Find or create CostApproval and mark as SKIPPED
+      await this.prisma.costApproval.upsert({
+        where: {
+          cutoverId_productId: {
+            cutoverId,
+            productId,
+          },
+        },
+        create: {
+          cutoverId,
+          productId,
+          approvedCost: new Prisma.Decimal(0),
+          source: 'SKIPPED',
+          migrationStatus: 'SKIPPED',
+        },
+        update: {
+          migrationStatus: 'SKIPPED',
+          source: 'SKIPPED',
+        },
+      });
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error(`Failed to discard item ${productId}: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Restore a SKIPPED item back to PENDING
+   */
+  async restoreItem(
+    cutoverId: string,
+    productId: string,
+  ): Promise<{ success: boolean }> {
+    try {
+      // Check if CostApproval record exists
+      const existing = await this.prisma.costApproval.findUnique({
+        where: {
+          cutoverId_productId: {
+            cutoverId,
+            productId,
+          },
+        },
+      });
+
+      if (!existing) {
+        // If no record exists, there's nothing to restore - item is already in PENDING state
+        // This can happen if the item was never approved or discarded
+        return { success: true };
+      }
+
+      // Update the migration status to PENDING
+      await this.prisma.costApproval.update({
+        where: {
+          cutoverId_productId: {
+            cutoverId,
+            productId,
+          },
+        },
+        data: {
+          migrationStatus: 'PENDING',
+        },
+      });
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error(`Failed to restore item ${productId}: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Approve an item by saving its cost approval to the database
+   * Also creates SupplierCostHistory and SupplierProduct records for all extracted entries
+   */
+  async approveItem(
+    cutoverId: string,
+    productId: string,
+    cost: number,
+    source: string = 'DESCRIPTION',
+    notes?: string | null,
+    extractedEntries?: Array<{
+      supplier: string;
+      amount: number;
+      supplierId?: string | null;
+      editedSupplierName?: string | null;
+      editedCost?: number | null;
+      editedEffectiveDate?: string | null;
+      isSelected?: boolean;
+    }>,
+    selectedSupplierId?: string | null,
+    selectedSupplierName?: string | null,
+  ): Promise<{ success: boolean }> {
+    try {
+      // Use a transaction to ensure all operations succeed or fail together
+      await this.prisma.$transaction(async (tx) => {
+        // 1. Save the cost approval
+        await tx.costApproval.upsert({
+          where: {
+            cutoverId_productId: {
+              cutoverId,
+              productId,
+            },
+          },
+          create: {
+            cutoverId,
+            productId,
+            approvedCost: new Prisma.Decimal(cost),
+            source,
+            migrationStatus: 'APPROVED',
+            notes: notes || null,
+          },
+          update: {
+            approvedCost: new Prisma.Decimal(cost),
+            source,
+            migrationStatus: 'APPROVED',
+            notes: notes || null,
+          },
+        });
+
+        // 2. Process extracted entries to create supplier cost history and supplier products
+        if (extractedEntries && extractedEntries.length > 0) {
+          const effectiveDate = new Date(); // Use current date as effective date
+          
+          // Group entries by supplier to handle multiple entries from the same supplier
+          const supplierGroups = new Map<string, Array<typeof extractedEntries[0]>>();
+          
+          for (const entry of extractedEntries) {
+            // Use edited supplier name if available, otherwise use original supplier name
+            const supplierName = entry.editedSupplierName || entry.supplier;
+            if (!supplierName || supplierName.trim().length === 0) {
+              continue; // Skip entries without supplier name
+            }
+            
+            if (!supplierGroups.has(supplierName)) {
+              supplierGroups.set(supplierName, []);
+            }
+            supplierGroups.get(supplierName)!.push(entry);
+          }
+
+          // Process each supplier group
+          for (const [supplierName, entries] of supplierGroups) {
+            // Find or create supplier
+            const supplier = await this.supplierService.findOrCreateSupplier(supplierName);
+            
+            // Determine the cost for SupplierProduct (use the most recent entry or selected entry)
+            let supplierProductCost = new Prisma.Decimal(0);
+            let isPreferred = false;
+            
+            // Find the selected entry or use the last entry
+            const selectedEntry = entries.find(e => e.isSelected) || entries[entries.length - 1];
+            if (selectedEntry) {
+              supplierProductCost = new Prisma.Decimal(
+                selectedEntry.editedCost !== null && selectedEntry.editedCost !== undefined
+                  ? selectedEntry.editedCost
+                  : selectedEntry.amount
+              );
+              // Mark as preferred if this is the selected supplier
+              isPreferred = supplier.id === selectedSupplierId || supplierName === selectedSupplierName;
+            }
+
+            // Create or update SupplierProduct
+            await tx.supplierProduct.upsert({
+              where: {
+                supplierId_productId: {
+                  supplierId: supplier.id,
+                  productId: productId,
+                },
+              },
+              create: {
+                supplierId: supplier.id,
+                productId: productId,
+                cost: supplierProductCost,
+                isPreferred: isPreferred,
+                notes: `Migrated from cutover ${cutoverId}`,
+              },
+              update: {
+                cost: supplierProductCost,
+                isPreferred: isPreferred,
+                notes: `Updated from cutover ${cutoverId}`,
+              },
+            });
+
+            // Create SupplierCostHistory entries for all entries from this supplier
+            // First, mark all existing history entries for this supplier+product as not current
+            await tx.supplierCostHistory.updateMany({
+              where: {
+                productId: productId,
+                supplierId: supplier.id,
+                isCurrent: true,
+              },
+              data: {
+                isCurrent: false,
+              },
+            });
+
+            // Create history entries for each cost entry
+            // Sort entries by date (if available) or use order, with selected entry last
+            const sortedEntries = [...entries].sort((a, b) => {
+              // Selected entry should be last
+              if (a.isSelected && !b.isSelected) return 1;
+              if (!a.isSelected && b.isSelected) return -1;
+              
+              // Sort by effective date if available
+              if (a.editedEffectiveDate && b.editedEffectiveDate) {
+                return new Date(a.editedEffectiveDate).getTime() - new Date(b.editedEffectiveDate).getTime();
+              }
+              
+              return 0;
+            });
+
+            // Find if there's a selected entry
+            const hasSelectedEntry = sortedEntries.some(e => e.isSelected);
+
+            for (let i = 0; i < sortedEntries.length; i++) {
+              const entry = sortedEntries[i];
+              const entryCost = new Prisma.Decimal(
+                entry.editedCost !== null && entry.editedCost !== undefined
+                  ? entry.editedCost
+                  : entry.amount
+              );
+              
+              const entryEffectiveDate = entry.editedEffectiveDate
+                ? new Date(entry.editedEffectiveDate)
+                : effectiveDate;
+
+              // The selected entry (if exists) or the last entry should be marked as current
+              const isCurrent = (hasSelectedEntry && entry.isSelected) || (!hasSelectedEntry && i === sortedEntries.length - 1);
+
+              await tx.supplierCostHistory.create({
+                data: {
+                  productId: productId,
+                  supplierId: supplier.id,
+                  unitCost: entryCost,
+                  effectiveAt: entryEffectiveDate,
+                  source: 'MIGRATION',
+                  isCurrent: isCurrent,
+                },
+              });
+            }
+          }
+        } else if (selectedSupplierName && selectedSupplierName.trim().length > 0) {
+          // If no extracted entries but we have a selected supplier, create records for it
+          const supplier = await this.supplierService.findOrCreateSupplier(selectedSupplierName);
+          
+          // Mark existing history as not current
+          await tx.supplierCostHistory.updateMany({
+            where: {
+              productId: productId,
+              supplierId: supplier.id,
+              isCurrent: true,
+            },
+            data: {
+              isCurrent: false,
+            },
+          });
+
+          // Create SupplierProduct
+          await tx.supplierProduct.upsert({
+            where: {
+              supplierId_productId: {
+                supplierId: supplier.id,
+                productId: productId,
+              },
+            },
+            create: {
+              supplierId: supplier.id,
+              productId: productId,
+              cost: new Prisma.Decimal(cost),
+              isPreferred: true,
+              notes: `Migrated from cutover ${cutoverId}`,
+            },
+            update: {
+              cost: new Prisma.Decimal(cost),
+              isPreferred: true,
+              notes: `Updated from cutover ${cutoverId}`,
+            },
+          });
+
+          // Create SupplierCostHistory entry
+          await tx.supplierCostHistory.create({
+            data: {
+              productId: productId,
+              supplierId: supplier.id,
+              unitCost: new Prisma.Decimal(cost),
+              effectiveAt: new Date(),
+              source: 'MIGRATION',
+              isCurrent: true,
+            },
+          });
+        }
+      });
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error(`Failed to approve item ${productId}: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Update batch size for an extraction session and recalculate total batches
+   */
+  async updateBatchSize(
+    extractionSessionId: string,
+    newBatchSize: number,
+  ): Promise<{ success: boolean; totalBatches: number }> {
+    try {
+      const session = await this.prisma.extractionSession.findUnique({
+        where: { id: extractionSessionId },
+      });
+
+      if (!session) {
+        throw new Error('Extraction session not found');
+      }
+
+      if (newBatchSize <= 0) {
+        throw new Error('Batch size must be greater than 0');
+      }
+
+      // Calculate remaining items (excluding SKIPPED)
+      const skippedProductIds = await this.prisma.costApproval.findMany({
+        where: {
+          cutoverId: session.cutoverId || extractionSessionId,
+          migrationStatus: 'SKIPPED',
+        },
+        select: { productId: true },
+      });
+      const skippedSet = new Set(skippedProductIds.map(a => a.productId));
+
+      // Get all product IDs from batches
+      const batches = await this.prisma.extractionBatch.findMany({
+        where: { extractionSessionId },
+        select: { productIds: true },
+      });
+      const allProductIds = new Set<string>();
+      batches.forEach(b => b.productIds.forEach(p => allProductIds.add(p)));
+
+      // Calculate remaining (non-skipped) items
+      const remainingItems = session.totalItems - session.processedItems - skippedSet.size;
+
+      // Recalculate total batches
+      const newTotalBatches = Math.ceil(remainingItems / newBatchSize);
+
+      await this.prisma.extractionSession.update({
+        where: { id: extractionSessionId },
+        data: {
+          batchSize: newBatchSize,
+          totalBatches: newTotalBatches,
+        },
+      });
+
+      return { success: true, totalBatches: newTotalBatches };
+    } catch (error) {
+      this.logger.error(`Failed to update batch size: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get extraction session with items grouped by status
+   */
+  async getExtractionSession(id: string): Promise<any> {
+    const session = await this.prisma.extractionSession.findUnique({
+      where: { id },
+      include: {
+        batches: {
+          orderBy: { batchNumber: 'asc' },
+        },
+      },
+    });
+
+    if (!session) {
+      return null;
+    }
+
+    // Get all product IDs from batches
+    const allProductIds = new Set<string>();
+    session.batches.forEach(b => b.productIds.forEach(p => allProductIds.add(p)));
+
+    // Get cost approvals grouped by status
+    const approvals = await this.prisma.costApproval.findMany({
+      where: {
+        productId: { in: Array.from(allProductIds) },
+        cutoverId: session.cutoverId || id,
+      },
+    });
+
+    // Group by status
+    const itemsByStatus = {
+      pending: [] as any[],
+      approved: [] as any[],
+      skipped: [] as any[],
+    };
+
+    // Return session with cost approvals included
+    return {
+      ...session,
+      itemsByStatus,
+      costApprovals: approvals, // Include cost approvals so frontend can extract supplier from notes
+    };
+  }
+
+  async listExtractionSessions(locationId?: string): Promise<any[]> {
+    const where: any = {
+      status: { in: ['IN_PROGRESS', 'COMPLETED'] },
+    };
+
+    if (locationId) {
+      where.locationIds = { has: locationId };
+    }
+
+    const sessions = await this.prisma.extractionSession.findMany({
+      where,
+      include: {
+        batches: {
+          orderBy: { batchNumber: 'asc' },
+          select: {
+            id: true,
+            batchNumber: true,
+            status: true,
+            totalProducts: true,
+            extractedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50, // Limit to recent 50 sessions
+    });
+
+    return sessions.map(session => ({
+      id: session.id,
+      locationIds: session.locationIds,
+      cutoverId: session.cutoverId,
+      currentBatch: session.currentBatch,
+      totalBatches: session.totalBatches,
+      totalItems: session.totalItems,
+      processedItems: session.processedItems,
+      batchSize: session.batchSize,
+      status: session.status,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      batchCount: session.batches.length,
+      lastBatchStatus: session.batches.length > 0 
+        ? session.batches[session.batches.length - 1].status 
+        : null,
+    }));
+  }
+
   async previewCutover(input: any, approvedCosts: any) { 
       // Reuse logic from execute but without writing to DB
       return { locations: [], totalProducts: 0, productsWithCost: 0, productsMissingCost: 0, estimatedOpeningBalances: 0, warnings: [] };
@@ -788,7 +1324,6 @@ export class InventoryMigrationService {
   async storeCostApprovals(cutoverId: string, approvedCosts: any[], approvedBy?: any, effectiveAt?: any, history?: any, batchId?: any) { /* ... */ }
   async getCostApprovals(cutoverId: string) { return []; }
   private inferSupplierNameFromInitials(initial: string, map: any) { return null; }
-  async getExtractionSession(id: string) { return null; }
   async approveBatch(
     batchId: string,
     extractionApproved: boolean,
@@ -799,5 +1334,7 @@ export class InventoryMigrationService {
     approvedBy?: string | null,
     effectiveAt?: Date | null,
   ) { return { success: true, nextBatchAvailable: false, lastApprovedProductId: '' }; }
-  private generateUUID() { return 'uuid'; }
+  private generateUUID(): string {
+    return randomUUID();
+  }
 }

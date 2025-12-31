@@ -34,6 +34,12 @@ enum UserRole {
   OWNER
 }
 
+enum MigrationStatus {
+  PENDING
+  APPROVED
+  SKIPPED
+}
+
 model Product {
   id         String  @id @default(uuid())
   name       String
@@ -220,15 +226,16 @@ model CatalogMapping {
 }
 
 model CostApproval {
-  id           String   @id @default(uuid())
-  cutoverId    String
-  batchId      String?  // Reference to ExtractionBatch
-  productId    String
-  approvedCost Decimal
-  source       String // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE", "BATCH_APPROVED"
-  notes        String?
-  approvedAt   DateTime @default(now())
-  approvedBy   String? // User ID
+  id             String          @id @default(uuid())
+  cutoverId      String
+  batchId        String?         // Reference to ExtractionBatch
+  productId      String
+  approvedCost   Decimal
+  source         String          // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE", "BATCH_APPROVED"
+  notes          String?
+  approvedAt     DateTime        @default(now())
+  approvedBy     String?         // User ID
+  migrationStatus MigrationStatus @default(PENDING)
 
   product Product        @relation(fields: [productId], references: [id])
   batch   ExtractionBatch? @relation(fields: [batchId], references: [id])
@@ -236,6 +243,7 @@ model CostApproval {
   @@unique([cutoverId, productId])
   @@index([cutoverId])
   @@index([batchId])
+  @@index([migrationStatus])
 }
 
 model Cutover {

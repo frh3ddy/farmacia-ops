@@ -139,6 +139,21 @@ export class InventoryMigrationController {
     }
   }
 
+  @Post('suppliers/add-initial')
+  async addInitialToSupplier(
+    @Body() body: { supplierName: string; initial: string },
+  ) {
+    try {
+      await this.supplierService.addInitialToSupplier(body.supplierName, body.initial);
+      return { success: true, message: 'Initial added successfully' };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to add initial: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Post('suppliers')
   async createSupplier(
     @Body() body: { name: string; initials?: string[] | string | null; contactInfo?: string | null },
@@ -202,12 +217,13 @@ export class InventoryMigrationController {
   // --- CUTOVER / MIGRATION ENDPOINTS ---
 
   @Post('extract-costs')
-  async extractCostsForApproval(@Body() body: ExtractCostsRequest) {
+  async extractCostsForApproval(@Body() body: ExtractCostsRequest & { newBatchSize?: number | string | null }) {
     if (body.costBasis !== 'DESCRIPTION') {
       throw new BadRequestException('Cost basis must be DESCRIPTION for cost extraction');
     }
 
     const batchSize = this.parseBatchSize(body.batchSize);
+    const newBatchSize = this.parseBatchSize(body.newBatchSize);
 
     try {
       const result = await this.migrationService.extractCostsForMigration(
@@ -215,6 +231,7 @@ export class InventoryMigrationController {
         body.costBasis,
         batchSize,
         body.extractionSessionId || null,
+        newBatchSize || null,
       );
 
       return {
@@ -277,6 +294,90 @@ export class InventoryMigrationController {
     }
   }
 
+  @Post('discard-item')
+  async discardItem(@Body() body: { cutoverId: string; productId: string }) {
+    try {
+      const result = await this.migrationService.discardItem(body.cutoverId, body.productId);
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to discard item: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('restore-item')
+  async restoreItem(@Body() body: { cutoverId: string; productId: string }) {
+    try {
+      const result = await this.migrationService.restoreItem(body.cutoverId, body.productId);
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to restore item: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('approve-item')
+  async approveItem(
+    @Body()
+    body: {
+      cutoverId: string;
+      productId: string;
+      cost: number;
+      source?: string;
+      notes?: string | null;
+      extractedEntries?: Array<{
+        supplier: string;
+        amount: number;
+        supplierId?: string | null;
+        editedSupplierName?: string | null;
+        editedCost?: number | null;
+        editedEffectiveDate?: string | null;
+        isSelected?: boolean;
+      }>;
+      selectedSupplierId?: string | null;
+      selectedSupplierName?: string | null;
+    },
+  ) {
+    try {
+      const result = await this.migrationService.approveItem(
+        body.cutoverId,
+        body.productId,
+        body.cost,
+        body.source || 'DESCRIPTION',
+        body.notes || null,
+        body.extractedEntries || [],
+        body.selectedSupplierId || null,
+        body.selectedSupplierName || null,
+      );
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to approve item: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('update-batch-size')
+  async updateBatchSize(@Body() body: { extractionSessionId: string; newBatchSize: number }) {
+    try {
+      if (!body.newBatchSize || body.newBatchSize < 10 || body.newBatchSize > 500) {
+        throw new BadRequestException('Batch size must be between 10 and 500');
+      }
+      const result = await this.migrationService.updateBatchSize(body.extractionSessionId, body.newBatchSize);
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to update batch size: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Get('extraction-session/:sessionId')
   async getExtractionSession(@Param('sessionId') sessionId: string) {
     try {
@@ -310,6 +411,26 @@ export class InventoryMigrationController {
     } catch (error) {
       throw new HttpException(
         { success: false, message: `Failed to get extraction session: ${error}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('extraction-sessions')
+  async listExtractionSessions(@Query('locationId') locationId?: string) {
+    try {
+      const sessions = await this.migrationService.listExtractionSessions(locationId);
+      return {
+        success: true,
+        sessions: sessions.map(session => ({
+          ...session,
+          createdAt: session.createdAt.toISOString(),
+          updatedAt: session.updatedAt.toISOString(),
+        })),
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to list extraction sessions: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
