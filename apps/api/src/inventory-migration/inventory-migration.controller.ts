@@ -261,6 +261,63 @@ export class InventoryMigrationController {
     }
   }
 
+  @Get('suppliers/:id/products/:productId/cost-history')
+  async getSupplierProductCostHistory(
+    @Param('id') supplierId: string,
+    @Param('productId') productId: string,
+  ) {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:265',message:'getSupplierProductCostHistory called',data:{supplierId,productId},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+
+    try {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:270',message:'Querying cost history from database',data:{supplierId,productId},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+
+      const costHistory = await this.prisma.supplierCostHistory.findMany({
+        where: {
+          supplierId,
+          productId,
+        },
+        orderBy: {
+          effectiveAt: 'desc',
+        },
+      });
+
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:282',message:'Cost history queried successfully',data:{supplierId,productId,count:costHistory.length,hasData:costHistory.length>0},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+
+      const history = costHistory.map((entry) => ({
+        id: entry.id,
+        cost: entry.unitCost.toString(),
+        effectiveAt: entry.effectiveAt.toISOString(),
+        createdAt: entry.createdAt.toISOString(),
+        source: entry.source,
+        isCurrent: entry.isCurrent,
+      }));
+
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:294',message:'Returning cost history response',data:{supplierId,productId,historyCount:history.length},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+
+      return {
+        success: true,
+        costHistory: history,
+      };
+    } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:302',message:'Error in getSupplierProductCostHistory',data:{supplierId,productId,error:error instanceof Error ? error.message : String(error)},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+
+      throw new HttpException(
+        { success: false, message: `Failed to fetch cost history: ${error instanceof Error ? error.message : String(error)}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   // --- CUTOVER / MIGRATION ENDPOINTS ---
 
   @Post('extract-costs')

@@ -121,7 +121,7 @@ const SupplierCostHistory = () => {
             >
               <option value="">-- Select a product --</option>
               {products.map(product => (
-                <option key={product.id} value={product.id}>
+                <option key={product.id} value={product.productId || product.id}>
                   {product.productName || product.name || 'N/A'}
                 </option>
               ))}
