@@ -214,6 +214,53 @@ export class InventoryMigrationController {
     }
   }
 
+  @Get('suppliers/:id/products')
+  async getSupplierProducts(@Param('id') id: string) {
+    try {
+      const supplierProducts = await this.prisma.supplierProduct.findMany({
+        where: { supplierId: id },
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              squareProductName: true,
+              squareVariationName: true,
+            },
+          },
+        },
+        orderBy: {
+          product: {
+            name: 'asc',
+          },
+        },
+      });
+
+      const products = supplierProducts.map((sp) => ({
+        id: sp.id,
+        productId: sp.productId,
+        productName: sp.product.squareProductName || sp.product.squareVariationName || sp.product.name,
+        name: sp.product.name,
+        sku: sp.product.sku,
+        cost: sp.cost.toString(),
+        isPreferred: sp.isPreferred,
+        notes: sp.notes,
+        updatedAt: null, // SupplierProduct doesn't have updatedAt in schema
+      }));
+
+      return {
+        success: true,
+        products,
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to fetch supplier products: ${error instanceof Error ? error.message : String(error)}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   // --- CUTOVER / MIGRATION ENDPOINTS ---
 
   @Post('extract-costs')
