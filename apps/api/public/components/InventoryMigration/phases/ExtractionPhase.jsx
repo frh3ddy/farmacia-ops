@@ -27,6 +27,7 @@ const ExtractionPhase = ({
   setBatchComplete,
   supplierInitialsMap,
   setSupplierInitialsMap,
+  sessionItemsByStatus,
   loading,
   error,
   setError,
@@ -44,13 +45,27 @@ const ExtractionPhase = ({
   handleStartMigration,
   getSupplierSuggestions,
 }) => {
-  // Group extraction results by status
+  // Group extraction results by status (current batch)
   const groupedResults = {
     extracting: extractionResults.filter(r => 
       r.migrationStatus !== 'SKIPPED' && r.migrationStatus !== 'APPROVED'
     ),
     approved: extractionResults.filter(r => r.migrationStatus === 'APPROVED'),
     discarded: extractionResults.filter(r => r.migrationStatus === 'SKIPPED'),
+  };
+  
+  // Use session-wide counts if available, otherwise fall back to current batch counts
+  const sessionCounts = sessionItemsByStatus ? {
+    extracting: sessionItemsByStatus.pending ? sessionItemsByStatus.pending.length : groupedResults.extracting.length,
+    approved: sessionItemsByStatus.approved ? sessionItemsByStatus.approved.length : groupedResults.approved.length,
+    skipped: sessionItemsByStatus.skipped ? sessionItemsByStatus.skipped.length : groupedResults.discarded.length,
+  } : null;
+  
+  // Display counts: prefer session-wide if available, otherwise use current batch
+  const displayCounts = sessionCounts || {
+    extracting: groupedResults.extracting.length,
+    approved: groupedResults.approved.length,
+    skipped: groupedResults.discarded.length,
   };
 
   const totalItems = extractionResults.length;
@@ -131,7 +146,7 @@ const ExtractionPhase = ({
                 : 'border-transparent text-gray-600 hover:text-primary'
             }`}
           >
-            Extracting / Action Needed ({groupedResults.extracting.length})
+            Extracting / Action Needed ({displayCounts.extracting})
           </button>
           <button
             onClick={() => setExtractionTab('approved')}
@@ -141,7 +156,7 @@ const ExtractionPhase = ({
                 : 'border-transparent text-gray-600 hover:text-primary'
             }`}
           >
-            Approved ({groupedResults.approved.length})
+            Approved ({displayCounts.approved})
           </button>
           <button
             onClick={() => setExtractionTab('discarded')}
@@ -151,7 +166,7 @@ const ExtractionPhase = ({
                 : 'border-transparent text-gray-600 hover:text-primary'
             }`}
           >
-            Discarded / Skipped ({groupedResults.discarded.length})
+            Discarded / Skipped ({displayCounts.skipped})
           </button>
         </div>
       </div>

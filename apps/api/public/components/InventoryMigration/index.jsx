@@ -101,20 +101,34 @@ const InventoryMigration = () => {
         if (sessionData.session.locationIds && sessionData.session.locationIds.length > 0) {
           state.setSelectedLocationId(sessionData.session.locationIds[0]);
         }
+        
+        // Check if batch size changed - if user set a new batch size, use it
+        const sessionBatchSize = sessionData.session.batchSize;
+        const newBatchSize = (state.batchSize !== sessionBatchSize && state.batchSize > 0) 
+          ? state.batchSize 
+          : null;
+        
+        // Only update state batch size if it matches session or is default
         if (sessionData.session.batchSize) {
           if (state.batchSize === 50 || state.batchSize === sessionData.session.batchSize) {
             state.setBatchSize(sessionData.session.batchSize);
           }
         }
+        
         if (sessionData.session.learnedSupplierInitials) {
           state.setSupplierInitialsMap(sessionData.session.learnedSupplierInitials);
         }
+        // Store session-wide itemsByStatus for displaying counts
+        if (sessionData.session.itemsByStatus) {
+          state.setSessionItemsByStatus(sessionData.session.itemsByStatus);
+        }
         const batches = sessionData.session.batches || [];
         const latestBatch = batches.length > 0 ? batches[batches.length - 1] : null;
+        // Pass sessionId explicitly to avoid state update timing issues
         if (latestBatch && latestBatch.status === 'EXTRACTED') {
-          await handleExtractCosts(true);
+          await handleExtractCosts(true, newBatchSize, sessionId);
         } else {
-          await handleExtractCosts(true);
+          await handleExtractCosts(true, newBatchSize, sessionId);
         }
       } else {
         state.setError('Failed to load session: ' + (sessionData.message || 'Unknown error'));
@@ -127,7 +141,7 @@ const InventoryMigration = () => {
   };
 
   // Handler: Continue extraction
-  const handleExtractCosts = async (continueExtraction = false) => {
+  const handleExtractCosts = async (continueExtraction = false, newBatchSize = null, explicitSessionId = null) => {
     if (!continueExtraction && !state.selectedLocationId) {
       state.setError('Please select a location');
       return;
@@ -140,6 +154,9 @@ const InventoryMigration = () => {
       state.setExtractionSessionId(null);
     }
 
+    // Use explicit sessionId if provided (for resuming), otherwise use state
+    const sessionIdToUse = explicitSessionId || (continueExtraction ? state.extractionSessionId : null);
+
     try {
       const response = await fetch('/admin/inventory/cutover/extract-costs', {
         method: 'POST',
@@ -148,8 +165,8 @@ const InventoryMigration = () => {
           locationIds: state.selectedLocationId ? [state.selectedLocationId] : [],
           costBasis: state.costBasis,
           batchSize: continueExtraction ? null : state.batchSize,
-          newBatchSize: continueExtraction ? (state.batchSize && state.batchSize > 0 ? state.batchSize : null) : null,
-          extractionSessionId: continueExtraction ? state.extractionSessionId : null,
+          newBatchSize: continueExtraction ? (newBatchSize || (state.batchSize && state.batchSize > 0 ? state.batchSize : null)) : null,
+          extractionSessionId: sessionIdToUse,
         }),
       });
 
@@ -255,11 +272,17 @@ const InventoryMigration = () => {
           try {
             const sessionResponse = await fetch(`/admin/inventory/cutover/extraction-session/${result.extractionSessionId}`);
             const sessionData = await sessionResponse.json();
-            if (sessionData.success && sessionData.session.batches && sessionData.session.batches.length > 0) {
-              const latestBatch = sessionData.session.batches[sessionData.session.batches.length - 1];
-              state.setCurrentBatchId(latestBatch.id);
+            if (sessionData.success && sessionData.session) {
+              if (sessionData.session.batches && sessionData.session.batches.length > 0) {
+                const latestBatch = sessionData.session.batches[sessionData.session.batches.length - 1];
+                state.setCurrentBatchId(latestBatch.id);
+              }
               if (sessionData.session.learnedSupplierInitials) {
                 state.setSupplierInitialsMap(sessionData.session.learnedSupplierInitials);
+              }
+              // Store session-wide itemsByStatus for displaying counts
+              if (sessionData.session.itemsByStatus) {
+                state.setSessionItemsByStatus(sessionData.session.itemsByStatus);
               }
             }
           } catch (err) {
@@ -269,7 +292,146 @@ const InventoryMigration = () => {
         
         state.setExtractionApproved(false);
         state.setManualInputApproved(false);
-        state.setExtractionResults(result.extractionResults || []);
+        const loadedResults = result.extractionResults || [];
+        state.setExtractionResults(loadedResults);
+        
+        // If resuming and all items in the current batch are already approved/skipped,
+        // automatically advance to the next batch
+        if (continueExtraction && loadedResults.length > 0) {
+          const allProcessed = loadedResults.every(r => 
+            r.migrationStatus === 'APPROVED' || r.migrationStatus === 'SKIPPED'
+          );
+          
+          if (allProcessed && !result.isComplete && result.canContinue) {
+            // All items in current batch are processed, automatically continue to next batch
+            // Make another call to extract-costs to get the next batch
+            try {
+              const continueResponse = await fetch('/admin/inventory/cutover/extract-costs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  locationIds: state.selectedLocationId ? [state.selectedLocationId] : [],
+                  costBasis: state.costBasis,
+                  batchSize: null,
+                  newBatchSize: state.batchSize && state.batchSize > 0 ? state.batchSize : null,
+                  extractionSessionId: result.extractionSessionId || sessionIdToUse,
+                }),
+              });
+              
+              if (continueResponse.ok) {
+                const continueData = await continueResponse.json();
+                if (continueData.success) {
+                  const continueResult = continueData.result;
+                  
+                  // Match supplier initials (same logic as handleExtractCosts)
+                  if (continueResult.extractionResults) {
+                    continueResult.extractionResults = continueResult.extractionResults.map(productResult => {
+                      if (productResult.extractedEntries) {
+                        productResult.extractedEntries = productResult.extractedEntries.map((entry, idx) => {
+                          const originalSupplier = entry.supplier;
+                          let matchedSupplierName = null;
+                          let matchedSupplierId = null;
+                          const isUnknownOrGeneral = !originalSupplier || originalSupplier === 'Unknown' || originalSupplier === 'General';
+                          
+                          if (!isUnknownOrGeneral && originalSupplier) {
+                            const supplierInitial = originalSupplier.trim().toLowerCase();
+                            const matchedByInitial = state.allSuppliers.find(s => {
+                              const initials = Array.isArray(s.initials) ? s.initials : (s.initials ? [s.initials] : []);
+                              return initials.some(init => init.toLowerCase() === supplierInitial.toLowerCase()) && s.isActive;
+                            });
+                            
+                            if (matchedByInitial) {
+                              matchedSupplierName = matchedByInitial.name;
+                              matchedSupplierId = matchedByInitial.id;
+                            } else {
+                              const matchedByName = state.allSuppliers.find(s => 
+                                s.name.toLowerCase() === originalSupplier.toLowerCase() && s.isActive
+                              );
+                              if (matchedByName) {
+                                matchedSupplierName = matchedByName.name;
+                                matchedSupplierId = matchedByName.id;
+                              }
+                            }
+                          }
+                          
+                          return {
+                            ...entry,
+                            supplier: originalSupplier,
+                            editedSupplierName: matchedSupplierName || originalSupplier,
+                            supplierId: matchedSupplierId,
+                            isSelected: matchedSupplierName ? true : (idx === productResult.extractedEntries.length - 1),
+                          };
+                        });
+                      }
+                      return productResult;
+                    });
+                  }
+                  
+                  // Update state with the next batch results
+                  const continueBatchProductIds = new Set((continueResult.extractionResults || []).map(r => r.productId));
+                  state.setEditedResults(prev => {
+                    const filtered = {};
+                    continueBatchProductIds.forEach(productId => {
+                      if (prev[productId]) {
+                        filtered[productId] = prev[productId];
+                      }
+                    });
+                    return filtered;
+                  });
+                  
+                  state.setExtractionResult(continueResult);
+                  if (continueResult.extractionSessionId) {
+                    state.setExtractionSessionId(continueResult.extractionSessionId);
+                    try {
+                      const sessionResponse = await fetch(`/admin/inventory/cutover/extraction-session/${continueResult.extractionSessionId}`);
+                      const sessionData = await sessionResponse.json();
+                      if (sessionData.success && sessionData.session) {
+                        if (sessionData.session.batches && sessionData.session.batches.length > 0) {
+                          const latestBatch = sessionData.session.batches[sessionData.session.batches.length - 1];
+                          state.setCurrentBatchId(latestBatch.id);
+                        }
+                        if (sessionData.session.learnedSupplierInitials) {
+                          state.setSupplierInitialsMap(sessionData.session.learnedSupplierInitials);
+                        }
+                        if (sessionData.session.itemsByStatus) {
+                          state.setSessionItemsByStatus(sessionData.session.itemsByStatus);
+                        }
+                      }
+                    } catch (err) {
+                      console.warn('Failed to fetch session details:', err);
+                    }
+                  }
+                  
+                  let newResults = continueResult.extractionResults || [];
+                  newResults = newResults.map(r => {
+                    if (!r.isAlreadyApproved) {
+                      if (r.migrationStatus && r.migrationStatus !== 'PENDING') {
+                        return { ...r, migrationStatus: 'PENDING' };
+                      }
+                      if (!r.migrationStatus) {
+                        return { ...r, migrationStatus: 'PENDING' };
+                      }
+                    }
+                    return r;
+                  });
+                  
+                  state.setExtractionResults(newResults);
+                  
+                  if (continueResult.isComplete || newResults.length === 0) {
+                    state.setState('reviewing');
+                  } else {
+                    state.setState('extracting');
+                  }
+                  return; // Exit early, we've loaded the next batch
+                }
+              }
+            } catch (continueErr) {
+              // If auto-continue fails, just proceed with the current batch
+              console.warn('Failed to auto-continue to next batch:', continueErr);
+            }
+          }
+        }
+        
         state.setState('extracting');
       } else {
         state.setError(data.message || 'Failed to extract costs');
@@ -332,6 +494,47 @@ const InventoryMigration = () => {
     }
   };
 
+  // Helper: Update sessionItemsByStatus locally when item status changes
+  const updateSessionItemsByStatus = (productId, newStatus, oldStatus) => {
+    if (!state.sessionItemsByStatus) return;
+    
+    state.setSessionItemsByStatus(prev => {
+      if (!prev) return prev;
+      
+      const updated = {
+        pending: [...(prev.pending || [])],
+        approved: [...(prev.approved || [])],
+        skipped: [...(prev.skipped || [])],
+      };
+      
+      // Remove from old status array
+      if (oldStatus === 'PENDING' || !oldStatus) {
+        updated.pending = updated.pending.filter(id => id !== productId);
+      } else if (oldStatus === 'APPROVED') {
+        updated.approved = updated.approved.filter(id => id !== productId);
+      } else if (oldStatus === 'SKIPPED') {
+        updated.skipped = updated.skipped.filter(id => id !== productId);
+      }
+      
+      // Add to new status array (if not already there)
+      if (newStatus === 'APPROVED') {
+        if (!updated.approved.includes(productId)) {
+          updated.approved.push(productId);
+        }
+      } else if (newStatus === 'SKIPPED') {
+        if (!updated.skipped.includes(productId)) {
+          updated.skipped.push(productId);
+        }
+      } else if (newStatus === 'PENDING') {
+        if (!updated.pending.includes(productId)) {
+          updated.pending.push(productId);
+        }
+      }
+      
+      return updated;
+    });
+  };
+
   // Handler: Discard item
   const handleDiscardItem = async (productId) => {
     const cutoverId = state.currentCutoverId || state.extractionResult?.cutoverId || state.extractionSessionId;
@@ -347,9 +550,17 @@ const InventoryMigration = () => {
       });
       const data = await response.json();
       if (response.ok && data.success) {
+        // Get old status before updating
+        const oldItem = state.extractionResults.find(r => r.productId === productId);
+        const oldStatus = oldItem?.migrationStatus || 'PENDING';
+        
         state.setExtractionResults(prev => prev.map(r => 
           r.productId === productId ? { ...r, migrationStatus: 'SKIPPED' } : r
         ));
+        
+        // Update sessionItemsByStatus locally (no refetch needed)
+        updateSessionItemsByStatus(productId, 'SKIPPED', oldStatus);
+        
         state.setCurrentExtractingIndex(prev => {
           const currentExtractingCount = state.extractionResults.filter(r => 
             !r.migrationStatus || r.migrationStatus === 'PENDING'
@@ -383,9 +594,16 @@ const InventoryMigration = () => {
       });
       const data = await response.json();
       if (response.ok && data.success) {
+        // Get old status before updating
+        const oldItem = state.extractionResults.find(r => r.productId === productId);
+        const oldStatus = oldItem?.migrationStatus || 'SKIPPED';
+        
         state.setExtractionResults(prev => prev.map(r => 
           r.productId === productId ? { ...r, migrationStatus: 'PENDING' } : r
         ));
+        
+        // Update sessionItemsByStatus locally (no refetch needed)
+        updateSessionItemsByStatus(productId, 'PENDING', oldStatus);
       } else {
         state.setError(data.message || 'Failed to restore item');
       }
@@ -502,11 +720,16 @@ const InventoryMigration = () => {
           try {
             const sessionResponse = await fetch(`/admin/inventory/cutover/extraction-session/${result.extractionSessionId}`);
             const sessionData = await sessionResponse.json();
-            if (sessionData.success && sessionData.session.batches && sessionData.session.batches.length > 0) {
-              const latestBatch = sessionData.session.batches[sessionData.session.batches.length - 1];
-              state.setCurrentBatchId(latestBatch.id);
+            if (sessionData.success && sessionData.session) {
+              if (sessionData.session.batches && sessionData.session.batches.length > 0) {
+                const latestBatch = sessionData.session.batches[sessionData.session.batches.length - 1];
+                state.setCurrentBatchId(latestBatch.id);
+              }
               if (sessionData.session.learnedSupplierInitials) {
                 state.setSupplierInitialsMap(sessionData.session.learnedSupplierInitials);
+              }
+              if (sessionData.session.itemsByStatus) {
+                state.setSessionItemsByStatus(sessionData.session.itemsByStatus);
               }
             }
           } catch (err) {
@@ -819,6 +1042,9 @@ const InventoryMigration = () => {
         }
       }
       
+      // Get old status before updating
+      const oldStatus = result.migrationStatus || 'PENDING';
+      
       state.setExtractionResults(prev => prev.map(r => 
         r.productId === result.productId ? { 
           ...r, 
@@ -828,6 +1054,9 @@ const InventoryMigration = () => {
           selectedSupplierId: supplierId,
         } : r
       ));
+      
+      // Update sessionItemsByStatus locally (no refetch needed)
+      updateSessionItemsByStatus(result.productId, 'APPROVED', oldStatus);
       
       state.setCurrentExtractingIndex(prev => {
         const currentExtractingCount = state.extractionResults.filter(r => 
@@ -873,11 +1102,22 @@ const InventoryMigration = () => {
       const data = await response.json();
       if (data.success) {
         state.setMigrationResult(data.result);
-        if (data.result.isComplete) {
+        // Set currentCutoverId from the result so continue can use it
+        const newCutoverId = data.result.cutoverId;
+        if (newCutoverId) {
+          state.setCurrentCutoverId(newCutoverId);
+          if (data.result.isComplete) {
+            state.setReportData(data.result);
+            state.setState('reporting');
+          } else {
+            // Pass cutoverId directly to avoid timing issues with state updates
+            handleContinueMigration(newCutoverId);
+          }
+        } else if (data.result.isComplete) {
           state.setReportData(data.result);
           state.setState('reporting');
         } else {
-          handleContinueMigration();
+          state.setError('Migration initiated but cutoverId not returned. Cannot continue.');
         }
       } else {
         state.setError(data.message || 'Migration failed');
@@ -892,20 +1132,43 @@ const InventoryMigration = () => {
   };
 
   // Handler: Continue migration batches
-  const handleContinueMigration = async () => {
+  const handleContinueMigration = async (explicitCutoverId = null) => {
+    // Use explicit cutoverId if provided, otherwise use fallback pattern
+    const cutoverId = explicitCutoverId || state.currentCutoverId || state.migrationResult?.cutoverId || state.extractionResult?.cutoverId || state.extractionSessionId;
+    
+    if (!cutoverId) {
+      state.setError('Missing cutover ID. Cannot continue migration.');
+      return;
+    }
+    
     try {
       const response = await fetch('/admin/inventory/cutover/continue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cutoverId: state.currentCutoverId }),
+        body: JSON.stringify({ cutoverId }),
       });
       const data = await response.json();
       if (data.success) {
         state.setMigrationResult(data.result);
+        // Update currentCutoverId from result if available
+        const resultCutoverId = data.result.cutoverId || cutoverId;
+        if (resultCutoverId !== cutoverId) {
+          state.setCurrentCutoverId(resultCutoverId);
+        }
+        
         if (data.result.isComplete) {
+          // Migration is complete
           state.setReportData(data.result);
           state.setState('reporting');
+        } else {
+          // Migration not complete, automatically continue to next batch
+          // Use a small delay to allow UI to update and prevent overwhelming the server
+          setTimeout(() => {
+            handleContinueMigration(resultCutoverId);
+          }, 100);
         }
+      } else {
+        state.setError(data.message || 'Failed to continue migration');
       }
     } catch (err) {
       state.setError(err.message || 'Failed to continue migration');
@@ -959,6 +1222,7 @@ const InventoryMigration = () => {
         setEditedResults={state.setEditedResults}
         costApprovals={state.costApprovals}
         setCostApprovals={state.setCostApprovals}
+        sessionItemsByStatus={state.sessionItemsByStatus}
         editingApprovedItem={state.editingApprovedItem}
         setEditingApprovedItem={state.setEditingApprovedItem}
         editingSkippedItem={state.editingSkippedItem}

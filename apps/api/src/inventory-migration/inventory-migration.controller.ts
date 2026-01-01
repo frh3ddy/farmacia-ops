@@ -646,9 +646,28 @@ export class InventoryMigrationController {
 
   @Post('continue')
   async continueCutover(@Body() body: { cutoverId: string }) {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:648',message:'continueCutover called',data:{cutoverId:body?.cutoverId,hasCutoverId:!!body?.cutoverId},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+
+    if (!body.cutoverId || typeof body.cutoverId !== 'string' || body.cutoverId.trim() === '') {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:653',message:'Invalid cutoverId provided',data:{cutoverId:body?.cutoverId},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      throw new BadRequestException('cutoverId is required and must be a non-empty string');
+    }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:658',message:'Querying cutover record from database',data:{cutoverId:body.cutoverId},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+
     const cutoverRecord = await this.prisma.cutover.findUnique({
       where: { id: body.cutoverId },
     });
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:664',message:'Cutover record query result',data:{cutoverId:body.cutoverId,found:!!cutoverRecord},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
 
     if (!cutoverRecord) {
       throw new HttpException({ success: false, message: 'Cutover not found' }, HttpStatus.NOT_FOUND);

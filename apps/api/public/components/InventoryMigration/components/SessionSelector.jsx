@@ -2,11 +2,43 @@
 const SessionSelector = ({ 
   show, 
   existingSessions, 
+  currentBatchSize,
   onResume, 
   onStartNew, 
   onClose 
 }) => {
   if (!show) return null;
+  
+  // Helper function to calculate projected values with new batch size
+  const calculateProjectedValues = (session) => {
+    if (!currentBatchSize || currentBatchSize === session.batchSize) {
+      // No change in batch size, return original values
+      return {
+        currentBatch: session.currentBatch,
+        totalBatches: session.totalBatches,
+        batchSize: session.batchSize,
+      };
+    }
+    
+    const newBatchSize = currentBatchSize;
+    const processedItems = session.processedItems || 0;
+    const totalItems = session.totalItems || 0;
+    const remainingItems = totalItems - processedItems;
+    
+    // Calculate projected current batch
+    const newCurrentBatch = processedItems > 0 
+      ? Math.ceil(processedItems / newBatchSize)
+      : 1;
+    
+    // Calculate projected total batches
+    const newTotalBatches = Math.ceil(remainingItems / newBatchSize);
+    
+    return {
+      currentBatch: newCurrentBatch,
+      totalBatches: newTotalBatches,
+      batchSize: newBatchSize,
+    };
+  };
 
   return (
     <div style={{
@@ -45,7 +77,11 @@ const SessionSelector = ({
               maxHeight: '300px',
               overflow: 'auto',
             }}>
-              {existingSessions.map(session => (
+              {existingSessions.map(session => {
+                const projected = calculateProjectedValues(session);
+                const batchSizeChanged = currentBatchSize && currentBatchSize !== session.batchSize;
+                
+                return (
                 <div
                   key={session.id}
                   onClick={() => onResume(session.id)}
@@ -64,9 +100,22 @@ const SessionSelector = ({
                         Session from {new Date(session.createdAt).toLocaleString()}
                       </div>
                       <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                        Batch {session.currentBatch} of {session.totalBatches || '?'} • 
-                        {' '}{session.processedItems} / {session.totalItems} items processed • 
-                        {' '}{session.batchCount} batches extracted
+                        {batchSizeChanged ? (
+                          <>
+                            Batch {projected.currentBatch} of {projected.totalBatches || '?'} • 
+                            {' '}{session.processedItems} / {session.totalItems} items processed • 
+                            {' '}{session.batchCount} batches extracted
+                            <span style={{ color: '#3b82f6', marginLeft: '8px', fontSize: '11px' }}>
+                              (with batch size {projected.batchSize})
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            Batch {session.currentBatch} of {session.totalBatches || '?'} • 
+                            {' '}{session.processedItems} / {session.totalItems} items processed • 
+                            {' '}{session.batchCount} batches extracted
+                          </>
+                        )}
                       </div>
                     </div>
                     <button
@@ -89,7 +138,7 @@ const SessionSelector = ({
                     </button>
                   </div>
                 </div>
-              ))}
+              );})}
             </div>
           </div>
         )}

@@ -18,10 +18,14 @@ const ExtractionItemEditor = ({
   onDiscard,
   setError,
 }) => {
-  if (!result) {
-    if (currentExtractingIndex >= groupedResults.extracting.length) {
+  // Fix: Move setState call from render to useEffect
+  React.useEffect(() => {
+    if (!result && currentExtractingIndex >= groupedResults.extracting.length && groupedResults.extracting.length > 0) {
       setCurrentExtractingIndex(Math.max(0, groupedResults.extracting.length - 1));
     }
+  }, [result, currentExtractingIndex, groupedResults.extracting.length, setCurrentExtractingIndex]);
+
+  if (!result) {
     return null;
   }
 

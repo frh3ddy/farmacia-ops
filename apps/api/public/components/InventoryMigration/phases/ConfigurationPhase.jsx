@@ -18,6 +18,46 @@ const ConfigurationPhase = ({
   onStartNew,
   onCloseSessionSelector,
 }) => {
+  // Local state for batch size input to allow empty values during typing
+  const [batchSizeInput, setBatchSizeInput] = React.useState(
+    batchSize != null ? batchSize.toString() : '50'
+  );
+  
+  // Sync local state when batchSize prop changes (e.g., when resuming session)
+  React.useEffect(() => {
+    if (batchSize != null) {
+      setBatchSizeInput(batchSize.toString());
+    }
+  }, [batchSize]);
+
+  const handleBatchSizeChange = (e) => {
+    const value = e.target.value;
+    setBatchSizeInput(value); // Allow empty string
+    
+    // Only update the actual batchSize if it's a valid number
+    const numValue = parseInt(value, 10);
+    if (!isNaN(numValue) && numValue > 0) {
+      setBatchSize(numValue);
+    }
+  };
+
+  const handleBatchSizeBlur = (e) => {
+    const value = e.target.value.trim();
+    const numValue = parseInt(value, 10);
+    
+    // If empty or invalid, set to default
+    if (!value || isNaN(numValue) || numValue < 10) {
+      setBatchSize(50);
+      setBatchSizeInput('50');
+    } else if (numValue > 500) {
+      setBatchSize(500);
+      setBatchSizeInput('500');
+    } else {
+      setBatchSize(numValue);
+      setBatchSizeInput(numValue.toString());
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <h2 className="text-2xl font-bold text-gray-900">Inventory Migration - Configuration</h2>
@@ -91,8 +131,9 @@ const ConfigurationPhase = ({
             type="number"
             min="10"
             max="500"
-            value={batchSize}
-            onChange={(e) => setBatchSize(parseInt(e.target.value) || 50)}
+            value={batchSizeInput}
+            onChange={handleBatchSizeChange}
+            onBlur={handleBatchSizeBlur}
             className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary"
           />
           <p className="mt-1 text-xs text-gray-500">Between 10 and 500 items per batch</p>
@@ -112,6 +153,7 @@ const ConfigurationPhase = ({
         <SessionSelector
           show={showSessionSelector}
           existingSessions={existingSessions}
+          currentBatchSize={batchSize}
           onResume={onResumeSession}
           onStartNew={onStartNew}
           onClose={onCloseSessionSelector}

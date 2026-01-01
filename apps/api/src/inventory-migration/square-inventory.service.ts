@@ -37,39 +37,97 @@ export class SquareInventoryService {
 
   /**
    * Fetch Square inventory counts for a location
+   * Implements pagination to fetch all items (not just the first 1000)
    */
   async fetchSquareInventory(
     locationId: string,
   ): Promise<SquareInventoryItem[]> {
     const client = this.getSquareClient();
+    const allItems: SquareInventoryItem[] = [];
+    let cursor: string | undefined = undefined;
 
     try {
-      const response = await client.inventory.batchGetCounts({
-        locationIds: [locationId],
-        states: ['IN_STOCK'],
-      });
+      do {
+        const response = await client.inventory.batchGetCounts({
+          locationIds: [locationId],
+          states: ['IN_STOCK'],
+          cursor: cursor, // Use cursor for pagination
+        });
 
-      const counts = response.data || [];
+        const responseAny = response as any;
+        
+        // Square SDK v40 uses a paginated response object with methods
+        // Response has: response, data, _hasNextPage, getItems, loadNextPage
+        // Extract counts from data property
+        const counts = responseAny.data || 
+                       (responseAny.response && responseAny.response.data) ||
+                       responseAny.counts || 
+                       [];
 
-      if (!counts || counts.length === 0) return [];
-
-      // Map and Filter in one pass
-      return counts.reduce<SquareInventoryItem[]>((acc, count) => {
-        if (
-          count.catalogObjectId &&
-          count.locationId &&
-          count.quantity &&
-          count.state === 'IN_STOCK'
-        ) {
-          acc.push({
-            catalogObjectId: count.catalogObjectId,
-            locationId: count.locationId,
-            quantity: parseInt(count.quantity, 10) || 0,
-            catalogObject: null,
-          });
+        if (!counts || counts.length === 0) {
+          this.logger.log(`No more counts returned, stopping pagination`);
+          break;
         }
-        return acc;
-      }, []);
+
+        // Map and Filter in one pass
+        const pageItems = counts.reduce((acc: SquareInventoryItem[], count: any) => {
+          if (
+            count.catalogObjectId &&
+            count.locationId &&
+            count.quantity &&
+            count.state === 'IN_STOCK'
+          ) {
+            acc.push({
+              catalogObjectId: count.catalogObjectId,
+              locationId: count.locationId,
+              quantity: parseInt(count.quantity, 10) || 0,
+              catalogObject: null,
+            });
+          }
+          return acc;
+        }, []);
+
+        allItems.push(...pageItems);
+        this.logger.log(`Fetched page with ${pageItems.length} items (total so far: ${allItems.length})`);
+
+        // Square SDK v40 paginated response structure
+        // Check _hasNextPage to see if there are more pages
+        const hasNextPage = responseAny._hasNextPage === true;
+        
+        // Get cursor from response.response.cursor for next iteration
+        // The actual API response with cursor is in the 'response' property
+        cursor = responseAny.response?.cursor || 
+                 responseAny.response?.cursor_ ||
+                 responseAny.cursor || 
+                 responseAny.cursor_ || 
+                 undefined;
+
+        // Debug log on first page to understand structure
+        if (!cursor && allItems.length === pageItems.length) {
+          this.logger.log(`[DEBUG] First page: _hasNextPage=${hasNextPage}, cursor=${cursor ? 'found' : 'not found'}`);
+          if (responseAny.response) {
+            this.logger.log(`[DEBUG] response.response keys: ${Object.keys(responseAny.response).join(', ')}`);
+            if (responseAny.response.cursor) {
+              this.logger.log(`[DEBUG] Found cursor in response.response.cursor`);
+            }
+          }
+        }
+
+        if (hasNextPage && !cursor) {
+          this.logger.warn(`_hasNextPage is true but no cursor found - pagination may fail`);
+        }
+
+        if (cursor) {
+          this.logger.log(`Cursor found, will fetch next page`);
+        } else {
+          this.logger.log(`No cursor in response, pagination complete`);
+          cursor = undefined; // Explicitly set to exit loop
+        }
+
+      } while (cursor); // Continue while there's a cursor for next page
+
+      this.logger.log(`Total inventory items fetched: ${allItems.length}`);
+      return allItems;
 
     } catch (error) {
       throw new SquareApiError(
