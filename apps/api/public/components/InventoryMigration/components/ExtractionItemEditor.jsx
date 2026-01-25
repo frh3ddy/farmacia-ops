@@ -40,18 +40,97 @@ const ExtractionItemEditor = ({
     }
   }, [result, currentExtractingIndex, groupedResults.extracting.length, setCurrentExtractingIndex]);
 
+  // Ensure the last entry is always synced to selectedCost and selectedSupplierName
+  // This runs when the result changes (new batch) or when extractedEntries change
+  React.useEffect(() => {
+    if (!result || !result.extractedEntries || result.extractedEntries.length === 0) {
+      return;
+    }
+    
+    const lastEntry = result.extractedEntries[result.extractedEntries.length - 1];
+    if (!lastEntry) {
+      return;
+    }
+
+    // Get current edited state
+    const currentEdited = editedResults[result.productId];
+    const lastEntryCost = lastEntry.editedCost !== null && lastEntry.editedCost !== undefined 
+      ? lastEntry.editedCost 
+      : lastEntry.amount;
+    const lastEntrySupplierName = lastEntry.editedSupplierName || lastEntry.supplier;
+    
+    // Check if we need to update (only if not already set or if values changed)
+    const needsUpdate = !currentEdited || 
+      currentEdited.selectedCost !== lastEntryCost || 
+      currentEdited.selectedSupplierName !== lastEntrySupplierName;
+    
+    if (needsUpdate) {
+      setEditedResults(prev => {
+        const newResults = { ...prev };
+        if (!newResults[result.productId]) {
+          newResults[result.productId] = { ...result };
+        }
+        if (!newResults[result.productId].extractedEntries) {
+          newResults[result.productId].extractedEntries = [...result.extractedEntries];
+        }
+        
+        // Ensure the last entry is marked as selected (for consistency)
+        newResults[result.productId].extractedEntries = newResults[result.productId].extractedEntries.map((e, i) => ({
+          ...e,
+          isSelected: i === newResults[result.productId].extractedEntries.length - 1
+        }));
+        
+        // Sync selectedCost and selectedSupplierName from the last entry
+        const lastEntry = newResults[result.productId].extractedEntries[newResults[result.productId].extractedEntries.length - 1];
+        newResults[result.productId].selectedCost = lastEntry.editedCost !== null && lastEntry.editedCost !== undefined 
+          ? lastEntry.editedCost 
+          : lastEntry.amount;
+        newResults[result.productId].selectedSupplierName = lastEntry.editedSupplierName || lastEntry.supplier;
+        newResults[result.productId].selectedSupplierId = lastEntry.supplierId;
+        
+        return newResults;
+      });
+    }
+  }, [result?.productId, result?.extractedEntries, editedResults, setEditedResults]);
+
+  // Use useMemo to ensure display values are computed from the latest editedResults state
+  // IMPORTANT: This hook must be called BEFORE any early returns to comply with Rules of Hooks
+  // Dependencies: editedResults[result.productId] and result to ensure updates when:
+  // 1. User edits supplier name, cost, or date (editedResults changes)
+  // 2. A new batch is loaded (result changes)
+  const editedResult = result ? editedResults[result.productId] : null;
+  const { edited, selectedEntry, displayCost, displaySupplier } = React.useMemo(() => {
+    if (!result) {
+      return { edited: null, selectedEntry: null, displayCost: null, displaySupplier: '' };
+    }
+    
+    const edited = editedResult || result;
+    const hasExtraction = edited.extractedEntries && edited.extractedEntries.length > 0;
+    
+    // Always use the last entry (or only entry if there's only one)
+    // No radio button selection - the last entry is always the selected one
+    const selectedEntry = edited.extractedEntries?.length > 0 
+      ? edited.extractedEntries[edited.extractedEntries.length - 1] 
+      : null;
+    
+    // Always use the last entry's values for display
+    // Priority: edited.selectedCost > selectedEntry.editedCost > selectedEntry.amount
+    const displayCost = edited.selectedCost !== null && edited.selectedCost !== undefined 
+      ? edited.selectedCost 
+      : (selectedEntry ? (selectedEntry.editedCost !== null && selectedEntry.editedCost !== undefined ? selectedEntry.editedCost : selectedEntry.amount) : null);
+    
+    // Priority: edited.selectedSupplierName > selectedEntry.editedSupplierName > selectedEntry.supplier
+    const displaySupplier = edited.selectedSupplierName || (selectedEntry ? (selectedEntry.editedSupplierName || selectedEntry.supplier) : null) || '';
+    
+    return { edited, selectedEntry, displayCost, displaySupplier };
+  }, [editedResult, result]);
+
   if (!result) {
     return null;
   }
 
-  const edited = editedResults[result.productId] || result;
-  const hasExtraction = edited.extractedEntries && edited.extractedEntries.length > 0;
-  const selectedEntry = edited.extractedEntries?.find(e => e.isSelected) || 
-    (edited.extractedEntries?.length > 0 ? edited.extractedEntries[edited.extractedEntries.length - 1] : null);
-  const displayCost = edited.selectedCost !== null && edited.selectedCost !== undefined 
-    ? edited.selectedCost 
-    : (selectedEntry ? (selectedEntry.editedCost !== null && selectedEntry.editedCost !== undefined ? selectedEntry.editedCost : selectedEntry.amount) : null);
-  const displaySupplier = edited.selectedSupplierName || (selectedEntry ? (selectedEntry.editedSupplierName || selectedEntry.supplier) : null) || '';
+  // At this point, result exists, so edited should also exist (from useMemo above)
+  const hasExtraction = edited?.extractedEntries && edited.extractedEntries.length > 0;
 
   return (
     <div className="space-y-4">
@@ -85,7 +164,6 @@ const ExtractionItemEditor = ({
                     <table className="w-full">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 w-12"></th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-700">SUPPLIER NAME</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-700">COST</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-700">DATE</th>
@@ -94,42 +172,14 @@ const ExtractionItemEditor = ({
                       </thead>
                       <tbody className="divide-y divide-gray-200 bg-white">
                         {edited.extractedEntries.map((entry, idx) => {
-                          const isSelected = entry.isSelected !== undefined ? entry.isSelected : (idx === edited.extractedEntries.length - 1);
+                          // Always use the last entry as the selected one
+                          const isLastEntry = idx === edited.extractedEntries.length - 1;
                           const entryKey = `${result.productId}_${idx}`;
                           const suggestions = supplierSuggestions[entryKey] || [];
                           const showAutocomplete = openAutocomplete[entryKey];
 
                           return (
-                            <tr key={idx} className={isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}>
-                              {/* Radio button column */}
-                              <td className="px-4 py-3">
-                                <input
-                                  type="radio"
-                                  name={`entry_${result.productId}`}
-                                  checked={isSelected}
-                                  onChange={() => {
-                                    setEditedResults(prev => {
-                                      const newResults = { ...prev };
-                                      if (!newResults[result.productId]) {
-                                        newResults[result.productId] = { ...result };
-                                      }
-                                      if (!newResults[result.productId].extractedEntries) {
-                                        newResults[result.productId].extractedEntries = [...result.extractedEntries];
-                                      }
-                                      newResults[result.productId].extractedEntries = newResults[result.productId].extractedEntries.map((e, i) => ({
-                                        ...e,
-                                        isSelected: i === idx
-                                      }));
-                                      newResults[result.productId].selectedCost = entry.editedCost !== null && entry.editedCost !== undefined ? entry.editedCost : entry.amount;
-                                      newResults[result.productId].selectedSupplierName = entry.editedSupplierName || entry.supplier;
-                                      newResults[result.productId].selectedSupplierId = entry.supplierId;
-                                      return newResults;
-                                    });
-                                  }}
-                                  className="w-4 h-4 text-primary"
-                                />
-                              </td>
-                              
+                            <tr key={idx} className={isLastEntry ? 'bg-blue-50' : 'hover:bg-gray-50'}>
                               {/* Supplier Name column */}
                               <td className="px-4 py-3">
                                 <div className="relative">
@@ -146,12 +196,22 @@ const ExtractionItemEditor = ({
                                         if (!newResults[result.productId].extractedEntries) {
                                           newResults[result.productId].extractedEntries = [...result.extractedEntries];
                                         }
-                                        newResults[result.productId].extractedEntries[idx] = {
+                                        // Update the entry's editedSupplierName
+                                        const updatedEntry = {
                                           ...newResults[result.productId].extractedEntries[idx],
                                           editedSupplierName: newValue,
                                         };
-                                        if (isSelected) {
+                                        newResults[result.productId].extractedEntries[idx] = updatedEntry;
+                                        
+                                        // If this is the last entry, update selectedSupplierName and selectedSupplierId
+                                        // The last entry is always the selected one
+                                        const isLastEntry = idx === newResults[result.productId].extractedEntries.length - 1;
+                                        if (isLastEntry) {
                                           newResults[result.productId].selectedSupplierName = newValue;
+                                          // Also update selectedSupplierId if it exists in the entry
+                                          if (updatedEntry.supplierId) {
+                                            newResults[result.productId].selectedSupplierId = updatedEntry.supplierId;
+                                          }
                                         }
                                         return newResults;
                                       });
@@ -191,7 +251,7 @@ const ExtractionItemEditor = ({
                                       }, 200);
                                     }}
                                     className={`w-full px-2 py-1 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
-                                      isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                                      isLastEntry ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
                                     }`}
                                     placeholder="Supplier name"
                                   />
@@ -216,12 +276,18 @@ const ExtractionItemEditor = ({
                                               if (!newResults[result.productId].extractedEntries) {
                                                 newResults[result.productId].extractedEntries = [...result.extractedEntries];
                                               }
-                                              newResults[result.productId].extractedEntries[idx] = {
+                                              // Update the entry with the selected suggestion
+                                              const updatedEntry = {
                                                 ...newResults[result.productId].extractedEntries[idx],
                                                 editedSupplierName: suggestion.name,
                                                 supplierId: suggestion.id,
                                               };
-                                              if (isSelected) {
+                                              newResults[result.productId].extractedEntries[idx] = updatedEntry;
+                                              
+                                              // If this is the last entry, update selectedSupplierName and selectedSupplierId
+                                              // The last entry is always the selected one
+                                              const isLastEntry = idx === newResults[result.productId].extractedEntries.length - 1;
+                                              if (isLastEntry) {
                                                 newResults[result.productId].selectedSupplierName = suggestion.name;
                                                 newResults[result.productId].selectedSupplierId = suggestion.id;
                                               }
@@ -271,18 +337,24 @@ const ExtractionItemEditor = ({
                                       if (!newResults[result.productId].extractedEntries) {
                                         newResults[result.productId].extractedEntries = [...result.extractedEntries];
                                       }
-                                      newResults[result.productId].extractedEntries[idx] = {
+                                      // Update the entry's editedCost
+                                      const updatedEntry = {
                                         ...newResults[result.productId].extractedEntries[idx],
                                         editedCost: newCost,
                                       };
-                                      if (isSelected) {
+                                      newResults[result.productId].extractedEntries[idx] = updatedEntry;
+                                      
+                                      // If this is the last entry, update selectedCost
+                                      // The last entry is always the selected one
+                                      const isLastEntry = idx === newResults[result.productId].extractedEntries.length - 1;
+                                      if (isLastEntry) {
                                         newResults[result.productId].selectedCost = newCost;
                                       }
                                       return newResults;
                                     });
                                   }}
                                   className={`w-full px-2 py-1 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
-                                    isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                                    isLastEntry ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
                                   }`}
                                 />
                               </td>
@@ -336,7 +408,7 @@ const ExtractionItemEditor = ({
                                         });
                                       }}
                                       className={`w-full px-2 py-1 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary ${
-                                        isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                                        isLastEntry ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
                                       }`}
                                     />
                                   );
@@ -593,35 +665,6 @@ const ExtractionItemEditor = ({
                     ) : null;
                   })()}
                 </div>
-                {hasExtraction && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Preferred Supplier Override</label>
-                    <select
-                      value={edited.selectedSupplierName || displaySupplier || ''}
-                      onChange={(e) => {
-                        const selectedName = e.target.value;
-                        const selectedSupplier = allSuppliers.find(s => s.name === selectedName);
-                        setEditedResults(prev => {
-                          const newResults = { ...prev };
-                          if (!newResults[result.productId]) {
-                            newResults[result.productId] = { ...result };
-                          }
-                          newResults[result.productId].selectedSupplierName = selectedName;
-                          newResults[result.productId].selectedSupplierId = selectedSupplier?.id || null;
-                          return newResults;
-                        });
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                    >
-                      <option value="">Select preferred supplier</option>
-                      {allSuppliers.filter(s => s.isActive).map(supplier => (
-                        <option key={supplier.id} value={supplier.name}>
-                          {supplier.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
                 <div className="flex gap-3 pt-4">
                   <button
                     onClick={() => onApprove(result)}

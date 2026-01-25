@@ -354,12 +354,13 @@ const InventoryMigration = () => {
                             }
                           }
                           
+                          // Always default to the last entry unless manually selected
                           return {
                             ...entry,
                             supplier: originalSupplier,
                             editedSupplierName: matchedSupplierName || originalSupplier,
                             supplierId: matchedSupplierId,
-                            isSelected: matchedSupplierName ? true : (idx === productResult.extractedEntries.length - 1),
+                            isSelected: idx === productResult.extractedEntries.length - 1,
                           };
                         });
                       }
@@ -750,24 +751,26 @@ const InventoryMigration = () => {
                   }
                 }
                 
+                // Always default to the last entry unless manually selected
+                // The user wants the last entry to be selected by default, not the first matched entry
                 return {
                   ...entry,
                   supplier: originalSupplier,
                   editedSupplierName: matchedSupplierName || originalSupplier,
                   supplierId: matchedSupplierId,
-                  isSelected: matchedSupplierName ? true : (idx === productResult.extractedEntries.length - 1),
+                  isSelected: idx === productResult.extractedEntries.length - 1,
                   matchedByInitial: matchedByInitial,
                 };
               });
               
-              const matchedEntry = productResult.extractedEntries.find(e => e.isSelected && e.editedSupplierName && e.supplierId) ||
-                productResult.extractedEntries[productResult.extractedEntries.length - 1];
-              if (matchedEntry) {
-                productResult.selectedCost = matchedEntry.editedCost !== null && matchedEntry.editedCost !== undefined 
-                  ? matchedEntry.editedCost 
-                  : matchedEntry.amount;
-                productResult.selectedSupplierName = matchedEntry.editedSupplierName || matchedEntry.supplier;
-                productResult.selectedSupplierId = matchedEntry.supplierId;
+              // Since we always default to the last entry, use it for initial selectedCost and selectedSupplierName
+              const lastEntry = productResult.extractedEntries[productResult.extractedEntries.length - 1];
+              if (lastEntry) {
+                productResult.selectedCost = lastEntry.editedCost !== null && lastEntry.editedCost !== undefined 
+                  ? lastEntry.editedCost 
+                  : lastEntry.amount;
+                productResult.selectedSupplierName = lastEntry.editedSupplierName || lastEntry.supplier;
+                productResult.selectedSupplierId = lastEntry.supplierId;
               }
             }
             return productResult;
