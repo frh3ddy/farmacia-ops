@@ -117,6 +117,12 @@ model Inventory {
   product  Product  @relation(fields: [productId], references: [id])
 
   createdAt DateTime @default(now())
+
+
+  @@index([productId])
+  @@index([locationId])
+  @@index([source])
+  @@unique([productId, locationId, source])
 }
 
 model Sale {
@@ -207,10 +213,15 @@ model DemandSignal {
 }
 
 model CatalogMapping {
-  id                String  @id @default(uuid())
-  squareVariationId String // ITEM_VARIATION.id from Square
+  id                String   @id @default(uuid())
+  squareVariationId String   // ITEM_VARIATION.id from Square
   productId         String
-  locationId        String? // Optional, null = global mapping
+  locationId        String?  // Optional, null = global mapping
+
+  // Cached selling price from Square
+  priceCents    Decimal? // Selling price in cents (from price_money.amount)
+  currency      String?  // Currency code (e.g., "USD")
+  priceSyncedAt DateTime? // When price was last synced from Square
 
   product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -274,6 +285,11 @@ model CutoverLock {
   lockedBy    String?
 
   location Location? @relation(fields: [locationId], references: [id])
+
+
+  @@index([locationId])
+  @@index([cutoverDate])
+  @@unique([locationId, cutoverDate])
 }
 
 model SupplierCostHistory {

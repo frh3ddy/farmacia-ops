@@ -536,6 +536,77 @@ const InventoryMigration = () => {
   };
 
   // Handler: Discard item
+  const handleReusePreviousApprovals = async () => {
+    const cutoverId = state.currentCutoverId || state.extractionResult?.cutoverId || state.extractionSessionId;
+    if (!cutoverId) {
+      state.setError('Missing cutover ID. Please start extraction first.');
+      return;
+    }
+
+    const itemsToReuse = state.extractionResults.filter(
+      r => r.isAlreadyApproved === true && 
+           r.existingApprovedCost !== null && 
+           r.existingApprovedCost !== undefined &&
+           r.migrationStatus !== 'APPROVED'
+    );
+
+    if (itemsToReuse.length === 0) {
+      state.setError('No items with previous approvals found to reuse.');
+      return;
+    }
+
+    const productIds = itemsToReuse.map(r => r.productId);
+
+    state.setLoading(true);
+    state.setError(null);
+
+    try {
+      const response = await fetch('/admin/inventory/cutover/reuse-previous-approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cutoverId, productIds }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to reuse previous approvals');
+      }
+
+      // Refresh extraction results to reflect new approvals
+      // Update each reused item's migrationStatus to 'APPROVED'
+      const updatedResults = state.extractionResults.map(result => {
+        if (productIds.includes(result.productId)) {
+          // Convert existingApprovedCost to number if it's a Decimal object
+          let costValue = result.existingApprovedCost;
+          if (costValue && typeof costValue === 'object' && typeof costValue.toNumber === 'function') {
+            costValue = costValue.toNumber();
+          } else if (costValue && typeof costValue === 'object' && typeof costValue.toString === 'function') {
+            costValue = parseFloat(costValue.toString());
+          }
+          
+          return {
+            ...result,
+            migrationStatus: 'APPROVED',
+            selectedCost: costValue || result.selectedCost,
+            // Clear isAlreadyApproved since it's now approved for this cutover
+            isAlreadyApproved: false,
+          };
+        }
+        return result;
+      });
+
+      state.setExtractionResults(updatedResults);
+
+      // Show success message
+      alert(`Successfully reused ${data.approvedCount} previous approval(s)`);
+    } catch (err) {
+      state.setError(err.message || 'Failed to reuse previous approvals');
+    } finally {
+      state.setLoading(false);
+    }
+  };
+
   const handleDiscardItem = async (productId) => {
     const cutoverId = state.currentCutoverId || state.extractionResult?.cutoverId || state.extractionSessionId;
     if (!cutoverId) {
@@ -1248,6 +1319,7 @@ const InventoryMigration = () => {
         dropdownSelectionRef={state.dropdownSelectionRef}
         handleApproveItem={handleApproveItem}
         handleDiscardItem={handleDiscardItem}
+        handleReusePreviousApprovals={handleReusePreviousApprovals}
         handleContinueBatch={handleContinueBatch}
         handleStartMigration={handleStartMigration}
         getSupplierSuggestions={supplierMatching.getSupplierSuggestions}

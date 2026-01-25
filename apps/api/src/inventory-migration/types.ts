@@ -40,6 +40,30 @@ export interface CostExtractionResult {
   isPreferredSupplier?: boolean; // Whether this supplier is preferred for the product
   latestCostHistoryDate?: string | null; // Latest cost history date for selected supplier
   imageUrl?: string | null; // Product image URL from Square catalog
+
+  // --- Selling price (Square catalog) - extraction-time only ---
+  sellingPrices?: Array<{
+    variationId: string;
+    variationName?: string | null;
+    priceCents: number;
+    currency: string;
+  }>;
+
+  // Primary selling price used for validation: MIN across variations
+  sellingPrice?: { priceCents: number; currency: string } | null;
+
+  // Only set when product has multiple variation prices
+  sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
+
+  // Margin guardrail for UI: selectedCost >= MIN selling price
+  priceGuard?: {
+    hasSellingPrice: boolean;
+    minSellingPriceCents?: number;
+    selectedCostCents?: number;
+    isCostTooHigh: boolean;
+    message?: string | null;
+  };
+
   extractionErrors: string[];
   requiresManualReview: boolean;
   migrationStatus?: MigrationStatus; // Migration status: PENDING, APPROVED, SKIPPED
@@ -97,6 +121,10 @@ export interface SquareCatalogObject {
   productDescription?: string | null;
   // Product image URL from Square catalog
   imageUrl?: string | null;
+
+  // Normalized selling price from variation.priceMoney (cents)
+  variationPriceCents?: number | null;
+  variationCurrency?: string | null;
 }
 
 export interface SquareInventoryCount {

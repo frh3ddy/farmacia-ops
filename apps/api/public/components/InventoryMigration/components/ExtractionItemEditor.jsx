@@ -18,6 +18,21 @@ const ExtractionItemEditor = ({
   onDiscard,
   setError,
 }) => {
+  // Helper function to format cents to dollars
+  const formatCentsToDollars = (cents) => {
+    if (cents === null || cents === undefined) return '0.00';
+    return (cents / 100).toFixed(2);
+  };
+
+  // Helper function to format currency with symbol
+  const formatCurrency = (cents, currency = 'USD') => {
+    const amount = formatCentsToDollars(cents);
+    return `$${amount}`;
+  };
+
+  // State for showing/hiding selling price details
+  const [showPriceDetails, setShowPriceDetails] = React.useState(false);
+
   // Fix: Move setState call from render to useEffect
   React.useEffect(() => {
     if (!result && currentExtractingIndex >= groupedResults.extracting.length && groupedResults.extracting.length > 0) {
@@ -482,6 +497,51 @@ const ExtractionItemEditor = ({
                     )}
                   </div>
                 </div>
+                
+                {/* Selling Price Section - Always show when price data is available */}
+                {result.sellingPrice && result.sellingPrice.priceCents !== null && result.sellingPrice.priceCents !== undefined ? (
+                  <div className="border border-gray-200 rounded-lg p-4 bg-blue-50">
+                    <h5 className="text-sm font-semibold text-gray-700 mb-2 uppercase">Selling Price</h5>
+                    {result.sellingPriceRange && result.sellingPriceRange.minCents !== result.sellingPriceRange.maxCents ? (
+                      <div>
+                        <div className="text-lg font-bold text-gray-900 mb-2">
+                          {formatCurrency(result.sellingPrice.priceCents, result.sellingPrice.currency)} – {formatCurrency(result.sellingPriceRange.maxCents, result.sellingPriceRange.currency)}
+                        </div>
+                        {result.sellingPrices && result.sellingPrices.length > 1 && (
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => setShowPriceDetails(!showPriceDetails)}
+                              className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                            >
+                              {showPriceDetails ? 'Hide' : 'Show'} details
+                              <span className={showPriceDetails ? 'transform rotate-180' : ''}>▼</span>
+                            </button>
+                            {showPriceDetails && (
+                              <div className="mt-2 space-y-1">
+                                {result.sellingPrices.map((price, idx) => (
+                                  <div key={idx} className="text-sm text-gray-700 flex items-center justify-between py-1 px-2 bg-white rounded border border-gray-200">
+                                    <span className="font-medium">
+                                      {price.variationName || `Variation ${idx + 1}`}
+                                    </span>
+                                    <span className="text-gray-900">
+                                      {formatCurrency(price.priceCents, price.currency)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-lg font-bold text-gray-900">
+                        {formatCurrency(result.sellingPrice.priceCents, result.sellingPrice.currency)}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+                
                 <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
                   <h5 className="text-sm font-semibold text-gray-700 mb-3 uppercase">Currently Selected</h5>
                   <div className="space-y-2">
@@ -496,6 +556,42 @@ const ExtractionItemEditor = ({
                       </span>
                     </div>
                   </div>
+                  
+                  {/* Cost Validation Warning Badge */}
+                  {(() => {
+                    // Check if cost is too high based on current edited cost or original priceGuard
+                    const currentCost = displayCost;
+                    const hasSellingPrice = result.sellingPrice !== null && result.sellingPrice !== undefined;
+                    const minSellingPriceCents = result.sellingPrice?.priceCents;
+                    
+                    // Recalculate warning if cost was edited, otherwise use original priceGuard
+                    let showWarning = false;
+                    let warningMessage = null;
+                    
+                    if (hasSellingPrice && minSellingPriceCents && currentCost !== null && currentCost !== undefined) {
+                      const currentCostCents = Math.round(currentCost * 100);
+                      showWarning = currentCostCents >= minSellingPriceCents;
+                      
+                      if (showWarning) {
+                        const costFormatted = `$${currentCost.toFixed(2)}`;
+                        const minPriceFormatted = formatCurrency(minSellingPriceCents);
+                        warningMessage = `Cost (${costFormatted}) is ≥ min selling price (${minPriceFormatted})`;
+                      }
+                    } else if (result.priceGuard?.isCostTooHigh && result.priceGuard?.message) {
+                      // Fallback to original priceGuard message
+                      showWarning = true;
+                      warningMessage = result.priceGuard.message;
+                    }
+                    
+                    return showWarning && warningMessage ? (
+                      <div className="mt-3 px-3 py-2 bg-red-100 border border-red-300 rounded-md">
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-600">⚠️</span>
+                          <span className="text-sm text-red-800">{warningMessage}</span>
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 {hasExtraction && (
                   <div>

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
 
 /**
@@ -28,6 +29,8 @@ interface CatalogData {
   productName: string | null;
   productDescription: string | null;
   imageUrl: string | null;
+  priceCents: number | null;  // Selling price in cents (from price_money.amount)
+  currency: string | null;     // Currency code (e.g., "USD")
 }
 
 @Injectable()
@@ -108,6 +111,8 @@ export class CatalogService {
               productName: null,
               productDescription: null,
               imageUrl: null,
+              priceCents: null,
+              currency: null,
             });
             continue;
           }
@@ -156,10 +161,47 @@ export class CatalogService {
               imageObj?.imageData?.url || imageObj?.image_data?.url || null;
           }
 
+          // Extract price from variation data (handle both camelCase and snake_case)
+          // In Square API, price is in itemVariationData.priceMoney or itemVariationData.price_money
+          const pm = variationData?.priceMoney || variationData?.price_money;
+          const rawAmount = pm?.amount;
+          
+          // Handle different amount types (number, string, bigint)
+          let priceCents: number | null = null;
+          if (rawAmount !== null && rawAmount !== undefined) {
+            if (typeof rawAmount === 'number') {
+              priceCents = rawAmount;
+            } else if (typeof rawAmount === 'string') {
+              priceCents = parseInt(rawAmount, 10);
+            } else if (typeof rawAmount === 'bigint') {
+              priceCents = Number(rawAmount);
+            }
+          }
+          
+          // Validate priceCents is a valid number
+          if (!Number.isFinite(priceCents) || priceCents === null || priceCents < 0) {
+            priceCents = null;
+          }
+          
+          const currency = typeof pm?.currency === 'string' 
+            ? pm.currency 
+            : (typeof variationData?.price_money?.currency === 'string' 
+                ? variationData.price_money.currency 
+                : null);
+
+          const finalPriceCents = Number.isFinite(priceCents) && priceCents !== null && priceCents >= 0 ? priceCents : null;
+          
+          // Log when price is found for debugging
+          if (finalPriceCents !== null) {
+            this.logger.debug(`[CATALOG_SYNC] Found price for variation ${obj.id}: ${finalPriceCents} cents (${currency || 'USD'})`);
+          }
+          
           resultMap.set(obj.id, {
             productName: finalName,
             productDescription: itemData?.description || null,
             imageUrl: imageUrl,
+            priceCents: finalPriceCents,
+            currency: currency || 'USD',
           });
         }
       } catch (error) {
@@ -174,6 +216,8 @@ export class CatalogService {
               productName: null,
               productDescription: null,
               imageUrl: null,
+              priceCents: null,
+              currency: null,
             });
           }
         }
@@ -299,9 +343,17 @@ export class CatalogService {
               productName: product.squareProductName,
               productDescription: product.squareDescription,
               imageUrl: product.squareImageUrl,
+              priceCents: null,
+              currency: null,
             };
           } else {
-             catalogData = { productName: variationName, productDescription: null, imageUrl: null };
+             catalogData = { 
+               productName: variationName, 
+               productDescription: null, 
+               imageUrl: null,
+               priceCents: null,
+               currency: null,
+             };
           }
 
           const squareProductName = catalogData.productName || variationName;
@@ -349,11 +401,29 @@ export class CatalogService {
               });
             }
 
-            // B. UPSERT MAPPING
+            // B. UPSERT MAPPING (with price data)
+            const hasPrice = catalogData.priceCents !== null && catalogData.priceCents !== undefined && Number.isFinite(catalogData.priceCents);
+            const priceData = {
+              priceCents: hasPrice && catalogData.priceCents !== null
+                ? new Prisma.Decimal(catalogData.priceCents) 
+                : null,
+              currency: catalogData.currency || 'USD',
+              priceSyncedAt: hasPrice ? new Date() : null,
+            };
+            
+            // Log when saving price for debugging
+            if (hasPrice && catalogData.priceCents !== null) {
+              this.logger.debug(`[CATALOG_SYNC] Saving price for variation ${variationId}: ${catalogData.priceCents} cents (${priceData.currency})`);
+            }
+
             if (existingMapping) {
               await tx.catalogMapping.update({
                 where: { id: existingMapping.id },
-                data: { syncedAt: new Date(), ...(locationId ? { locationId } : {}) },
+                data: { 
+                  syncedAt: new Date(), 
+                  ...priceData,
+                  ...(locationId ? { locationId } : {}) 
+                },
               });
             } else {
               await tx.catalogMapping.create({
@@ -362,6 +432,7 @@ export class CatalogService {
                   productId: product!.id,
                   locationId: locationId,
                   syncedAt: new Date(),
+                  ...priceData,
                 },
               });
               result.mappingsCreated++;

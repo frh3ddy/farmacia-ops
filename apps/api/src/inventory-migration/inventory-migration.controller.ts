@@ -266,15 +266,7 @@ export class InventoryMigrationController {
     @Param('id') supplierId: string,
     @Param('productId') productId: string,
   ) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:265',message:'getSupplierProductCostHistory called',data:{supplierId,productId},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:270',message:'Querying cost history from database',data:{supplierId,productId},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
       const costHistory = await this.prisma.supplierCostHistory.findMany({
         where: {
           supplierId,
@@ -284,11 +276,6 @@ export class InventoryMigrationController {
           effectiveAt: 'desc',
         },
       });
-
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:282',message:'Cost history queried successfully',data:{supplierId,productId,count:costHistory.length,hasData:costHistory.length>0},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
       const history = costHistory.map((entry) => ({
         id: entry.id,
         cost: entry.unitCost.toString(),
@@ -297,20 +284,11 @@ export class InventoryMigrationController {
         source: entry.source,
         isCurrent: entry.isCurrent,
       }));
-
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:294',message:'Returning cost history response',data:{supplierId,productId,historyCount:history.length},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
       return {
         success: true,
         costHistory: history,
       };
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:302',message:'Error in getSupplierProductCostHistory',data:{supplierId,productId,error:error instanceof Error ? error.message : String(error)},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
       throw new HttpException(
         { success: false, message: `Failed to fetch cost history: ${error instanceof Error ? error.message : String(error)}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -461,6 +439,29 @@ export class InventoryMigrationController {
     } catch (error) {
       throw new HttpException(
         { success: false, message: `Failed to approve item: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('reuse-previous-approvals')
+  async reusePreviousApprovals(
+    @Body() body: { cutoverId: string; productIds?: string[] },
+  ) {
+    try {
+      const result = await this.migrationService.reusePreviousApprovals(
+        body.cutoverId,
+        body.productIds || undefined,
+      );
+      return {
+        success: true,
+        approvedCount: result.approvedCount,
+        products: result.products,
+        message: `Successfully reused ${result.approvedCount} previous approval(s)`,
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to reuse previous approvals: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -646,29 +647,11 @@ export class InventoryMigrationController {
 
   @Post('continue')
   async continueCutover(@Body() body: { cutoverId: string }) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:648',message:'continueCutover called',data:{cutoverId:body?.cutoverId,hasCutoverId:!!body?.cutoverId},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-
-    if (!body.cutoverId || typeof body.cutoverId !== 'string' || body.cutoverId.trim() === '') {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:653',message:'Invalid cutoverId provided',data:{cutoverId:body?.cutoverId},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      throw new BadRequestException('cutoverId is required and must be a non-empty string');
+    if (!body.cutoverId || typeof body.cutoverId !== 'string' || body.cutoverId.trim() === '') {      throw new BadRequestException('cutoverId is required and must be a non-empty string');
     }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:658',message:'Querying cutover record from database',data:{cutoverId:body.cutoverId},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-
     const cutoverRecord = await this.prisma.cutover.findUnique({
       where: { id: body.cutoverId },
     });
-
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/32e30185-2d86-43cb-8c51-b92aab2d068e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'inventory-migration.controller.ts:664',message:'Cutover record query result',data:{cutoverId:body.cutoverId,found:!!cutoverRecord},timestamp:Date.now(),sessionId:'debug-session',runId:'pre-fix',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-
     if (!cutoverRecord) {
       throw new HttpException({ success: false, message: 'Cutover not found' }, HttpStatus.NOT_FOUND);
     }

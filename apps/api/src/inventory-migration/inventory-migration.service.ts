@@ -60,6 +60,43 @@ export class InventoryMigrationService {
     return cleanSquareName || cleanVarName || fallbackName;
   }
 
+  private buildPriceGuard(
+    sellingPrice: { priceCents: number; currency: string } | null,
+    selectedCost: number | null | undefined,
+  ) {
+    if (!sellingPrice) {
+      return {
+        hasSellingPrice: false,
+        isCostTooHigh: false,
+        message: 'No Square selling price found for this product/variation.',
+      };
+    }
+
+    const minSellingPriceCents = sellingPrice.priceCents;
+
+    if (selectedCost === null || selectedCost === undefined) {
+      return {
+        hasSellingPrice: true,
+        minSellingPriceCents,
+        isCostTooHigh: false,
+        message: null,
+      };
+    }
+
+    const selectedCostCents = Math.round(selectedCost * 100);
+    const isCostTooHigh = selectedCostCents >= minSellingPriceCents;
+
+    return {
+      hasSellingPrice: true,
+      minSellingPriceCents,
+      selectedCostCents,
+      isCostTooHigh,
+      message: isCostTooHigh
+        ? `Selected cost (${selectedCostCents} cents) is >= MIN selling price (${minSellingPriceCents} cents).`
+        : null,
+    };
+  }
+
   /**
    * Validate cutover input parameters before migration
    */
@@ -102,34 +139,21 @@ export class InventoryMigrationService {
     costBasis: 'DESCRIPTION',
     batchSize?: number | null,
     extractionSessionId?: string | null,
-    newBatchSize?: number | null, // For resuming with different batch size
-    recursionDepth: number = 0, // Track recursion depth to prevent infinite loops
+    newBatchSize?: number | null,
+    recursionDepth: number = 0,
   ): Promise<CostApprovalRequest> {
     interface ItemToProcess {
       locationId: string;
       locationName: string;
       squareInventoryItem: any;
-      itemKey: string; // Used for skipping processed items efficiently
+      itemKey: string;
     }
 
-    let sessionId = extractionSessionId || this.generateUUID();
+    const sessionId = extractionSessionId || this.generateUUID();
     let dbSession = await this.prisma.extractionSession.findUnique({ where: { id: sessionId } });
 
-    // 1. Gather all Square Inventory Items
-    let allItems: ItemToProcess[] = [];
-    const processedItemKeys = new Set<string>(); // optimization: track Square keys, not just ProductIDs
-    
-    // If resuming, load what we've already done
-    if (dbSession) {
-      const previousBatches = await this.prisma.extractionBatch.findMany({
-        where: { extractionSessionId: sessionId },
-        select: { productIds: true }, // We still track product IDs for DB consistency
-      });
-      // NOTE: For true efficiency in "Skip", we'd ideally store SquareIDs in DB. 
-      // For now, we rely on batch count logic or reprocessing cost which is acceptable if we avoid DB hits.
-    }
-
-    // Fetch Inventory
+    // 1) Collect inventory items across selected locations
+    const allItems: ItemToProcess[] = [];
     for (const locationId of locationIds) {
       const location = await this.prisma.location.findUnique({ where: { id: locationId } });
       if (!location?.squareId) continue;
@@ -140,14 +164,49 @@ export class InventoryMigrationService {
           locationId,
           locationName: location.name,
           squareInventoryItem: item,
-          itemKey: `${locationId}:${item.catalogObjectId}`
+          itemKey: `${locationId}:${item.catalogObjectId}`,
         });
       }
     }
 
-    // Get SKIPPED product IDs to filter out
+    // 2) Create session if not exists
+    if (!dbSession) {
+      const eff = batchSize && batchSize > 0 ? batchSize : allItems.length;
+      dbSession = await this.prisma.extractionSession.create({
+        data: {
+          id: sessionId,
+          cutoverId: sessionId,
+          locationIds,
+          currentBatch: 1,
+          totalBatches: Math.ceil(allItems.length / eff),
+          totalItems: allItems.length,
+          processedItems: 0,
+          batchSize: eff,
+          status: 'IN_PROGRESS',
+        },
+      });
+    }
+
+    // 3) Apply new batch size if requested
+    let effectiveBatchSize = dbSession.batchSize;
+    if (newBatchSize && newBatchSize > 0) {
+      effectiveBatchSize = newBatchSize;
+      const remainingItems = dbSession.totalItems - dbSession.processedItems;
+      const newTotalBatches = Math.ceil(remainingItems / effectiveBatchSize);
+      const newCurrentBatch = dbSession.processedItems > 0 ? Math.ceil(dbSession.processedItems / effectiveBatchSize) : 1;
+
+      await this.prisma.extractionSession.update({
+        where: { id: sessionId },
+        data: { batchSize: effectiveBatchSize, totalBatches: newTotalBatches, currentBatch: newCurrentBatch },
+      });
+      dbSession.batchSize = effectiveBatchSize;
+      dbSession.totalBatches = newTotalBatches;
+      dbSession.currentBatch = newCurrentBatch;
+    }
+
+    // 4) Figure out SKIPPED productIds for this session
     const skippedProductIds = new Set<string>();
-    if (dbSession) {
+    {
       const skippedApprovals = await this.prisma.costApproval.findMany({
         where: {
           cutoverId: dbSession.cutoverId || sessionId,
@@ -155,305 +214,381 @@ export class InventoryMigrationService {
         },
         select: { productId: true },
       });
-      skippedApprovals.forEach(a => skippedProductIds.add(a.productId));
+      skippedApprovals.forEach((a) => skippedProductIds.add(a.productId));
     }
 
-    // Initialize Session if needed
-    if (!dbSession) {
-      const effectiveBatchSize = batchSize && batchSize > 0 ? batchSize : allItems.length;
-      dbSession = await this.prisma.extractionSession.create({
-        data: {
-          id: sessionId,
-          cutoverId: sessionId, // Set cutoverId to sessionId for consistency
-          locationIds,
-          currentBatch: 1,
-          totalBatches: Math.ceil(allItems.length / effectiveBatchSize),
-          totalItems: allItems.length,
-          processedItems: 0,
-          batchSize: effectiveBatchSize,
-          status: 'IN_PROGRESS',
-        },
-      });
-    }
-
-    // Recalculate processedItems from database to ensure accuracy (count approved + skipped)
-    if (dbSession) {
-      const processedApprovals = await this.prisma.costApproval.findMany({
-        where: {
-          cutoverId: dbSession.cutoverId || sessionId,
-          migrationStatus: { in: ['APPROVED', 'SKIPPED'] },
-        },
-        select: { productId: true },
-      });
-      // Count distinct productIds (should already be unique due to unique constraint, but being safe)
-      const actualProcessedItems = new Set(processedApprovals.map(a => a.productId)).size;
-      
-      // Update processedItems if it doesn't match the actual count
-      if (dbSession.processedItems !== actualProcessedItems) {
-        await this.prisma.extractionSession.update({
-          where: { id: sessionId },
-          data: {
-            processedItems: actualProcessedItems,
-          },
-        });
-        dbSession.processedItems = actualProcessedItems;
-      }
-    }
-    
-    // Update batch size if resuming with new batch size
-    let effectiveBatchSize = dbSession.batchSize;
-    if (newBatchSize && newBatchSize > 0 && dbSession) {
-      effectiveBatchSize = newBatchSize;
-      // Recalculate total batches based on remaining items
-      const remainingItems = dbSession.totalItems - dbSession.processedItems;
-      const newTotalBatches = Math.ceil(remainingItems / effectiveBatchSize);
-      
-      // Recalculate currentBatch based on processedItems and new batch size
-      const newCurrentBatch = dbSession.processedItems > 0 
-        ? Math.ceil(dbSession.processedItems / effectiveBatchSize)
-        : 1;
-      
-      await this.prisma.extractionSession.update({
-        where: { id: sessionId },
-        data: {
-          batchSize: effectiveBatchSize,
-          totalBatches: newTotalBatches,
-          currentBatch: newCurrentBatch,
-        },
-      });
-      dbSession.batchSize = effectiveBatchSize;
-      dbSession.totalBatches = newTotalBatches;
-      dbSession.currentBatch = newCurrentBatch;
-    }
-    // Simple pagination: Skip items based on processed count from DB
+    // 5) Resolve products for this page of inventory items
     const startIndex = (dbSession.currentBatch - 1) * effectiveBatchSize;
-    const itemsToProcess = allItems.slice(startIndex, startIndex + effectiveBatchSize);
+    const pageItems = allItems.slice(startIndex, startIndex + effectiveBatchSize);
 
-    const extractionResults: CostExtractionResult[] = [];
-    const batchProductIds: string[] = [];
-    const productsToUpdate: any[] = []; // For bulk update if needed
-    const learnedInitials = (dbSession.learnedSupplierInitials as Record<string, string[]> | null) || {};
-
-    // 2. Pre-resolve Product IDs for this batch (Parallel)
-    // We map SquareID -> ProductID
-    const itemResolutionPromises = itemsToProcess.map(async (item) => {
-      const pid = await this.catalogMapper.resolveProductFromSquareVariation(
-        item.squareInventoryItem.catalogObjectId, 
-        item.locationId
-      );
-      return { ...item, productId: pid };
-    });
-    
-    const resolvedItems = await Promise.all(itemResolutionPromises);
-    const uniqueProductIds = [...new Set(resolvedItems.map(i => i.productId))];
-
-    // 3. Bulk Fetch DB Data
-    const [products, existingApprovals] = await Promise.all([
-      this.prisma.product.findMany({
-        where: { id: { in: uniqueProductIds } },
-        select: { 
-          id: true, name: true, squareProductName: true, 
-          squareDescription: true, squareImageUrl: true, 
-          squareVariationName: true 
-        }
+    const resolvedItems = await Promise.all(
+      pageItems.map(async (item) => {
+        const pid = await this.catalogMapper.resolveProductFromSquareVariation(
+          item.squareInventoryItem.catalogObjectId,
+          item.locationId,
+        );
+        return { ...item, productId: pid };
       }),
+    );
+
+    // Filter out skipped products
+    const nonSkipped = resolvedItems.filter((i) => !skippedProductIds.has(i.productId));
+
+    // 6) Dedup by productId (ONE result per product)
+    // Representative item used to fetch Square catalog data
+    const representativeByProduct = new Map<string, (typeof nonSkipped)[0]>();
+    const variationIdsByProduct = new Map<string, Set<string>>();
+
+    for (const item of nonSkipped) {
+      if (!representativeByProduct.has(item.productId)) {
+        representativeByProduct.set(item.productId, item);
+      }
+      if (!variationIdsByProduct.has(item.productId)) {
+        variationIdsByProduct.set(item.productId, new Set());
+      }
+      variationIdsByProduct.get(item.productId)!.add(item.squareInventoryItem.catalogObjectId);
+    }
+
+    const batchProductIds = Array.from(representativeByProduct.keys());
+
+    // 7) Bulk load products and approvals
+    const [products, approvals] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { id: { in: batchProductIds } },
+        select: {
+          id: true,
+          name: true,
+          squareProductName: true,
+          squareDescription: true,
+          squareImageUrl: true,
+          squareVariationName: true,
+        },
+      }),
+      // NOTE: If you want approvals strictly per session, add cutoverId filter.
       this.prisma.costApproval.findMany({
-        where: { productId: { in: uniqueProductIds } },
-        orderBy: { approvedAt: 'desc' }
-      })
+        where: { productId: { in: batchProductIds } },
+        orderBy: { approvedAt: 'desc' },
+      }),
     ]);
 
-    // Filter out SKIPPED items from resolvedItems
-    const nonSkippedResolvedItems = resolvedItems.filter(item => !skippedProductIds.has(item.productId));
-
-    const productMap = new Map(products.map(p => [p.id, p]));
-    const approvalMap = new Map(); // Store only latest approval
-    existingApprovals.forEach(a => {
-       if (!approvalMap.has(a.productId)) approvalMap.set(a.productId, a);
+    const productMap = new Map(products.map((p) => [p.id, p]));
+    const approvalMap = new Map<string, any>();
+    approvals.forEach((a) => {
+      if (!approvalMap.has(a.productId)) approvalMap.set(a.productId, a);
     });
 
-    // 4. Identification of missing data (needs Square Catalog fetch)
-    const variationsToFetch = resolvedItems
-      .filter(item => {
-        const p = productMap.get(item.productId);
-        return p && (!p.squareProductName || !p.squareDescription);
-      })
-      .map(item => item.squareInventoryItem.catalogObjectId);
-
-    // 5. Bulk Fetch Square Catalog Data (If optimized service available)
-    // Since we don't have a bulk fetch exposed here, we might still do parallel individual fetches
-    // or use the batchGet if available in squareInventoryService.
-    // Assuming squareInventoryService handles cache/batching internally or we do parallel:
-    
-    // We'll limit concurrency to avoid rate limits
-    const CHUNK_SIZE = 20;
-    const catalogDataMap = new Map();
-    
-    for (let i = 0; i < variationsToFetch.length; i += CHUNK_SIZE) {
-      const chunk = variationsToFetch.slice(i, i + CHUNK_SIZE);
-      await Promise.all(chunk.map(async (vid) => {
-        try {
-          const data = await this.squareInventory.fetchSquareCatalogObject(vid);
-          if (data) catalogDataMap.set(vid, data);
-        } catch (e) {}
-      }));
+    // 8) Load cached prices from CatalogMapping first
+    const allVariationIds = new Set<string>();
+    for (const set of variationIdsByProduct.values()) {
+      for (const v of set) allVariationIds.add(v);
     }
 
-    // 6. Processing Loop (Memory only, no DB calls)
-    let batchProductsWithExtraction = 0;
-    let batchProductsRequiringManualInput = 0;
+    const variationIds = Array.from(allVariationIds);
+    const cachedMappings = await this.prisma.catalogMapping.findMany({
+      where: {
+        squareVariationId: { in: variationIds },
+      },
+      select: {
+        squareVariationId: true,
+        priceCents: true,
+        currency: true,
+        priceSyncedAt: true,
+      } as any, // Type assertion needed until TypeScript server reloads Prisma types
+    });
 
-    for (const item of nonSkippedResolvedItems) {
-      const product = productMap.get(item.productId);
+    const cachedPriceMap = new Map(
+      cachedMappings.map((m: any) => [
+        m.squareVariationId,
+        {
+          priceCents: m.priceCents,
+          currency: m.currency,
+          priceSyncedAt: m.priceSyncedAt,
+        },
+      ]),
+    );
+
+    // 9) Identify variations needing Square fetch (missing or stale prices)
+    const PRICE_STALE_HOURS = 24;
+    const now = new Date();
+    const variationsNeedingFetch = new Set<string>();
+
+    for (const vid of variationIds) {
+      const cached = cachedPriceMap.get(vid);
+      const isStale =
+        !cached ||
+        !cached.priceCents ||
+        !cached.priceSyncedAt ||
+        now.getTime() - cached.priceSyncedAt.getTime() > PRICE_STALE_HOURS * 60 * 60 * 1000;
+
+      if (isStale) {
+        variationsNeedingFetch.add(vid);
+      }
+    }
+
+    // 10) Fetch only missing/stale prices from Square
+    const catalogDataMap = new Map<string, any>();
+    if (variationsNeedingFetch.size > 0) {
+      this.logger.log(
+        `[EXTRACTION] Fetching ${variationsNeedingFetch.size} prices from Square (${variationIds.length - variationsNeedingFetch.size} from cache)`,
+      );
+      const CHUNK = 20;
+      const fetchIds = Array.from(variationsNeedingFetch);
+      for (let i = 0; i < fetchIds.length; i += CHUNK) {
+        const chunk = fetchIds.slice(i, i + CHUNK);
+        await Promise.all(
+          chunk.map(async (vid) => {
+            try {
+              const data = await this.squareInventory.fetchSquareCatalogObject(vid);
+              if (data) {
+                catalogDataMap.set(vid, data);
+                // Update CatalogMapping with fresh price (best-effort, non-blocking)
+                const priceCents = data.variationPriceCents;
+                const currency = data.variationCurrency;
+                if (priceCents !== null && priceCents !== undefined && currency) {
+                  this.prisma.catalogMapping
+                    .updateMany({
+                      where: { squareVariationId: vid },
+                      data: {
+                        priceCents: new Prisma.Decimal(priceCents),
+                        currency: currency,
+                        priceSyncedAt: new Date(),
+                      } as any, // Type assertion needed until TypeScript server reloads Prisma types
+                    })
+                    .catch((e) =>
+                      this.logger.warn(`Failed to update price cache for ${vid}:`, e),
+                    );
+                }
+              }
+            } catch (e) {
+              this.logger.warn(`[CATALOG_FETCH_ERROR] Failed to fetch variation ${vid}:`, e);
+            }
+          }),
+        );
+      }
+    } else {
+      this.logger.log(`[EXTRACTION] All ${variationIds.length} prices loaded from cache`);
+    }
+
+    // 11) Build selling price list per product (from cache + fresh Square data)
+    const sellingPricesByProduct = new Map<
+      string,
+      Array<{ variationId: string; variationName?: string | null; priceCents: number; currency: string }>
+    >();
+
+    for (const [productId, vset] of variationIdsByProduct.entries()) {
+      const list: Array<{ variationId: string; variationName?: string | null; priceCents: number; currency: string }> = [];
+      for (const vid of vset.values()) {
+        let priceCents: number | null = null;
+        let currency: string | null = null;
+        let variationName: string | null = null;
+
+        // Try cached price first
+        const cached = cachedPriceMap.get(vid);
+        if (cached?.priceCents && cached?.currency) {
+          priceCents = cached.priceCents.toNumber();
+          currency = cached.currency;
+        }
+
+        // Always check fresh Square data for variation name and as fallback for price
+        const cat = catalogDataMap.get(vid);
+        if (cat) {
+          if (!priceCents) priceCents = cat.variationPriceCents;
+          if (!currency) currency = cat.variationCurrency;
+          // Always get variation name from Square if available (even if price is cached)
+          variationName = cat.itemVariationData?.name ?? null;
+        }
+
+        // If we have cached price but no variation name, and we're not fetching from Square,
+        // we'll show the price without the variation name (UI will show "Variation 1", etc.)
+
+        if (!Number.isFinite(priceCents) || priceCents === null || !currency) continue;
+
+        list.push({
+          variationId: vid,
+          variationName: variationName,
+          priceCents,
+          currency,
+        });
+      }
+      // de-dupe by variationId
+      const uniq = new Map(list.map((x) => [x.variationId, x]));
+      sellingPricesByProduct.set(productId, Array.from(uniq.values()));
+    }
+
+    // 10) Assemble CostExtractionResult per productId
+    const extractionResults: CostExtractionResult[] = [];
+    let productsWithExtraction = 0;
+    let productsRequiringManualInput = 0;
+
+    for (const productId of batchProductIds) {
+      const product = productMap.get(productId);
       if (!product) continue;
 
-      const existingApproval = approvalMap.get(item.productId);
-      const catalogData = catalogDataMap.get(item.squareInventoryItem.catalogObjectId);
+      const rep = representativeByProduct.get(productId)!;
+      const existingApproval = approvalMap.get(productId);
 
-      // Determine correct names/descriptions
+      // Use representative variation to fetch catalog name/desc/image
+      const repVarId = rep.squareInventoryItem.catalogObjectId;
+      const repCat = catalogDataMap.get(repVarId);
+
       let productName = product.squareProductName || product.squareVariationName || product.name;
       let productDescription = product.squareDescription || null;
       let imageUrl = product.squareImageUrl || null;
 
-      if (catalogData) {
-        // Normalize name
+      if (repCat) {
         const normalizedName = this.normalizeSquareProductName(
-          catalogData.productName, 
-          catalogData.itemVariationData?.name, 
-          productName
+          repCat.productName,
+          repCat.itemVariationData?.name,
+          productName,
         );
-        
-        // Update local variables for extraction
-        productName = normalizedName;
-        productDescription = catalogData.productDescription || productDescription;
-        imageUrl = catalogData.imageUrl || imageUrl;
 
-        // Queue DB update (Optimistic)
-        // Note: Real bulk update in Prisma is hard, we might fire individual updates in background
-        // or just accept N updates here since it's only for missing data
-        this.prisma.product.update({
-          where: { id: item.productId },
-          data: {
-             squareProductName: normalizedName,
-             squareDescription: productDescription,
-             squareImageUrl: imageUrl,
-             squareVariationName: catalogData.itemVariationData?.name,
-             squareDataSyncedAt: new Date()
-          }
-        }).catch(e => this.logger.warn(`Failed to update product ${item.productId}: ${e}`));
+        productName = normalizedName;
+        productDescription = repCat.productDescription || productDescription;
+        imageUrl = repCat.imageUrl || imageUrl;
+
+        // Cache Square metadata in background (best-effort)
+        this.prisma.product
+          .update({
+            where: { id: productId },
+            data: {
+              squareProductName: normalizedName,
+              squareDescription: productDescription,
+              squareImageUrl: imageUrl,
+              squareVariationName: repCat.itemVariationData?.name,
+              squareDataSyncedAt: new Date(),
+            },
+          })
+          .catch((e) => this.logger.warn(`Failed to update product ${productId}: ${e}`));
+      }
+
+      const sellingPrices = sellingPricesByProduct.get(productId) || [];
+      let sellingPrice: { priceCents: number; currency: string } | null = null;
+      let sellingPriceRange: { minCents: number; maxCents: number; currency: string } | null = null;
+
+      if (sellingPrices.length > 0) {
+        const currency = sellingPrices[0].currency;
+        const cents = sellingPrices.map((p) => p.priceCents);
+        const minCents = Math.min(...cents);
+        const maxCents = Math.max(...cents);
+        sellingPrice = { priceCents: minCents, currency };
+        if (minCents !== maxCents) sellingPriceRange = { minCents, maxCents, currency };
       }
 
       if (existingApproval) {
-        // Extract supplier name from notes if available (format: "Supplier: {name}")
         let supplierName = null;
         if (existingApproval.notes) {
           const match = existingApproval.notes.match(/Supplier:\s*(.+)/i);
-          if (match && match[1]) {
-            supplierName = match[1].trim();
-          }
+          if (match?.[1]) supplierName = match[1].trim();
         }
-        
-        // Already approved logic...
+
+        const selectedCost = existingApproval.approvedCost.toNumber();
+        const guard = this.buildPriceGuard(sellingPrice, selectedCost);
+
         extractionResults.push({
-            productId: item.productId,
-            productName,
-            originalDescription: productName,
-            extractedEntries: [],
-            selectedCost: existingApproval.approvedCost.toNumber(),
-            selectedSupplierName: supplierName, // Include supplier name from notes
-            extractionErrors: [],
-            requiresManualReview: false,
-            isAlreadyApproved: true,
-            existingApprovedCost: existingApproval.approvedCost,
-            existingApprovalDate: existingApproval.approvedAt,
-            existingCutoverId: existingApproval.cutoverId,
-            imageUrl,
-            migrationStatus: (existingApproval as any).migrationStatus || 'PENDING',
+          productId,
+          productName,
+          originalDescription: productName,
+          extractedEntries: [],
+          selectedCost,
+          selectedSupplierName: supplierName,
+          extractionErrors: [],
+          requiresManualReview: guard.isCostTooHigh ? true : false,
+          isAlreadyApproved: true,
+          existingApprovedCost: existingApproval.approvedCost,
+          existingApprovalDate: existingApproval.approvedAt,
+          existingCutoverId: existingApproval.cutoverId,
+          imageUrl,
+          migrationStatus: (existingApproval as any).migrationStatus || 'PENDING',
+
+          sellingPrices,
+          sellingPrice,
+          sellingPriceRange,
+          priceGuard: guard,
         });
       } else {
-        // Extraction logic
-        const extractionResult = this.costExtraction.extractCostFromDescription(
-          productName, 
-          productDescription
+        const extraction = this.costExtraction.extractCostFromDescription(productName, productDescription);
+
+        const enrichedEntries = await Promise.all(
+          extraction.extractedEntries.map(async (entry, idx) => {
+            const inferred = this.inferSupplierNameFromInitials(entry.supplier, (dbSession!.learnedSupplierInitials as any) || {});
+            const term = inferred || entry.supplier;
+            const suggestions = await this.supplierService.suggestSuppliers(term, 1);
+            const defaultDateString = new Date().toISOString().split('T')[0];
+
+            return {
+              ...entry,
+              supplierId: suggestions.find((s) => s.name.toLowerCase() === term.toLowerCase())?.id || null,
+              isEditable: true,
+              suggestedSuppliers: suggestions,
+              addToHistory: true,
+              editedSupplierName: null,
+              editedCost: null,
+              editedEffectiveDate: defaultDateString,
+              isSelected: idx === extraction.extractedEntries.length - 1,
+            };
+          }),
         );
 
-        // Enrich entries (Logic preserved)
-        // Note: suggestSuppliers is a DB call. We should ideally bulk fetch but for now 
-        // let's keep it sequential or limited parallel as fuzzy search is hard to bulk.
-        // Optimization: limit suggestions to 1 to speed up
-        const enrichedEntries = await Promise.all(extractionResult.extractedEntries.map(async (entry, idx) => {
-           const inferred = this.inferSupplierNameFromInitials(entry.supplier, learnedInitials);
-           const term = inferred || entry.supplier;
-           const suggestions = await this.supplierService.suggestSuppliers(term, 1);
-           
-           // Date logic...
-           const defaultDateString = new Date().toISOString().split('T')[0]; // Simplified for brevity
-
-           return {
-             ...entry,
-             supplierId: suggestions.find(s => s.name.toLowerCase() === term.toLowerCase())?.id || null,
-             isEditable: true,
-             suggestedSuppliers: suggestions,
-             addToHistory: true,
-             editedSupplierName: null,
-             editedCost: null,
-             editedEffectiveDate: defaultDateString,
-             isSelected: idx === extractionResult.extractedEntries.length - 1
-           };
-        }));
+        const guard = this.buildPriceGuard(sellingPrice, extraction.selectedCost);
 
         extractionResults.push({
-          ...extractionResult,
-          productId: item.productId,
+          ...extraction,
+          productId,
           productName,
           originalDescription: productName,
           extractedEntries: enrichedEntries,
           imageUrl,
           migrationStatus: 'PENDING' as const,
+          requiresManualReview: extraction.requiresManualReview || guard.isCostTooHigh,
+
+          sellingPrices,
+          sellingPrice,
+          sellingPriceRange,
+          priceGuard: guard,
         });
 
-        if (extractionResult.extractedEntries.length > 0) batchProductsWithExtraction++;
-        else batchProductsRequiringManualInput++;
+        if (extraction.extractedEntries.length > 0) productsWithExtraction++;
+        else productsRequiringManualInput++;
       }
-      
-      batchProductIds.push(item.productId);
     }
 
-    // 7. Check if all items in current batch are already processed (approved/skipped)
-    // If so, automatically advance to the next batch
-    const allItemsProcessed = extractionResults.length > 0 && 
-      extractionResults.every(r => 
-        r.migrationStatus === 'APPROVED' || 
-        r.migrationStatus === 'SKIPPED' || 
-        r.isAlreadyApproved === true
+    // 11) Auto-advance batch if everything in current page is already processed
+    const allItemsProcessed =
+      extractionResults.length > 0 &&
+      extractionResults.every(
+        (r) => r.migrationStatus === 'APPROVED' || r.migrationStatus === 'SKIPPED' || r.isAlreadyApproved === true,
       );
-    
-    // Prevent infinite recursion (max 10 consecutive completed batches)
-    if (allItemsProcessed && dbSession && recursionDepth < 10 &&
-        (dbSession.totalBatches === null || dbSession.currentBatch < dbSession.totalBatches)) {
-      // All items in current batch are already processed, advance to next batch
+
+    if (
+      allItemsProcessed &&
+      dbSession &&
+      recursionDepth < 10 &&
+      (dbSession.totalBatches === null || dbSession.currentBatch < dbSession.totalBatches)
+    ) {
       const nextBatch = dbSession.currentBatch + 1;
       await this.prisma.extractionSession.update({
         where: { id: sessionId },
         data: {
           currentBatch: nextBatch,
-          status: (dbSession.totalBatches !== null && nextBatch >= dbSession.totalBatches) ? 'COMPLETED' : 'IN_PROGRESS',
-        }
+          status:
+            dbSession.totalBatches !== null && nextBatch >= dbSession.totalBatches
+              ? 'COMPLETED'
+              : 'IN_PROGRESS',
+        },
       });
       dbSession.currentBatch = nextBatch;
-      
-      // Recursively call to get the next batch
+
       return this.extractCostsForMigration(
         locationIds,
         costBasis,
-        null, // batchSize - use existing
+        null,
         sessionId,
-        null, // newBatchSize - use existing
-        recursionDepth + 1, // Increment recursion depth
+        null,
+        recursionDepth + 1,
       );
     }
 
-    // 8. Check if batch already exists for current batch number (to avoid duplicates when resuming)
+    // 12) Create / reuse extraction batch record for this batch number
     const existingBatch = await this.prisma.extractionBatch.findFirst({
       where: {
         extractionSessionId: sessionId,
@@ -461,34 +596,30 @@ export class InventoryMigrationService {
       },
     });
 
-    let batch;
-    if (existingBatch) {
-      // Batch already exists, use it instead of creating a new one
-      batch = existingBatch;
-      // Don't update processedItems since this batch was already counted
-    } else {
-      // Create new batch
-      [batch] = await this.prisma.$transaction([
+    if (!existingBatch) {
+      await this.prisma.$transaction([
         this.prisma.extractionBatch.create({
           data: {
             extractionSessionId: sessionId,
-            cutoverId: dbSession.cutoverId || sessionId, // Set cutoverId from session or fallback to sessionId
+            cutoverId: dbSession.cutoverId || sessionId,
             batchNumber: dbSession.currentBatch,
             locationIds,
             productIds: batchProductIds,
             totalProducts: extractionResults.length,
-            productsWithExtraction: batchProductsWithExtraction,
-            productsRequiringManualInput: batchProductsRequiringManualInput,
+            productsWithExtraction: productsWithExtraction,
+            productsRequiringManualInput: productsRequiringManualInput,
             status: 'EXTRACTED',
           },
         }),
         this.prisma.extractionSession.update({
           where: { id: sessionId },
           data: {
-            // Don't increment processedItems here - it will be incremented when items are approved/skipped
-            status: (dbSession.totalBatches !== null && dbSession.currentBatch >= dbSession.totalBatches) ? 'COMPLETED' : 'IN_PROGRESS',
-          }
-        })
+            status:
+              dbSession.totalBatches !== null && dbSession.currentBatch >= dbSession.totalBatches
+                ? 'COMPLETED'
+                : 'IN_PROGRESS',
+          },
+        }),
       ]);
     }
 
@@ -498,12 +629,12 @@ export class InventoryMigrationService {
       costBasis,
       extractionResults,
       totalProducts: extractionResults.length,
-      productsWithExtraction: batchProductsWithExtraction,
-      productsRequiringManualInput: batchProductsRequiringManualInput,
+      productsWithExtraction: productsWithExtraction,
+      productsRequiringManualInput: productsRequiringManualInput,
       batchSize: effectiveBatchSize,
       currentBatch: dbSession.currentBatch,
       totalBatches: dbSession.totalBatches ?? null,
-      processedItems: dbSession.processedItems, // processedItems is only updated when items are approved/skipped
+      processedItems: dbSession.processedItems,
       totalItems: dbSession.totalItems,
       isComplete: dbSession.totalBatches !== null && dbSession.currentBatch >= dbSession.totalBatches,
       canContinue: dbSession.totalBatches === null || dbSession.currentBatch < dbSession.totalBatches,
@@ -662,7 +793,9 @@ export class InventoryMigrationService {
            try {
              const data = await this.squareInventory.fetchSquareCatalogObject(vid);
              if (data) catalogDataMap.set(vid, data);
-           } catch(e) {}
+           } catch(e) {
+             this.logger.warn(`[CATALOG_FETCH_ERROR] Failed to fetch variation ${vid} in migration:`, e);
+           }
         }));
       }
     }
@@ -845,23 +978,33 @@ export class InventoryMigrationService {
     // Validation checks... (kept from original)
     if (item.quantity < 0) throw new MigrationErrorClass('INVALID_QUANTITY', 'Quantity cannot be negative', false);
     if (item.unitCost.lt(0)) throw new MigrationErrorClass('MISSING_COST', 'Non-negative cost required', false);
-    
-    // Check existing (idempotency)
+
+    // Fast-path read (still useful), but DB uniqueness should be enforced in schema:
+    // @@unique([productId, locationId, source])
     const existing = await tx.inventory.findFirst({
       where: { productId: item.productId, locationId: item.locationId, source: 'OPENING_BALANCE' }
     });
     if (existing) return existing; // Skip if already exists to allow re-run
 
-    return tx.inventory.create({
-      data: {
-        productId: item.productId, locationId: item.locationId, quantity: item.quantity,
-        unitCost: item.unitCost, receivedAt: item.receivedAt, source: item.source, costSource: item.costSource
+    try {
+      return await tx.inventory.create({
+        data: {
+          productId: item.productId, locationId: item.locationId, quantity: item.quantity,
+          unitCost: item.unitCost, receivedAt: item.receivedAt, source: item.source, costSource: item.costSource
+        }
+      });
+    } catch (e: any) {
+      // Prisma unique constraint violation
+      if (e?.code === 'P2002') {
+        const again = await tx.inventory.findFirst({
+          where: { productId: item.productId, locationId: item.locationId, source: 'OPENING_BALANCE' }
+        });
+        if (again) return again;
       }
-    });
+      throw e;
+    }
   }
 
-  // ... (Other methods: continueBatchMigration, enableCutoverLock, etc. remain largely same but ensure they don't break the optimized flow)
-  // For brevity, assume standard getters/setters and basic CRUD methods are preserved.
   async continueBatchMigration(cutoverId: string, approvedCosts: any[]) {
       // Implementation calling executeInventoryMigration
       const cutoverRecord = await this.prisma.cutover.findUnique({ where: { id: cutoverId } });
@@ -894,7 +1037,8 @@ export class InventoryMigrationService {
       await tx.cutoverLock.createMany({
           data: locationIds.map(id => ({
               locationId: id, cutoverDate, isLocked: true, lockedAt: new Date()
-          }))
+          })),
+          skipDuplicates: true,
       });
       return { isLocked: true, lockedAt: new Date(), lockedBy: null, cutoverDate, preventsBackdatedEdits: true, preventsBackdatedSales: true, preventsSilentCostChanges: true };
   }
@@ -1334,6 +1478,115 @@ export class InventoryMigrationService {
       return { success: true };
     } catch (error) {
       this.logger.error(`Failed to approve item ${productId}: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Reuse previous approvals from any previous cutover for the current cutover
+   * Creates new CostApproval records with the same approved costs
+   */
+  async reusePreviousApprovals(
+    cutoverId: string,
+    productIds?: string[],
+  ): Promise<{ success: boolean; approvedCount: number; products: string[] }> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // 1. Find all existing CostApprovals for products (from any previous cutover)
+        //    Ordered by approvedAt DESC to get most recent
+        const whereClause: any = {
+          cutoverId: { not: cutoverId }, // Exclude current cutover
+          migrationStatus: 'APPROVED', // Only reuse approved costs
+        };
+
+        if (productIds && productIds.length > 0) {
+          whereClause.productId = { in: productIds };
+        }
+
+        const previousApprovals = await tx.costApproval.findMany({
+          where: whereClause,
+          orderBy: { approvedAt: 'desc' },
+        });
+
+        if (previousApprovals.length === 0) {
+          return { success: true, approvedCount: 0, products: [] };
+        }
+
+        // 2. Check which products already have approvals for current cutover
+        const existingApprovals = await tx.costApproval.findMany({
+          where: {
+            cutoverId,
+            productId: { in: previousApprovals.map((a) => a.productId) },
+          },
+          select: { productId: true },
+        });
+
+        const existingProductIds = new Set(existingApprovals.map((a) => a.productId));
+
+        // 3. Group by productId and take the most recent one (first in DESC order)
+        const approvalsByProduct = new Map<string, typeof previousApprovals[0]>();
+        for (const approval of previousApprovals) {
+          if (!approvalsByProduct.has(approval.productId)) {
+            approvalsByProduct.set(approval.productId, approval);
+          }
+        }
+
+        // 4. Filter out products that already have approvals for current cutover
+        const approvalsToCreate: typeof previousApprovals = [];
+        for (const [productId, approval] of approvalsByProduct.entries()) {
+          if (!existingProductIds.has(productId)) {
+            approvalsToCreate.push(approval);
+          }
+        }
+
+        if (approvalsToCreate.length === 0) {
+          return { success: true, approvedCount: 0, products: [] };
+        }
+
+        // 5. Create new CostApproval records for current cutover with same costs
+        const createdProducts: string[] = [];
+        for (const approval of approvalsToCreate) {
+          await tx.costApproval.create({
+            data: {
+              cutoverId,
+              productId: approval.productId,
+              approvedCost: approval.approvedCost,
+              source: approval.source,
+              migrationStatus: 'APPROVED',
+              notes: approval.notes,
+              approvedAt: new Date(),
+              approvedBy: approval.approvedBy,
+            },
+          });
+          createdProducts.push(approval.productId);
+        }
+
+        // 6. Update extraction session processedItems count
+        const session = await tx.extractionSession.findFirst({
+          where: {
+            OR: [{ id: cutoverId }, { cutoverId: cutoverId }],
+          },
+        });
+
+        if (session) {
+          await tx.extractionSession.update({
+            where: { id: session.id },
+            data: {
+              processedItems: {
+                increment: approvalsToCreate.length,
+              },
+            },
+          });
+        }
+
+        return {
+          success: true,
+          approvedCount: approvalsToCreate.length,
+          products: createdProducts,
+        };
+      });
+    } catch (error) {
+      this.logger.error(`Failed to reuse previous approvals: ${error}`);
       throw error;
     }
   }

@@ -41,6 +41,7 @@ const ExtractionPhase = ({
   // Handlers
   handleApproveItem,
   handleDiscardItem,
+  handleReusePreviousApprovals,
   handleContinueBatch,
   handleStartMigration,
   getSupplierSuggestions,
@@ -71,6 +72,14 @@ const ExtractionPhase = ({
   const totalItems = extractionResults.length;
   const remainingItems = groupedResults.extracting.length;
   const progress = totalItems > 0 ? ((totalItems - remainingItems) / totalItems * 100) : 0;
+
+  // Calculate items that can be reused (have previous approvals but not approved for current cutover)
+  const itemsWithPreviousApprovals = groupedResults.extracting.filter(
+    r => r.isAlreadyApproved === true && 
+         r.existingApprovedCost !== null && 
+         r.existingApprovedCost !== undefined &&
+         r.migrationStatus !== 'APPROVED' // Not already approved for current cutover
+  );
 
   // Detect batch completion when all items are approved or discarded
   useEffect(() => {
@@ -123,6 +132,15 @@ const ExtractionPhase = ({
           </div>
         </div>
         <div className="flex gap-2">
+          {itemsWithPreviousApprovals.length > 0 && (
+            <button
+              onClick={handleReusePreviousApprovals}
+              disabled={loading}
+              className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              Reuse {itemsWithPreviousApprovals.length} Previous Approval{itemsWithPreviousApprovals.length !== 1 ? 's' : ''}
+            </button>
+          )}
           <button
             onClick={() => setState('configuring')}
             className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"

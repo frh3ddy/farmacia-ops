@@ -198,6 +198,24 @@ export class SquareInventoryService {
         }
       }
 
+      // Normalize selling price (Square Money amount is in cents)
+      // Handle both camelCase (SDK) and snake_case (raw API) formats
+      const pm = (varData as any)?.priceMoney || (varData as any)?.price_money;
+      const rawAmount = pm?.amount;
+
+      const variationPriceCents =
+        typeof rawAmount === 'number'
+          ? rawAmount
+          : typeof rawAmount === 'string'
+            ? parseInt(rawAmount, 10)
+            : null;
+
+      const variationCurrency = typeof pm?.currency === 'string' 
+        ? pm.currency 
+        : (typeof (varData as any)?.price_money?.currency === 'string' 
+            ? (varData as any).price_money.currency 
+            : null);
+
       return {
         id: variationObj.id,
         type: 'ITEM_VARIATION',
@@ -205,6 +223,11 @@ export class SquareInventoryService {
         productName,
         productDescription,
         imageUrl,
+        variationPriceCents:
+          Number.isFinite(variationPriceCents) && (variationPriceCents as number) >= 0
+            ? (variationPriceCents as number)
+            : null,
+        variationCurrency,
       };
 
     } catch (error) {
