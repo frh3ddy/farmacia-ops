@@ -436,17 +436,19 @@ export class InventoryMigrationController {
         newBatchSize || null,
       );
 
-      // Get summary of all approved/skipped items for this session
-      const approvalsSummary = await this.migrationService.getApprovalsSummary(result.cutoverId);
+      // Get summary of all approved/skipped items across ALL sessions (historical)
+      const approvalsSummary = await this.migrationService.getApprovalsSummary(result.cutoverId, true);
 
       return {
         success: true,
         result,
-        // Include summary of all approved/skipped items across all batches
+        // Include summary of all approved/skipped items across all batches AND all sessions
         approvalsSummary: {
           approvedCount: approvalsSummary.approvedCount,
           skippedCount: approvalsSummary.skippedCount,
           pendingCount: approvalsSummary.pendingCount,
+          currentSessionApprovedCount: approvalsSummary.currentSessionApprovedCount,
+          currentSessionSkippedCount: approvalsSummary.currentSessionSkippedCount,
           approvedItems: approvalsSummary.approvedItems.map(item => ({
             ...item,
             approvedAt: item.approvedAt?.toISOString() || null,
@@ -673,9 +675,14 @@ export class InventoryMigrationController {
   }
 
   @Get('approvals-summary/:cutoverId')
-  async getApprovalsSummary(@Param('cutoverId') cutoverId: string) {
+  async getApprovalsSummary(
+    @Param('cutoverId') cutoverId: string,
+    @Query('includeAllSessions') includeAllSessions?: string,
+  ) {
     try {
-      const summary = await this.migrationService.getApprovalsSummary(cutoverId);
+      // Default to including all sessions to show historical approvals
+      const includeAll = includeAllSessions !== 'false';
+      const summary = await this.migrationService.getApprovalsSummary(cutoverId, includeAll);
       
       return {
         success: true,
