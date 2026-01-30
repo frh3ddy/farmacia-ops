@@ -4,10 +4,20 @@
  * Usage: npx ts-node scripts/seed-owner.ts
  */
 
+import { config } from 'dotenv';
+// Load .env BEFORE importing PrismaClient
+config();
+
 import { PrismaClient } from '@prisma/client';
 import * as crypto from 'crypto';
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  datasources: {
+    db: {
+      url: process.env.DATABASE_URL,
+    },
+  },
+});
 
 // Simple password hashing (matches auth.service.ts)
 function hashPassword(password: string): { hash: string; salt: string } {
