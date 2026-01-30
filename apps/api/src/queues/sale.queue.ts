@@ -10,7 +10,7 @@ export class SaleQueue {
     const connection = new IORedis(process.env.REDIS_URL!);
 
     this.queue = new Queue('sales', {
-      connection,
+      connection: connection as any,
       defaultJobOptions: {
         attempts: 5,
         backoff: { type: 'exponential', delay: 5000 },
