@@ -268,6 +268,21 @@ export class InventoryMigrationService {
       this.prisma.costApproval.findMany({
         where: { productId: { in: batchProductIds } },
         orderBy: { approvedAt: 'desc' },
+        select: {
+          id: true,
+          productId: true,
+          cutoverId: true,
+          migrationStatus: true,
+          approvedCost: true,
+          source: true,
+          notes: true,
+          approvedAt: true,
+          approvedBy: true,
+          sellingPriceCents: true,
+          sellingPriceCurrency: true,
+          sellingPriceRangeMinCents: true,
+          sellingPriceRangeMaxCents: true,
+        },
       }),
     ]);
 
@@ -1075,6 +1090,8 @@ export class InventoryMigrationService {
   async discardItem(
     cutoverId: string,
     productId: string,
+    sellingPrice?: { priceCents: number; currency: string } | null,
+    sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null,
   ): Promise<{ success: boolean }> {
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -1105,10 +1122,18 @@ export class InventoryMigrationService {
             approvedCost: new Prisma.Decimal(0),
             source: 'SKIPPED',
             migrationStatus: 'SKIPPED',
+            sellingPriceCents: sellingPrice?.priceCents || null,
+            sellingPriceCurrency: sellingPrice?.currency || null,
+            sellingPriceRangeMinCents: sellingPriceRange?.minCents || null,
+            sellingPriceRangeMaxCents: sellingPriceRange?.maxCents || null,
           },
           update: {
             migrationStatus: 'SKIPPED',
             source: 'SKIPPED',
+            sellingPriceCents: sellingPrice?.priceCents || null,
+            sellingPriceCurrency: sellingPrice?.currency || null,
+            sellingPriceRangeMinCents: sellingPriceRange?.minCents || null,
+            sellingPriceRangeMaxCents: sellingPriceRange?.maxCents || null,
           },
         });
         
@@ -1237,6 +1262,8 @@ export class InventoryMigrationService {
     }>,
     selectedSupplierId?: string | null,
     selectedSupplierName?: string | null,
+    sellingPrice?: { priceCents: number; currency: string } | null,
+    sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null,
   ): Promise<{ success: boolean }> {
     try {
       // Use a transaction to ensure all operations succeed or fail together
@@ -1269,12 +1296,20 @@ export class InventoryMigrationService {
             source,
             migrationStatus: 'APPROVED',
             notes: notes || null,
+            sellingPriceCents: sellingPrice?.priceCents || null,
+            sellingPriceCurrency: sellingPrice?.currency || null,
+            sellingPriceRangeMinCents: sellingPriceRange?.minCents || null,
+            sellingPriceRangeMaxCents: sellingPriceRange?.maxCents || null,
           },
           update: {
             approvedCost: new Prisma.Decimal(cost),
             source,
             migrationStatus: 'APPROVED',
             notes: notes || null,
+            sellingPriceCents: sellingPrice?.priceCents || null,
+            sellingPriceCurrency: sellingPrice?.currency || null,
+            sellingPriceRangeMinCents: sellingPriceRange?.minCents || null,
+            sellingPriceRangeMaxCents: sellingPriceRange?.maxCents || null,
           },
         });
         
@@ -1506,6 +1541,21 @@ export class InventoryMigrationService {
         const previousApprovals = await tx.costApproval.findMany({
           where: whereClause,
           orderBy: { approvedAt: 'desc' },
+          select: {
+            id: true,
+            productId: true,
+            cutoverId: true,
+            migrationStatus: true,
+            approvedCost: true,
+            source: true,
+            notes: true,
+            approvedAt: true,
+            approvedBy: true,
+            sellingPriceCents: true,
+            sellingPriceCurrency: true,
+            sellingPriceRangeMinCents: true,
+            sellingPriceRangeMaxCents: true,
+          },
         });
 
         if (previousApprovals.length === 0) {
@@ -1676,6 +1726,21 @@ export class InventoryMigrationService {
       where: {
         productId: { in: Array.from(allProductIds) },
         cutoverId: session.cutoverId || id,
+      },
+      select: {
+        id: true,
+        productId: true,
+        cutoverId: true,
+        migrationStatus: true,
+        approvedCost: true,
+        source: true,
+        notes: true,
+        approvedAt: true,
+        approvedBy: true,
+        sellingPriceCents: true,
+        sellingPriceCurrency: true,
+        sellingPriceRangeMinCents: true,
+        sellingPriceRangeMaxCents: true,
       },
     });
 

@@ -296,6 +296,126 @@ export class InventoryMigrationController {
     }
   }
 
+  @Get('products/:productId/suppliers')
+  async getProductSuppliers(@Param('productId') productId: string) {
+    try {
+      const supplierProducts = await this.prisma.supplierProduct.findMany({
+        where: {
+          productId,
+        },
+        include: {
+          supplier: {
+            select: {
+              id: true,
+              name: true,
+              contactInfo: true,
+              isActive: true,
+            },
+          },
+        },
+        orderBy: {
+          supplier: {
+            name: 'asc',
+          },
+        },
+      });
+
+      const suppliers = supplierProducts.map((sp) => ({
+        id: sp.supplier.id,
+        name: sp.supplier.name,
+        contactInfo: sp.supplier.contactInfo,
+        isActive: sp.supplier.isActive,
+        cost: sp.cost.toString(),
+        isPreferred: sp.isPreferred,
+        notes: sp.notes,
+      }));
+
+      return {
+        success: true,
+        suppliers,
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to fetch product suppliers: ${error instanceof Error ? error.message : String(error)}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('products/:productId/suppliers/cost-history')
+  async getProductSuppliersCostHistory(@Param('productId') productId: string) {
+    try {
+      const costHistories = await this.prisma.supplierCostHistory.findMany({
+        where: {
+          productId,
+        },
+        include: {
+          supplier: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: [
+          {
+            supplier: {
+              name: 'asc',
+            },
+          },
+          {
+            effectiveAt: 'desc',
+          },
+        ],
+      });
+
+      // Group by supplier
+      const groupedBySupplier = new Map<string, Array<{
+        id: string;
+        cost: string;
+        effectiveAt: string;
+        createdAt: string;
+        source: string;
+        isCurrent: boolean;
+      }>>();
+
+      for (const entry of costHistories) {
+        const supplierId = entry.supplierId;
+        if (!groupedBySupplier.has(supplierId)) {
+          groupedBySupplier.set(supplierId, []);
+        }
+        groupedBySupplier.get(supplierId)!.push({
+          id: entry.id,
+          cost: entry.unitCost.toString(),
+          effectiveAt: entry.effectiveAt.toISOString(),
+          createdAt: entry.createdAt.toISOString(),
+          source: entry.source,
+          isCurrent: entry.isCurrent,
+        });
+      }
+
+      // Convert to array format with supplier info
+      const result = Array.from(groupedBySupplier.entries()).map(([supplierId, history]) => {
+        const firstEntry = costHistories.find(e => e.supplierId === supplierId);
+        return {
+          supplierId,
+          supplierName: firstEntry?.supplier.name || 'Unknown',
+          costHistory: history,
+        };
+      });
+
+      return {
+        success: true,
+        suppliers: result,
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to fetch product suppliers cost history: ${error instanceof Error ? error.message : String(error)}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   // --- CUTOVER / MIGRATION ENDPOINTS ---
 
   @Post('extract-costs')
@@ -377,9 +497,22 @@ export class InventoryMigrationController {
   }
 
   @Post('discard-item')
-  async discardItem(@Body() body: { cutoverId: string; productId: string }) {
+  async discardItem(
+    @Body()
+    body: {
+      cutoverId: string;
+      productId: string;
+      sellingPrice?: { priceCents: number; currency: string } | null;
+      sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
+    },
+  ) {
     try {
-      const result = await this.migrationService.discardItem(body.cutoverId, body.productId);
+      const result = await this.migrationService.discardItem(
+        body.cutoverId,
+        body.productId,
+        body.sellingPrice || null,
+        body.sellingPriceRange || null,
+      );
       return result;
     } catch (error) {
       throw new HttpException(
@@ -422,6 +555,8 @@ export class InventoryMigrationController {
       }>;
       selectedSupplierId?: string | null;
       selectedSupplierName?: string | null;
+      sellingPrice?: { priceCents: number; currency: string } | null;
+      sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
     },
   ) {
     try {
@@ -434,6 +569,8 @@ export class InventoryMigrationController {
         body.extractedEntries || [],
         body.selectedSupplierId || null,
         body.selectedSupplierName || null,
+        body.sellingPrice || null,
+        body.sellingPriceRange || null,
       );
       return result;
     } catch (error) {

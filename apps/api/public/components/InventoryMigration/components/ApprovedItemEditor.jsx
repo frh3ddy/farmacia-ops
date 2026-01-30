@@ -20,6 +20,18 @@ const ApprovedItemEditor = ({
   setCostApprovals,
   setError,
 }) => {
+  // Helper function to format cents to dollars
+  const formatCentsToDollars = (cents) => {
+    if (cents === null || cents === undefined) return '0.00';
+    return (cents / 100).toFixed(2);
+  };
+
+  // Helper function to format currency with symbol
+  const formatCurrency = (cents, currency = 'USD') => {
+    const amount = formatCentsToDollars(cents);
+    return `$${amount}`;
+  };
+
   const isEditing = editingApprovedItem === result.productId;
   const edited = editedResults[result.productId] || result;
   
@@ -128,6 +140,18 @@ const ApprovedItemEditor = ({
           <h3 className="font-semibold text-gray-900">{result.productName}</h3>
           <div className="mt-2 space-y-3">
             <p className="text-sm text-gray-600">Status: <span className="text-green-600 font-medium">Approved</span></p>
+            
+            {/* Selling Price - display only */}
+            {result.sellingPrice && result.sellingPrice.priceCents !== null && result.sellingPrice.priceCents !== undefined && (
+              <div>
+                <label className="text-xs text-gray-600 font-medium">Selling Price:</label>
+                <p className="text-sm font-semibold text-gray-900 mt-1">
+                  {result.sellingPriceRange && result.sellingPriceRange.minCents !== result.sellingPriceRange.maxCents
+                    ? `${formatCurrency(result.sellingPrice.priceCents, result.sellingPrice.currency)} – ${formatCurrency(result.sellingPriceRange.maxCents, result.sellingPriceRange.currency)}`
+                    : formatCurrency(result.sellingPrice.priceCents, result.sellingPrice.currency)}
+                </p>
+              </div>
+            )}
             
             {/* Cost - editable */}
             <div>

@@ -1,10 +1,20 @@
--- AlterTable
-ALTER TABLE "Inventory" ADD COLUMN "source" TEXT,
-ADD COLUMN "costSource" TEXT,
-ADD COLUMN "migrationId" TEXT;
+-- AlterTable (only add columns if they don't exist)
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Inventory') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Inventory' AND column_name = 'source') THEN
+            ALTER TABLE "Inventory" ADD COLUMN "source" TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Inventory' AND column_name = 'costSource') THEN
+            ALTER TABLE "Inventory" ADD COLUMN "costSource" TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Inventory' AND column_name = 'migrationId') THEN
+            ALTER TABLE "Inventory" ADD COLUMN "migrationId" TEXT;
+        END IF;
+    END IF;
+END $$;
 
--- CreateTable
-CREATE TABLE "CostApproval" (
+-- CreateTable (only if it doesn't exist)
+CREATE TABLE IF NOT EXISTS "CostApproval" (
     "id" TEXT NOT NULL,
     "cutoverId" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
@@ -17,8 +27,8 @@ CREATE TABLE "CostApproval" (
     CONSTRAINT "CostApproval_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "Cutover" (
+-- CreateTable (only if it doesn't exist)
+CREATE TABLE IF NOT EXISTS "Cutover" (
     "id" TEXT NOT NULL,
     "cutoverDate" TIMESTAMP(3) NOT NULL,
     "costBasis" TEXT NOT NULL,
@@ -33,8 +43,8 @@ CREATE TABLE "Cutover" (
     CONSTRAINT "Cutover_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "CutoverLock" (
+-- CreateTable (only if it doesn't exist)
+CREATE TABLE IF NOT EXISTS "CutoverLock" (
     "id" TEXT NOT NULL,
     "locationId" TEXT,
     "cutoverDate" TIMESTAMP(3) NOT NULL,
@@ -45,15 +55,35 @@ CREATE TABLE "CutoverLock" (
     CONSTRAINT "CutoverLock_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE UNIQUE INDEX "CostApproval_cutoverId_productId_key" ON "CostApproval"("cutoverId", "productId");
+-- CreateIndex (only if it doesn't exist)
+CREATE UNIQUE INDEX IF NOT EXISTS "CostApproval_cutoverId_productId_key" ON "CostApproval"("cutoverId", "productId");
 
--- CreateIndex
-CREATE INDEX "CostApproval_cutoverId_idx" ON "CostApproval"("cutoverId");
+-- CreateIndex (only if it doesn't exist)
+CREATE INDEX IF NOT EXISTS "CostApproval_cutoverId_idx" ON "CostApproval"("cutoverId");
 
--- AddForeignKey
-ALTER TABLE "CostApproval" ADD CONSTRAINT "CostApproval_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+-- AddForeignKey (only if it doesn't exist)
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'CostApproval') THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.table_constraints 
+            WHERE constraint_name = 'CostApproval_productId_fkey'
+        ) THEN
+            ALTER TABLE "CostApproval" ADD CONSTRAINT "CostApproval_productId_fkey" 
+            FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+        END IF;
+    END IF;
+END $$;
 
--- AddForeignKey
-ALTER TABLE "CutoverLock" ADD CONSTRAINT "CutoverLock_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- AddForeignKey (only if it doesn't exist)
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'CutoverLock') THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.table_constraints 
+            WHERE constraint_name = 'CutoverLock_locationId_fkey'
+        ) THEN
+            ALTER TABLE "CutoverLock" ADD CONSTRAINT "CutoverLock_locationId_fkey" 
+            FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+        END IF;
+    END IF;
+END $$;
 

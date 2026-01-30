@@ -247,6 +247,12 @@ model CostApproval {
   approvedAt     DateTime        @default(now())
   approvedBy     String?         // User ID
   migrationStatus MigrationStatus @default(PENDING)
+  
+  // Selling price data (stored for reconstruction)
+  sellingPriceCents       Int?     // Minimum selling price in cents
+  sellingPriceCurrency     String?  // Currency code (e.g., "USD")
+  sellingPriceRangeMinCents Int?    // Minimum price in range (if multiple variations)
+  sellingPriceRangeMaxCents Int?    // Maximum price in range (if multiple variations)
 
   product Product        @relation(fields: [productId], references: [id])
   batch   ExtractionBatch? @relation(fields: [batchId], references: [id])

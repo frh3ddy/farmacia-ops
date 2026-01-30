@@ -63,16 +63,27 @@ export class DataController {
             location: true,
           },
         },
+        suppliers: {
+          select: {
+            id: true,
+          },
+        },
       },
       orderBy: {
         createdAt: 'desc',
       },
     });
 
+    // Add supplier count to each product
+    const productsWithSupplierCount = products.map((product) => ({
+      ...product,
+      supplierCount: product.suppliers?.length || 0,
+    }));
+
     return {
       success: true,
-      data: products,
-      count: products.length,
+      data: productsWithSupplierCount,
+      count: productsWithSupplierCount.length,
     };
   }
 

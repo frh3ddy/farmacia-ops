@@ -267,6 +267,8 @@ const InventoryMigration = () => {
         }
         
         state.setExtractionResult(result);
+        // Fetch session data to get approved/skipped items
+        let sessionApprovedSkippedItems = [];
         if (result.extractionSessionId) {
           state.setExtractionSessionId(result.extractionSessionId);
           try {
@@ -284,6 +286,110 @@ const InventoryMigration = () => {
               if (sessionData.session.itemsByStatus) {
                 state.setSessionItemsByStatus(sessionData.session.itemsByStatus);
               }
+              
+              // Reconstruct approved/skipped items from cost approvals
+              if (sessionData.session.costApprovals && sessionData.session.itemsByStatus) {
+                const costApprovalsMap = new Map();
+                sessionData.session.costApprovals.forEach(approval => {
+                  costApprovalsMap.set(approval.productId, approval);
+                });
+                
+                // Get product data for approved/skipped items
+                const approvedProductIds = sessionData.session.itemsByStatus.approved || [];
+                const skippedProductIds = sessionData.session.itemsByStatus.skipped || [];
+                const allApprovedSkippedIds = [...approvedProductIds, ...skippedProductIds];
+                
+                if (allApprovedSkippedIds.length > 0) {
+                  try {
+                    // Fetch product data
+                    const productsResponse = await fetch('/api/products');
+                    const productsData = await productsResponse.json();
+                    const productsMap = new Map();
+                    if (productsData.success && productsData.data) {
+                      productsData.data.forEach(product => {
+                        productsMap.set(product.id, product);
+                      });
+                    }
+                    
+                    // Reconstruct extraction results for approved/skipped items
+                    allApprovedSkippedIds.forEach(productId => {
+                      const approval = costApprovalsMap.get(productId);
+                      const product = productsMap.get(productId);
+                      
+                      if (approval) {
+                        // Extract supplier name from notes
+                        let supplierName = null;
+                        if (approval.notes) {
+                          const match = approval.notes.match(/Supplier:\s*(.+)/i);
+                          if (match && match[1]) {
+                            supplierName = match[1].trim();
+                          }
+                        }
+                        
+                        // Build selling price data from cost approval
+                        let sellingPrice = null;
+                        let sellingPriceRange = null;
+                        let sellingPrices = null;
+                        
+                        if (approval.sellingPriceCents !== null && approval.sellingPriceCents !== undefined) {
+                          const priceCents = typeof approval.sellingPriceCents === 'number' 
+                            ? approval.sellingPriceCents 
+                            : parseInt(approval.sellingPriceCents.toString());
+                          if (Number.isFinite(priceCents) && priceCents > 0) {
+                            sellingPrice = {
+                              priceCents: priceCents,
+                              currency: approval.sellingPriceCurrency || 'USD'
+                            };
+                            
+                            // Check if there's a price range
+                            if (approval.sellingPriceRangeMinCents !== null && approval.sellingPriceRangeMaxCents !== null) {
+                              const minCents = typeof approval.sellingPriceRangeMinCents === 'number'
+                                ? approval.sellingPriceRangeMinCents
+                                : parseInt(approval.sellingPriceRangeMinCents.toString());
+                              const maxCents = typeof approval.sellingPriceRangeMaxCents === 'number'
+                                ? approval.sellingPriceRangeMaxCents
+                                : parseInt(approval.sellingPriceRangeMaxCents.toString());
+                              
+                              if (minCents !== maxCents) {
+                                sellingPriceRange = {
+                                  minCents: minCents,
+                                  maxCents: maxCents,
+                                  currency: approval.sellingPriceCurrency || 'USD'
+                                };
+                              }
+                            }
+                            
+                            sellingPrices = [sellingPrice];
+                          }
+                        }
+                        
+                        // Create minimal extraction result object
+                        const reconstructedItem = {
+                          productId: productId,
+                          productName: product?.name || product?.squareProductName || 'Unknown Product',
+                          originalDescription: product?.squareDescription || null,
+                          imageUrl: product?.squareImageUrl || null,
+                          selectedCost: approval.approvedCost ? parseFloat(approval.approvedCost.toString()) : null,
+                          selectedSupplierName: supplierName,
+                          selectedSupplierId: null,
+                          migrationStatus: approval.migrationStatus === 'APPROVED' ? 'APPROVED' : 'SKIPPED',
+                          extractedEntries: [],
+                          sellingPrice: sellingPrice,
+                          sellingPriceRange: sellingPriceRange,
+                          sellingPrices: sellingPrices,
+                          priceGuard: null,
+                          isAlreadyApproved: approval.migrationStatus === 'APPROVED',
+                          existingApprovedCost: approval.approvedCost ? parseFloat(approval.approvedCost.toString()) : null,
+                        };
+                        
+                        sessionApprovedSkippedItems.push(reconstructedItem);
+                      }
+                    });
+                  } catch (err) {
+                    console.warn('Failed to fetch product data for approved/skipped items:', err);
+                  }
+                }
+              }
             }
           } catch (err) {
             console.warn('Failed to fetch session details:', err);
@@ -292,7 +398,53 @@ const InventoryMigration = () => {
         
         state.setExtractionApproved(false);
         state.setManualInputApproved(false);
-        const loadedResults = result.extractionResults || [];
+        
+        // Get loaded results from the batch
+        let loadedResults = result.extractionResults || [];
+        
+        // If continuing/resuming, merge approved and skipped items
+        if (continueExtraction) {
+          // Get approved/skipped items from current state (if any)
+          const currentResults = state.extractionResults || [];
+          const currentApprovedOrSkippedItems = currentResults.filter(r => 
+            r.migrationStatus === 'APPROVED' || r.migrationStatus === 'SKIPPED'
+          );
+          
+          // Combine: items from session + items from current state
+          // For items from session, try to get selling price from current state items if available
+          const allApprovedSkippedItems = sessionApprovedSkippedItems.map(sessionItem => {
+            // Try to find matching item in current state to get selling price
+            const currentItem = currentApprovedOrSkippedItems.find(ci => ci.productId === sessionItem.productId);
+            if (currentItem && currentItem.sellingPrice) {
+              return {
+                ...sessionItem,
+                sellingPrice: currentItem.sellingPrice,
+                sellingPriceRange: currentItem.sellingPriceRange,
+                sellingPrices: currentItem.sellingPrices,
+              };
+            }
+            return sessionItem;
+          });
+          
+          currentApprovedOrSkippedItems.forEach(item => {
+            // Only add if not already in session items (avoid duplicates)
+            if (!sessionApprovedSkippedItems.find(si => si.productId === item.productId)) {
+              allApprovedSkippedItems.push(item);
+            }
+          });
+          
+          // Create a map of new batch product IDs for quick lookup
+          const newBatchProductIdsSet = new Set(loadedResults.map(r => r.productId));
+          
+          // Remove approved/skipped items that are in the new batch (they'll be replaced)
+          const preservedItems = allApprovedSkippedItems.filter(r => 
+            !newBatchProductIdsSet.has(r.productId)
+          );
+          
+          // Merge: preserved approved/skipped items + new batch results
+          loadedResults = [...preservedItems, ...loadedResults];
+        }
+        
         state.setExtractionResults(loadedResults);
         
         // If resuming and all items in the current batch are already approved/skipped,
@@ -403,8 +555,9 @@ const InventoryMigration = () => {
                     }
                   }
                   
-                  let newResults = continueResult.extractionResults || [];
-                  newResults = newResults.map(r => {
+                  // Get new batch results
+                  let newBatchResults = continueResult.extractionResults || [];
+                  newBatchResults = newBatchResults.map(r => {
                     if (!r.isAlreadyApproved) {
                       if (r.migrationStatus && r.migrationStatus !== 'PENDING') {
                         return { ...r, migrationStatus: 'PENDING' };
@@ -416,9 +569,26 @@ const InventoryMigration = () => {
                     return r;
                   });
                   
-                  state.setExtractionResults(newResults);
+                  // Preserve approved and skipped items from previous batches
+                  const currentResults = state.extractionResults || [];
+                  const approvedOrSkippedItems = currentResults.filter(r => 
+                    r.migrationStatus === 'APPROVED' || r.migrationStatus === 'SKIPPED'
+                  );
                   
-                  if (continueResult.isComplete || newResults.length === 0) {
+                  // Create a map of new batch product IDs for quick lookup
+                  const newBatchProductIdsSet = new Set(newBatchResults.map(r => r.productId));
+                  
+                  // Remove approved/skipped items that are in the new batch (they'll be replaced)
+                  const preservedItems = approvedOrSkippedItems.filter(r => 
+                    !newBatchProductIdsSet.has(r.productId)
+                  );
+                  
+                  // Merge: preserved approved/skipped items + new batch results
+                  const mergedResults = [...preservedItems, ...newBatchResults];
+                  
+                  state.setExtractionResults(mergedResults);
+                  
+                  if (continueResult.isComplete || newBatchResults.length === 0) {
                     state.setState('reviewing');
                   } else {
                     state.setState('extracting');
@@ -614,11 +784,22 @@ const InventoryMigration = () => {
       state.setError('Missing cutover ID. Please start extraction first.');
       return;
     }
+    
+    // Get selling price from the item
+    const item = state.extractionResults.find(r => r.productId === productId);
+    const sellingPrice = item?.sellingPrice || null;
+    const sellingPriceRange = item?.sellingPriceRange || null;
+    
     try {
       const response = await fetch('/admin/inventory/cutover/discard-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cutoverId, productId }),
+        body: JSON.stringify({ 
+          cutoverId, 
+          productId,
+          sellingPrice,
+          sellingPriceRange,
+        }),
       });
       const data = await response.json();
       if (response.ok && data.success) {
@@ -789,6 +970,9 @@ const InventoryMigration = () => {
         });
         
         state.setExtractionResult(result);
+        
+        // Fetch session data to get approved/skipped items
+        let sessionApprovedSkippedItems = [];
         if (result.extractionSessionId) {
           state.setExtractionSessionId(result.extractionSessionId);
           try {
@@ -805,6 +989,110 @@ const InventoryMigration = () => {
               if (sessionData.session.itemsByStatus) {
                 state.setSessionItemsByStatus(sessionData.session.itemsByStatus);
               }
+              
+              // Reconstruct approved/skipped items from cost approvals
+              if (sessionData.session.costApprovals && sessionData.session.itemsByStatus) {
+                const costApprovalsMap = new Map();
+                sessionData.session.costApprovals.forEach(approval => {
+                  costApprovalsMap.set(approval.productId, approval);
+                });
+                
+                // Get product data for approved/skipped items
+                const approvedProductIds = sessionData.session.itemsByStatus.approved || [];
+                const skippedProductIds = sessionData.session.itemsByStatus.skipped || [];
+                const allApprovedSkippedIds = [...approvedProductIds, ...skippedProductIds];
+                
+                if (allApprovedSkippedIds.length > 0) {
+                  try {
+                    // Fetch product data
+                    const productsResponse = await fetch('/api/products');
+                    const productsData = await productsResponse.json();
+                    const productsMap = new Map();
+                    if (productsData.success && productsData.data) {
+                      productsData.data.forEach(product => {
+                        productsMap.set(product.id, product);
+                      });
+                    }
+                    
+                    // Reconstruct extraction results for approved/skipped items
+                    allApprovedSkippedIds.forEach(productId => {
+                      const approval = costApprovalsMap.get(productId);
+                      const product = productsMap.get(productId);
+                      
+                      if (approval) {
+                        // Extract supplier name from notes
+                        let supplierName = null;
+                        if (approval.notes) {
+                          const match = approval.notes.match(/Supplier:\s*(.+)/i);
+                          if (match && match[1]) {
+                            supplierName = match[1].trim();
+                          }
+                        }
+                        
+                        // Build selling price data from cost approval
+                        let sellingPrice = null;
+                        let sellingPriceRange = null;
+                        let sellingPrices = null;
+                        
+                        if (approval.sellingPriceCents !== null && approval.sellingPriceCents !== undefined) {
+                          const priceCents = typeof approval.sellingPriceCents === 'number' 
+                            ? approval.sellingPriceCents 
+                            : parseInt(approval.sellingPriceCents.toString());
+                          if (Number.isFinite(priceCents) && priceCents > 0) {
+                            sellingPrice = {
+                              priceCents: priceCents,
+                              currency: approval.sellingPriceCurrency || 'USD'
+                            };
+                            
+                            // Check if there's a price range
+                            if (approval.sellingPriceRangeMinCents !== null && approval.sellingPriceRangeMaxCents !== null) {
+                              const minCents = typeof approval.sellingPriceRangeMinCents === 'number'
+                                ? approval.sellingPriceRangeMinCents
+                                : parseInt(approval.sellingPriceRangeMinCents.toString());
+                              const maxCents = typeof approval.sellingPriceRangeMaxCents === 'number'
+                                ? approval.sellingPriceRangeMaxCents
+                                : parseInt(approval.sellingPriceRangeMaxCents.toString());
+                              
+                              if (minCents !== maxCents) {
+                                sellingPriceRange = {
+                                  minCents: minCents,
+                                  maxCents: maxCents,
+                                  currency: approval.sellingPriceCurrency || 'USD'
+                                };
+                              }
+                            }
+                            
+                            sellingPrices = [sellingPrice];
+                          }
+                        }
+                        
+                        // Create minimal extraction result object
+                        const reconstructedItem = {
+                          productId: productId,
+                          productName: product?.name || product?.squareProductName || 'Unknown Product',
+                          originalDescription: product?.squareDescription || null,
+                          imageUrl: product?.squareImageUrl || null,
+                          selectedCost: approval.approvedCost ? parseFloat(approval.approvedCost.toString()) : null,
+                          selectedSupplierName: supplierName,
+                          selectedSupplierId: null,
+                          migrationStatus: approval.migrationStatus === 'APPROVED' ? 'APPROVED' : 'SKIPPED',
+                          extractedEntries: [],
+                          sellingPrice: sellingPrice,
+                          sellingPriceRange: sellingPriceRange,
+                          sellingPrices: sellingPrices,
+                          priceGuard: null,
+                          isAlreadyApproved: approval.migrationStatus === 'APPROVED',
+                          existingApprovedCost: approval.approvedCost ? parseFloat(approval.approvedCost.toString()) : null,
+                        };
+                        
+                        sessionApprovedSkippedItems.push(reconstructedItem);
+                      }
+                    });
+                  } catch (err) {
+                    console.warn('Failed to fetch product data for approved/skipped items:', err);
+                  }
+                }
+              }
             }
           } catch (err) {
             console.warn('Failed to fetch session details:', err);
@@ -814,8 +1102,9 @@ const InventoryMigration = () => {
         state.setExtractionApproved(false);
         state.setManualInputApproved(false);
         
-        let newResults = result.extractionResults || [];
-        newResults = newResults.map(r => {
+        // Get new batch results
+        let newBatchResults = result.extractionResults || [];
+        newBatchResults = newBatchResults.map(r => {
           if (!r.isAlreadyApproved) {
             if (r.migrationStatus && r.migrationStatus !== 'PENDING') {
               return { ...r, migrationStatus: 'PENDING' };
@@ -827,10 +1116,50 @@ const InventoryMigration = () => {
           return r;
         });
         
-        state.setBatchComplete(false);
-        state.setExtractionResults(newResults);
+        // Get approved and skipped items from current state (if any)
+        const currentResults = state.extractionResults || [];
+        const currentApprovedOrSkippedItems = currentResults.filter(r => 
+          r.migrationStatus === 'APPROVED' || r.migrationStatus === 'SKIPPED'
+        );
         
-        if (result.isComplete || newResults.length === 0) {
+        // Combine: items from session + items from current state
+        // For items from session, try to get selling price from current state items if available
+        const allApprovedSkippedItems = sessionApprovedSkippedItems.map(sessionItem => {
+          // Try to find matching item in current state to get selling price
+          const currentItem = currentApprovedOrSkippedItems.find(ci => ci.productId === sessionItem.productId);
+          if (currentItem && currentItem.sellingPrice) {
+            return {
+              ...sessionItem,
+              sellingPrice: currentItem.sellingPrice,
+              sellingPriceRange: currentItem.sellingPriceRange,
+              sellingPrices: currentItem.sellingPrices,
+            };
+          }
+          return sessionItem;
+        });
+        
+        currentApprovedOrSkippedItems.forEach(item => {
+          // Only add if not already in session items (avoid duplicates)
+          if (!sessionApprovedSkippedItems.find(si => si.productId === item.productId)) {
+            allApprovedSkippedItems.push(item);
+          }
+        });
+        
+        // Create a map of new batch product IDs for quick lookup
+        const newBatchProductIdsSet = new Set(newBatchResults.map(r => r.productId));
+        
+        // Remove approved/skipped items that are in the new batch (they'll be replaced)
+        const preservedItems = allApprovedSkippedItems.filter(r => 
+          !newBatchProductIdsSet.has(r.productId)
+        );
+        
+        // Merge: preserved approved/skipped items + new batch results
+        const mergedResults = [...preservedItems, ...newBatchResults];
+        
+        state.setBatchComplete(false);
+        state.setExtractionResults(mergedResults);
+        
+        if (result.isComplete || newBatchResults.length === 0) {
           state.setState('reviewing');
         } else {
           state.setState('extracting');
@@ -984,6 +1313,8 @@ const InventoryMigration = () => {
           extractedEntries: entriesToSend,
           selectedSupplierId: supplierId,
           selectedSupplierName: supplierName,
+          sellingPrice: result.sellingPrice || null,
+          sellingPriceRange: result.sellingPriceRange || null,
         }),
       });
       
