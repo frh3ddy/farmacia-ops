@@ -22,9 +22,134 @@ model Location {
   adjustments     InventoryAdjustment[]
   receivings      InventoryReceiving[]
 
+  // Authentication relations
+  devices     Device[]
+  employeeAssignments EmployeeLocationAssignment[]
+
   createdAt DateTime @default(now())
 }
 
+// ============================================================================
+// Authentication & Authorization Models (Phase F)
+// Multi-user PIN access for retail POS with role-based permissions
+// ============================================================================
+
+// Device - represents an activated iPad/tablet at a location
+model Device {
+  id            String    @id @default(uuid())
+  locationId    String
+  name          String    // "iPad Pro - Front Counter"
+  deviceToken   String    @unique // dt_<uuid> format
+  type          DeviceType @default(FIXED)
+  isActive      Boolean   @default(true)
+  lastActiveAt  DateTime?
+  activatedAt   DateTime  @default(now())
+  activatedBy   String    // Employee ID who activated
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@index([deviceToken])
+  @@index([locationId])
+}
+
+enum DeviceType {
+  FIXED   // iPad at counter, locked to one location
+  MOBILE  // Mobile device, can switch locations
+}
+
+// Employee - a person who can log in with PIN
+model Employee {
+  id           String    @id @default(uuid())
+  name         String
+  email        String?   @unique
+  passwordHash String?   // Only for owner/manager device activation
+  pin          String?   // Hashed 4-6 digit PIN
+  pinSalt      String?   // Salt for PIN hashing
+  pinFailedAttempts Int  @default(0)
+  pinLockedUntil DateTime?
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  createdBy    String?   // Employee ID who created this employee
+
+  // Relations
+  assignments  EmployeeLocationAssignment[]
+  auditLogs    AuditLog[]
+  sessions     EmployeeSession[]
+
+  @@index([email])
+  @@index([isActive])
+}
+
+// Role assignment per location - allows different roles at different stores
+model EmployeeLocationAssignment {
+  id         String       @id @default(uuid())
+  employeeId String
+  locationId String
+  role       EmployeeRole
+  isActive   Boolean      @default(true)
+  assignedAt DateTime     @default(now())
+  assignedBy String?      // Employee ID who made this assignment
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([employeeId, locationId])
+  @@index([employeeId])
+  @@index([locationId])
+  @@index([role])
+}
+
+enum EmployeeRole {
+  OWNER      // Full access to everything
+  MANAGER    // Inventory operations, reports, limited employee management
+  CASHIER    // Read-only inventory access
+  ACCOUNTANT // Expenses, reports, read-only inventory
+}
+
+// Session - tracks active employee sessions
+model EmployeeSession {
+  id           String   @id @default(uuid())
+  employeeId   String
+  deviceToken  String   // Links to device
+  sessionToken String   @unique // st_<uuid> format
+  locationId   String   // Current location context
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  lastActivityAt DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([sessionToken])
+  @@index([employeeId])
+  @@index([deviceToken])
+  @@index([expiresAt])
+}
+
+// Audit log for all significant actions
+model AuditLog {
+  id         String   @id @default(uuid())
+  employeeId String?
+  deviceId   String?
+  locationId String?
+  action     String   // "LOGIN", "LOGOUT", "CREATE_EXPENSE", etc.
+  entityType String?  // "Expense", "InventoryAdjustment", etc.
+  entityId   String?
+  details    Json?    // Additional context
+  ipAddress  String?
+  userAgent  String?
+  timestamp  DateTime @default(now())
+
+  employee Employee? @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@index([locationId])
+  @@index([timestamp])
+  @@index([action])
+  @@index([entityType, entityId])
+}
+
+// Legacy User model (kept for backwards compatibility)
 model User {
   id   String   @id @default(uuid())
   role UserRole @default(OWNER)

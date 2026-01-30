@@ -5,6 +5,7 @@ import { DataModule } from './data/data.module';
 import { InventoryAgingModule } from './inventory-aging/inventory-aging.module';
 import { InventoryMigrationModule } from './inventory-migration/inventory-migration.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { AuthModule } from './auth/auth.module';
 import { PrismaService } from './prisma/prisma.service';
 import { LocationsController } from './locations/locations.controller';
 import { LocationsService } from './locations/locations.service';
@@ -17,6 +18,7 @@ import { LocationsService } from './locations/locations.service';
     InventoryAgingModule,
     InventoryMigrationModule,
     InventoryModule,
+    AuthModule,
   ],
   controllers: [LocationsController],
   providers: [PrismaService, LocationsService],
