@@ -1905,6 +1905,70 @@ export class InventoryMigrationService {
     }));
   }
 
+  /**
+   * Get summary of all approved and skipped items for a cutover/extraction session
+   * Returns counts and lists of items by status across all batches
+   */
+  async getApprovalsSummary(
+    cutoverId: string,
+  ): Promise<{
+    approvedCount: number;
+    skippedCount: number;
+    pendingCount: number;
+    approvedItems: Array<{
+      productId: string;
+      productName: string | null;
+      approvedCost: number;
+      source: string;
+      approvedAt: Date | null;
+      sellingPriceCents: number | null;
+      sellingPriceCurrency: string | null;
+    }>;
+    skippedItems: Array<{
+      productId: string;
+      productName: string | null;
+    }>;
+  }> {
+    // Get all approvals for this cutover
+    const allApprovals = await this.prisma.costApproval.findMany({
+      where: { cutoverId },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            squareProductName: true,
+            squareVariationName: true,
+          },
+        },
+      },
+      orderBy: { approvedAt: 'desc' },
+    });
+
+    const approved = allApprovals.filter(a => a.migrationStatus === 'APPROVED');
+    const skipped = allApprovals.filter(a => a.migrationStatus === 'SKIPPED');
+    const pending = allApprovals.filter(a => a.migrationStatus === 'PENDING');
+
+    return {
+      approvedCount: approved.length,
+      skippedCount: skipped.length,
+      pendingCount: pending.length,
+      approvedItems: approved.map(a => ({
+        productId: a.productId,
+        productName: a.product?.squareProductName || a.product?.squareVariationName || a.product?.name || null,
+        approvedCost: a.approvedCost.toNumber(),
+        source: a.source,
+        approvedAt: a.approvedAt,
+        sellingPriceCents: a.sellingPriceCents,
+        sellingPriceCurrency: a.sellingPriceCurrency,
+      })),
+      skippedItems: skipped.map(a => ({
+        productId: a.productId,
+        productName: a.product?.squareProductName || a.product?.squareVariationName || a.product?.name || null,
+      })),
+    };
+  }
+
   private generateUUID(): string {
     return randomUUID();
   }
