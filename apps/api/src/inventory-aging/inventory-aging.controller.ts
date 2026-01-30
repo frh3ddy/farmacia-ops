@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Query,
   HttpException,
   HttpStatus,
@@ -23,22 +24,12 @@ export class InventoryAgingController {
       const normalizedLocationId = locationId?.trim() || undefined;
       const normalizedCategoryId = categoryId?.trim() || undefined;
 
-      let agedBatches =
-        await this.inventoryAgingService.classifyInventoryAging();
-
-      // Filter by location if provided
-      if (normalizedLocationId) {
-        agedBatches = agedBatches.filter(
-          (batch) => batch.batch.locationId === normalizedLocationId,
+      // Filters are now pushed to the database query for efficiency
+      const agedBatches =
+        await this.inventoryAgingService.classifyInventoryAging(
+          normalizedLocationId,
+          normalizedCategoryId,
         );
-      }
-
-      // Filter by category if provided
-      if (normalizedCategoryId) {
-        agedBatches = agedBatches.filter(
-          (batch) => batch.batch.product.categoryId === normalizedCategoryId,
-        );
-      }
 
       const summary =
         this.inventoryAgingService.aggregateAgingSummary(agedBatches);
@@ -90,22 +81,12 @@ export class InventoryAgingController {
         ? (normalizedRiskLevel as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL')
         : undefined;
 
-      let agedBatches =
-        await this.inventoryAgingService.classifyInventoryAging();
-
-      // Filter by location if provided
-      if (normalizedLocationId) {
-        agedBatches = agedBatches.filter(
-          (batch) => batch.batch.locationId === normalizedLocationId,
+      // Filters are now pushed to the database query for efficiency
+      const agedBatches =
+        await this.inventoryAgingService.classifyInventoryAging(
+          normalizedLocationId,
+          normalizedCategoryId,
         );
-      }
-
-      // Filter by category if provided
-      if (normalizedCategoryId) {
-        agedBatches = agedBatches.filter(
-          (batch) => batch.batch.product.categoryId === normalizedCategoryId,
-        );
-      }
 
       let productAnalyses =
         this.inventoryAgingService.analyzeProductAging(agedBatches);
@@ -175,15 +156,11 @@ export class InventoryAgingController {
       // Normalize empty strings to undefined
       const normalizedLocationId = locationId?.trim() || undefined;
 
-      let agedBatches =
-        await this.inventoryAgingService.classifyInventoryAging();
-
-      // Filter by location if provided
-      if (normalizedLocationId) {
-        agedBatches = agedBatches.filter(
-          (batch) => batch.batch.locationId === normalizedLocationId,
+      // Filter pushed to database query for efficiency
+      const agedBatches =
+        await this.inventoryAgingService.classifyInventoryAging(
+          normalizedLocationId,
         );
-      }
 
       const locationAnalyses =
         this.inventoryAgingService.analyzeLocationAging(agedBatches);
@@ -228,15 +205,12 @@ export class InventoryAgingController {
       // Normalize empty strings to undefined
       const normalizedCategoryId = categoryId?.trim() || undefined;
 
-      let agedBatches =
-        await this.inventoryAgingService.classifyInventoryAging();
-
-      // Filter by category if provided
-      if (normalizedCategoryId) {
-        agedBatches = agedBatches.filter(
-          (batch) => batch.batch.product.categoryId === normalizedCategoryId,
+      // Filter pushed to database query for efficiency
+      const agedBatches =
+        await this.inventoryAgingService.classifyInventoryAging(
+          undefined, // locationId
+          normalizedCategoryId,
         );
-      }
 
       const categoryAnalyses =
         this.inventoryAgingService.analyzeCategoryAging(agedBatches);
@@ -280,11 +254,15 @@ export class InventoryAgingController {
     @Query('severity') severity?: string,
     @Query('type') type?: string,
     @Query('limit') limit?: string,
+    @Query('locationId') locationId?: string,
+    @Query('categoryId') categoryId?: string,
   ) {
     try {
       // Normalize empty strings to undefined
       const normalizedSeverity = severity?.trim() || undefined;
       const normalizedType = type?.trim() || undefined;
+      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedCategoryId = categoryId?.trim() || undefined;
       const validSeverities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
       const validTypes = ['AT_RISK', 'SLOW_MOVING_EXPENSIVE', 'OVERSTOCKED_CATEGORY'];
       const normalizedSeverityEnum = normalizedSeverity && validSeverities.includes(normalizedSeverity)
@@ -294,8 +272,12 @@ export class InventoryAgingController {
         ? (normalizedType as 'AT_RISK' | 'SLOW_MOVING_EXPENSIVE' | 'OVERSTOCKED_CATEGORY')
         : undefined;
 
+      // Filters pushed to database query - uses cache if available
       const agedBatches =
-        await this.inventoryAgingService.classifyInventoryAging();
+        await this.inventoryAgingService.classifyInventoryAging(
+          normalizedLocationId,
+          normalizedCategoryId,
+        );
 
       const productAnalyses =
         this.inventoryAgingService.analyzeProductAging(agedBatches);
@@ -350,6 +332,41 @@ export class InventoryAgingController {
         {
           success: false,
           message: `Failed to get actionable signals: ${errorMessage}`,
+          error: errorMessage,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('clear-cache')
+  async clearCache(
+    @Query('locationId') locationId?: string,
+    @Query('categoryId') categoryId?: string,
+  ) {
+    try {
+      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedCategoryId = categoryId?.trim() || undefined;
+
+      this.inventoryAgingService.clearAgingCache(
+        normalizedLocationId,
+        normalizedCategoryId,
+      );
+
+      return {
+        success: true,
+        message: normalizedLocationId || normalizedCategoryId
+          ? `Cache cleared for location=${normalizedLocationId || 'all'}, category=${normalizedCategoryId || 'all'}`
+          : 'All aging cache cleared',
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      console.error('[INVENTORY_AGING] Error clearing cache:', errorMessage);
+      throw new HttpException(
+        {
+          success: false,
+          message: `Failed to clear cache: ${errorMessage}`,
           error: errorMessage,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,

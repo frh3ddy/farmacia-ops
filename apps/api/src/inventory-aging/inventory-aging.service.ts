@@ -146,9 +146,56 @@ const SIGNAL_THRESHOLDS = {
   CRITICAL_CATEGORY_THRESHOLD: new Decimal(50000.0),
 };
 
+/**
+ * Cache entry for aged inventory data
+ */
+interface AgingCacheEntry {
+  agedBatches: AgedInventoryBatch[];
+  timestamp: number;
+}
+
 @Injectable()
 export class InventoryAgingService {
   constructor(private readonly prisma: PrismaService) {}
+
+  // In-memory cache for aging data (keyed by filter hash)
+  private agingCache: Map<string, AgingCacheEntry> = new Map();
+  
+  // Cache TTL: 5 minutes (aging data doesn't change frequently)
+  private readonly CACHE_TTL_MS = parseInt(
+    process.env.AGING_CACHE_TTL_MS || '300000',
+    10,
+  );
+
+  /**
+   * Generate cache key from filters
+   */
+  private getCacheKey(locationId?: string, categoryId?: string): string {
+    return `${locationId || 'all'}:${categoryId || 'all'}`;
+  }
+
+  /**
+   * Check if cache entry is valid
+   */
+  private isCacheValid(entry: AgingCacheEntry): boolean {
+    return Date.now() - entry.timestamp < this.CACHE_TTL_MS;
+  }
+
+  /**
+   * Clear aging cache (call when inventory changes)
+   */
+  clearAgingCache(locationId?: string, categoryId?: string): void {
+    if (locationId || categoryId) {
+      // Clear specific cache entry
+      const key = this.getCacheKey(locationId, categoryId);
+      this.agingCache.delete(key);
+      // Also clear the 'all' cache since it would include this data
+      this.agingCache.delete(this.getCacheKey());
+    } else {
+      // Clear all cache entries
+      this.agingCache.clear();
+    }
+  }
 
   /**
    * Calculate days since batch was received (authoritative age calculation)
@@ -186,12 +233,27 @@ export class InventoryAgingService {
 
   /**
    * Fetch all inventory batches with quantity > 0, including product and location relations
+   * @param locationId Optional filter by location
+   * @param categoryId Optional filter by category
    */
-  async getAllRemainingInventory() {
+  async getAllRemainingInventory(locationId?: string, categoryId?: string) {
+    const whereClause: any = {
+      quantity: { gt: 0 },
+    };
+
+    // Push filters to database query for efficiency
+    if (locationId) {
+      whereClause.locationId = locationId;
+    }
+
+    if (categoryId) {
+      whereClause.product = {
+        categoryId: categoryId,
+      };
+    }
+
     return await this.prisma.inventory.findMany({
-      where: {
-        quantity: { gt: 0 },
-      },
+      where: whereClause,
       include: {
         product: {
           include: {
@@ -208,15 +270,36 @@ export class InventoryAgingService {
 
   /**
    * Classify all inventory batches into aging buckets
+   * @param locationId Optional filter by location (pushed to DB query)
+   * @param categoryId Optional filter by category (pushed to DB query)
+   * @param skipCache Force fresh data fetch (default: false)
    */
-  async classifyInventoryAging(): Promise<AgedInventoryBatch[]> {
-    const batches = await this.getAllRemainingInventory();
+  async classifyInventoryAging(
+    locationId?: string,
+    categoryId?: string,
+    skipCache = false,
+  ): Promise<AgedInventoryBatch[]> {
+    const cacheKey = this.getCacheKey(locationId, categoryId);
+
+    // Check cache first
+    if (!skipCache) {
+      const cached = this.agingCache.get(cacheKey);
+      if (cached && this.isCacheValid(cached)) {
+        console.log(
+          `[InventoryAgingService] Using cached aging data for ${cacheKey} (${cached.agedBatches.length} batches, cached ${Math.floor((Date.now() - cached.timestamp) / 1000)}s ago)`,
+        );
+        return cached.agedBatches;
+      }
+    }
+
+    // Fetch from database with filters pushed down
+    const batches = await this.getAllRemainingInventory(locationId, categoryId);
     const agedBatches: AgedInventoryBatch[] = [];
 
     for (const batch of batches) {
       const ageDays = this.calculateAge(batch.receivedAt);
-      const categoryId = batch.product.categoryId;
-      const bucketConfig = this.getAgingBucketsForCategory(categoryId);
+      const batchCategoryId = batch.product.categoryId;
+      const bucketConfig = this.getAgingBucketsForCategory(batchCategoryId);
       const bucket = this.assignBucket(ageDays, bucketConfig.buckets);
       const cashValue = new Decimal(batch.quantity).mul(batch.unitCost);
 
@@ -227,6 +310,16 @@ export class InventoryAgingService {
         cashValue,
       });
     }
+
+    // Store in cache
+    this.agingCache.set(cacheKey, {
+      agedBatches,
+      timestamp: Date.now(),
+    });
+
+    console.log(
+      `[InventoryAgingService] Fetched and cached ${agedBatches.length} aged batches for ${cacheKey}`,
+    );
 
     return agedBatches;
   }
