@@ -116,7 +116,8 @@ export class InventoryReceivingService {
       }
 
       // Call Square Inventory API - RECEIVE_STOCK increases inventory
-      const response = await client.inventory.batchChangeInventory({
+      // batchCreateChanges is the current method name in Square SDK
+      await client.inventory.batchCreateChanges({
         idempotencyKey: randomUUID(),
         changes: [
           {
