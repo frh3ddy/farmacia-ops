@@ -1908,13 +1908,19 @@ export class InventoryMigrationService {
   /**
    * Get summary of all approved and skipped items for a cutover/extraction session
    * Returns counts and lists of items by status across all batches
+   * 
+   * @param cutoverId - The current cutover/session ID
+   * @param includeAllSessions - If true, includes approvals from ALL sessions (historical)
    */
   async getApprovalsSummary(
     cutoverId: string,
+    includeAllSessions: boolean = false,
   ): Promise<{
     approvedCount: number;
     skippedCount: number;
     pendingCount: number;
+    currentSessionApprovedCount: number;
+    currentSessionSkippedCount: number;
     approvedItems: Array<{
       productId: string;
       productName: string | null;
@@ -1923,15 +1929,21 @@ export class InventoryMigrationService {
       approvedAt: Date | null;
       sellingPriceCents: number | null;
       sellingPriceCurrency: string | null;
+      cutoverId: string;
+      isFromCurrentSession: boolean;
     }>;
     skippedItems: Array<{
       productId: string;
       productName: string | null;
+      cutoverId: string;
+      isFromCurrentSession: boolean;
     }>;
   }> {
-    // Get all approvals for this cutover
+    // Get approvals - either for this cutover only, or all historical
+    const whereClause = includeAllSessions ? {} : { cutoverId };
+    
     const allApprovals = await this.prisma.costApproval.findMany({
-      where: { cutoverId },
+      where: whereClause,
       include: {
         product: {
           select: {
@@ -1945,14 +1957,33 @@ export class InventoryMigrationService {
       orderBy: { approvedAt: 'desc' },
     });
 
-    const approved = allApprovals.filter(a => a.migrationStatus === 'APPROVED');
-    const skipped = allApprovals.filter(a => a.migrationStatus === 'SKIPPED');
-    const pending = allApprovals.filter(a => a.migrationStatus === 'PENDING');
+    // If includeAllSessions, deduplicate by productId (keep most recent)
+    let deduplicatedApprovals = allApprovals;
+    if (includeAllSessions) {
+      const seenProducts = new Map<string, typeof allApprovals[0]>();
+      for (const approval of allApprovals) {
+        // Keep the first one (most recent due to orderBy)
+        if (!seenProducts.has(approval.productId)) {
+          seenProducts.set(approval.productId, approval);
+        }
+      }
+      deduplicatedApprovals = Array.from(seenProducts.values());
+    }
+
+    const approved = deduplicatedApprovals.filter(a => a.migrationStatus === 'APPROVED');
+    const skipped = deduplicatedApprovals.filter(a => a.migrationStatus === 'SKIPPED');
+    const pending = deduplicatedApprovals.filter(a => a.migrationStatus === 'PENDING');
+
+    // Count current session items
+    const currentSessionApproved = approved.filter(a => a.cutoverId === cutoverId);
+    const currentSessionSkipped = skipped.filter(a => a.cutoverId === cutoverId);
 
     return {
       approvedCount: approved.length,
       skippedCount: skipped.length,
       pendingCount: pending.length,
+      currentSessionApprovedCount: currentSessionApproved.length,
+      currentSessionSkippedCount: currentSessionSkipped.length,
       approvedItems: approved.map(a => ({
         productId: a.productId,
         productName: a.product?.squareProductName || a.product?.squareVariationName || a.product?.name || null,
@@ -1961,10 +1992,14 @@ export class InventoryMigrationService {
         approvedAt: a.approvedAt,
         sellingPriceCents: a.sellingPriceCents,
         sellingPriceCurrency: a.sellingPriceCurrency,
+        cutoverId: a.cutoverId,
+        isFromCurrentSession: a.cutoverId === cutoverId,
       })),
       skippedItems: skipped.map(a => ({
         productId: a.productId,
         productName: a.product?.squareProductName || a.product?.squareVariationName || a.product?.name || null,
+        cutoverId: a.cutoverId,
+        isFromCurrentSession: a.cutoverId === cutoverId,
       })),
     };
   }
