@@ -319,17 +319,37 @@ model Expense {
   id         String @id @default(uuid())
   locationId String
 
-  type   ExpenseType
-  amount Decimal
-  date   DateTime
+  type        ExpenseType
+  amount      Decimal
+  date        DateTime
+  description String?      // Description of the expense
+  vendor      String?      // Who was paid (landlord, utility company, etc.)
+  reference   String?      // Invoice/receipt number
+  isPaid      Boolean      @default(true)
+  paidAt      DateTime?
+  notes       String?
+  createdBy   String?      // User who recorded it
+  createdAt   DateTime     @default(now())
 
   location Location @relation(fields: [locationId], references: [id])
+
+  @@index([locationId])
+  @@index([type])
+  @@index([date])
 }
 
 enum ExpenseType {
   RENT
   UTILITIES
   PAYROLL
+  INSURANCE
+  SUPPLIES      // Office/store supplies (not inventory)
+  MARKETING
+  MAINTENANCE
+  TAXES
+  BANK_FEES
+  SOFTWARE      // POS software, subscriptions
+  PROFESSIONAL  // Accountant, lawyer fees
   OTHER
 }
 
