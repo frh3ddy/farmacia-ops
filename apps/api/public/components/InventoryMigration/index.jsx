@@ -540,10 +540,22 @@ const InventoryMigration = () => {
         
         state.setState('extracting');
       } else {
-        state.setError(data.message || 'Failed to extract costs');
+        // Handle structured error from API
+        if (data.error && typeof data.error === 'object') {
+          state.setError(data.error);
+        } else {
+          state.setError(data.message || 'Failed to extract costs');
+        }
       }
     } catch (err) {
-      state.setError(err.message || 'Failed to extract costs');
+      state.setError({
+        code: 'NETWORK_ERROR',
+        message: err.message,
+        userMessage: 'Unable to connect to the server.',
+        recoveryAction: 'Check your internet connection and try again.',
+        canRetry: true,
+        canResume: !!state.extractionSessionId,
+      });
     } finally {
       state.setLoading(false);
     }
@@ -591,11 +603,23 @@ const InventoryMigration = () => {
       if (response.ok && data.success) {
         await handleExtractCosts(false);
       } else {
-        state.setError(data.message || 'Failed to start extraction');
+        // Handle structured error from API
+        if (data.error && typeof data.error === 'object') {
+          state.setError(data.error);
+        } else {
+          state.setError(data.message || 'Failed to start extraction');
+        }
         state.setLoading(false);
       }
     } catch (err) {
-      state.setError(err.message || 'Failed to start extraction');
+      state.setError({
+        code: 'NETWORK_ERROR',
+        message: err.message,
+        userMessage: 'Unable to connect to the server.',
+        recoveryAction: 'Check your internet connection and try again.',
+        canRetry: true,
+        canResume: false,
+      });
       state.setLoading(false);
     }
   };
@@ -1473,7 +1497,9 @@ const InventoryMigration = () => {
         locations={state.locations}
         loading={state.loading}
         error={state.error}
+        setError={state.setError}
         onStartExtraction={handleStartExtraction}
+        onRetry={handleStartExtraction}
         showSessionSelector={showSessionSelector}
         existingSessions={state.existingSessions}
         onResumeSession={handleResumeSession}

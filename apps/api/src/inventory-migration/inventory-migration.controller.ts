@@ -424,8 +424,38 @@ export class InventoryMigrationController {
       throw new BadRequestException('Cost basis must be DESCRIPTION for cost extraction');
     }
 
+    // Validate location IDs upfront
+    if (!body.locationIds || body.locationIds.length === 0) {
+      throw new BadRequestException({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'At least one location must be specified',
+          userMessage: 'Please select a location before starting extraction.',
+          recoveryAction: 'Select a location from the dropdown and try again.',
+          canRetry: true,
+          canResume: false,
+        },
+      });
+    }
+
     const batchSize = this.parseBatchSize(body.batchSize);
     const newBatchSize = this.parseBatchSize(body.newBatchSize);
+
+    // Validate session if resuming
+    if (body.extractionSessionId) {
+      const validation = await this.migrationService.validateExtractionSession(body.extractionSessionId);
+      if (!validation.valid) {
+        throw new HttpException(
+          {
+            success: false,
+            error: validation.error,
+            message: validation.error?.userMessage || 'Invalid session',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
 
     try {
       const result = await this.migrationService.extractCostsForMigration(
@@ -452,8 +482,41 @@ export class InventoryMigrationController {
         message: 'Cost extraction completed. Please review and approve.',
       };
     } catch (error) {
+      // Check if it's a structured ExtractionError
+      if (error && typeof error === 'object' && 'code' in error) {
+        const extractionError = error as any;
+        throw new HttpException(
+          {
+            success: false,
+            error: {
+              code: extractionError.code,
+              message: extractionError.message,
+              userMessage: extractionError.userMessage,
+              recoveryAction: extractionError.recoveryAction,
+              canRetry: extractionError.canRetry,
+              canResume: extractionError.canResume,
+            },
+            message: extractionError.userMessage || 'Cost extraction failed',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      
+      // Generic error handling with helpful message
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new HttpException(
-        { success: false, message: `Cost extraction failed: ${error}` },
+        {
+          success: false,
+          error: {
+            code: 'UNKNOWN_ERROR',
+            message: errorMessage,
+            userMessage: 'An unexpected error occurred during extraction.',
+            recoveryAction: 'Try again. If the problem persists, contact support.',
+            canRetry: true,
+            canResume: !!body.extractionSessionId,
+          },
+          message: `Cost extraction failed: ${errorMessage}`,
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -913,5 +976,176 @@ export class InventoryMigrationController {
         cutoverDate: loc.cutoverDate?.toISOString() || null,
       })),
     };
+  }
+
+  // --- ERROR RECOVERY ENDPOINTS ---
+
+  /**
+   * Validate if an extraction session can be resumed
+   */
+  @Get('extraction-session/:sessionId/validate')
+  async validateExtractionSession(@Param('sessionId') sessionId: string) {
+    const result = await this.migrationService.validateExtractionSession(sessionId);
+    
+    if (!result.valid) {
+      return {
+        success: false,
+        valid: false,
+        error: result.error,
+        message: result.error?.userMessage || 'Session validation failed',
+      };
+    }
+
+    return {
+      success: true,
+      valid: true,
+      session: result.session ? {
+        id: result.session.id,
+        status: result.session.status,
+        currentBatch: result.session.currentBatch,
+        totalBatches: result.session.totalBatches,
+        processedItems: result.session.processedItems,
+        totalItems: result.session.totalItems,
+        updatedAt: result.session.updatedAt?.toISOString(),
+      } : null,
+    };
+  }
+
+  /**
+   * Reset a failed extraction session to allow retry
+   */
+  @Post('extraction-session/:sessionId/reset')
+  async resetExtractionSession(@Param('sessionId') sessionId: string) {
+    const result = await this.migrationService.resetExtractionSession(sessionId);
+
+    if (!result.success) {
+      throw new HttpException(
+        {
+          success: false,
+          error: result.error,
+          message: result.error?.userMessage || 'Failed to reset session',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Session reset successfully. You can now resume the extraction.',
+      session: result.session ? {
+        id: result.session.id,
+        status: result.session.status,
+        currentBatch: result.session.currentBatch,
+      } : null,
+    };
+  }
+
+  /**
+   * Cleanup stale extraction sessions
+   * Admin operation - cleans up sessions that have been IN_PROGRESS for too long
+   */
+  @Post('extraction-sessions/cleanup')
+  async cleanupStaleSessions(@Body() body: { daysOld?: number }) {
+    const daysOld = body.daysOld && body.daysOld > 0 ? body.daysOld : 7;
+
+    try {
+      const result = await this.migrationService.cleanupStaleSessions(daysOld);
+      return {
+        success: true,
+        cleaned: result.cleaned,
+        sessionIds: result.sessionIds,
+        message: result.cleaned > 0 
+          ? `Cleaned up ${result.cleaned} stale session(s)` 
+          : 'No stale sessions found',
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Cleanup failed: ${error}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Get detailed health/status information for extraction diagnostics
+   */
+  @Get('extraction-health')
+  async getExtractionHealth(@Query('locationId') locationId?: string) {
+    try {
+      // Get active sessions count
+      const activeSessions = await this.prisma.extractionSession.count({
+        where: { status: 'IN_PROGRESS' },
+      });
+
+      // Get failed sessions (last 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      const failedSessions = await this.prisma.extractionSession.findMany({
+        where: {
+          status: 'FAILED',
+          updatedAt: { gte: sevenDaysAgo },
+        },
+        select: {
+          id: true,
+          locationIds: true,
+          currentBatch: true,
+          totalBatches: true,
+          updatedAt: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+      });
+
+      // Get pending approvals count
+      const pendingApprovals = await this.prisma.costApproval.count({
+        where: { migrationStatus: 'PENDING' },
+      });
+
+      // Get location-specific info if requested
+      let locationHealth = null;
+      if (locationId) {
+        const location = await this.prisma.location.findUnique({
+          where: { id: locationId },
+          select: { id: true, name: true, squareId: true },
+        });
+
+        if (location) {
+          const locationSessions = await this.prisma.extractionSession.count({
+            where: {
+              locationIds: { has: locationId },
+              status: 'IN_PROGRESS',
+            },
+          });
+
+          locationHealth = {
+            locationId: location.id,
+            locationName: location.name,
+            hasSquareId: !!location.squareId,
+            activeSessions: locationSessions,
+          };
+        }
+      }
+
+      return {
+        success: true,
+        health: {
+          activeSessions,
+          failedSessions: failedSessions.map(s => ({
+            id: s.id,
+            locationIds: s.locationIds,
+            progress: `${s.currentBatch}/${s.totalBatches}`,
+            failedAt: s.updatedAt?.toISOString(),
+          })),
+          pendingApprovals,
+          locationHealth,
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Health check failed: ${error}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 }

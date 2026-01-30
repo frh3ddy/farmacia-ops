@@ -18,6 +18,8 @@ import {
 import {
   MigrationError as MigrationErrorClass,
   CutoverValidationError,
+  ExtractionError,
+  ExtractionErrorDetail,
 } from './errors';
 import { SquareInventoryService } from './square-inventory.service';
 import { CostExtractionService } from './cost-extraction.service';
@@ -129,6 +131,156 @@ export class InventoryMigrationService {
     }
 
     return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Validate extraction session state for resumption
+   * Returns structured error if session is invalid
+   */
+  async validateExtractionSession(sessionId: string): Promise<{
+    valid: boolean;
+    session?: any;
+    error?: ExtractionErrorDetail;
+  }> {
+    const session = await this.prisma.extractionSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      return {
+        valid: false,
+        error: ExtractionError.sessionNotFound(sessionId).toJSON(),
+      };
+    }
+
+    // Check for expired sessions (older than 7 days with no activity)
+    const SESSION_EXPIRY_DAYS = 7;
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() - SESSION_EXPIRY_DAYS);
+
+    if (session.updatedAt < expiryDate && session.status === 'IN_PROGRESS') {
+      return {
+        valid: false,
+        error: ExtractionError.sessionExpired(sessionId, session.updatedAt).toJSON(),
+      };
+    }
+
+    // Only IN_PROGRESS sessions can be resumed
+    if (session.status !== 'IN_PROGRESS') {
+      return {
+        valid: false,
+        error: ExtractionError.sessionInvalidState(sessionId, session.status, 'IN_PROGRESS').toJSON(),
+      };
+    }
+
+    return { valid: true, session };
+  }
+
+  /**
+   * Reset a failed or stuck extraction session to allow retry
+   */
+  async resetExtractionSession(sessionId: string): Promise<{
+    success: boolean;
+    session?: any;
+    error?: ExtractionErrorDetail;
+  }> {
+    const session = await this.prisma.extractionSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      return {
+        success: false,
+        error: ExtractionError.sessionNotFound(sessionId).toJSON(),
+      };
+    }
+
+    // Only reset if session is in a failed or stuck state
+    if (session.status === 'COMPLETED') {
+      return {
+        success: false,
+        error: {
+          code: 'SESSION_INVALID_STATE',
+          message: 'Cannot reset a completed session',
+          userMessage: 'This session has already been completed successfully.',
+          recoveryAction: 'Start a new extraction session if you need to re-extract.',
+          canRetry: false,
+          canResume: false,
+        },
+      };
+    }
+
+    try {
+      // Reset session state to allow retry from current batch
+      const updatedSession = await this.prisma.extractionSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'IN_PROGRESS',
+          updatedAt: new Date(),
+        },
+      });
+
+      this.logger.log(`[EXTRACTION] Reset session ${sessionId} to IN_PROGRESS state`);
+      return { success: true, session: updatedSession };
+    } catch (error) {
+      this.logger.error(`[EXTRACTION] Failed to reset session ${sessionId}:`, error);
+      return {
+        success: false,
+        error: ExtractionError.databaseError('reset session', error).toJSON(),
+      };
+    }
+  }
+
+  /**
+   * Mark a session as failed with error details
+   */
+  async markSessionFailed(sessionId: string, errorDetail: ExtractionErrorDetail): Promise<void> {
+    try {
+      await this.prisma.extractionSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'FAILED',
+          updatedAt: new Date(),
+          // Store error details in a JSON field if available, or just log
+        },
+      });
+      this.logger.warn(`[EXTRACTION] Marked session ${sessionId} as FAILED: ${errorDetail.code}`);
+    } catch (error) {
+      this.logger.error(`[EXTRACTION] Failed to mark session as failed:`, error);
+    }
+  }
+
+  /**
+   * Cleanup stale sessions (older than threshold with IN_PROGRESS status)
+   */
+  async cleanupStaleSessions(daysOld: number = 7): Promise<{
+    cleaned: number;
+    sessionIds: string[];
+  }> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+
+    const staleSessions = await this.prisma.extractionSession.findMany({
+      where: {
+        status: 'IN_PROGRESS',
+        updatedAt: { lt: cutoffDate },
+      },
+      select: { id: true },
+    });
+
+    if (staleSessions.length === 0) {
+      return { cleaned: 0, sessionIds: [] };
+    }
+
+    const sessionIds = staleSessions.map(s => s.id);
+
+    await this.prisma.extractionSession.updateMany({
+      where: { id: { in: sessionIds } },
+      data: { status: 'EXPIRED' },
+    });
+
+    this.logger.log(`[EXTRACTION] Cleaned up ${sessionIds.length} stale sessions`);
+    return { cleaned: sessionIds.length, sessionIds };
   }
 
   /**
