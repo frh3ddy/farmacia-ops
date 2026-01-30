@@ -1631,29 +1631,468 @@ export class InventoryMigrationService {
   // but based on context they were likely imported or part of the file. 
   // I will assume they are methods I need to keep.
   
-  private inferSupplierNameFromInitials(initials: string, learned: Record<string, string>): string | null {
-     // Simple implementation placeholder - real one might be more complex
-     return learned[initials.toUpperCase()] || null;
-  }
-  
-  async getExtractionSession(id: string) {
-     return this.prisma.extractionSession.findUnique({ where: { id } });
+  private inferSupplierNameFromInitials(initials: string, learned: Record<string, string[]>): string | null {
+    if (!initials) return null;
+    const normalized = initials.toUpperCase().trim();
+    
+    // Check learned initials first
+    for (const [supplierName, learnedInitials] of Object.entries(learned)) {
+      if (Array.isArray(learnedInitials) && learnedInitials.some(i => i.toUpperCase() === normalized)) {
+        return supplierName;
+      }
+    }
+    return null;
   }
 
-  async approveBatch(sessionId: string, items: any[]) {
-      // Placeholder
-      return { success: true };
+  async getExtractionSession(id: string) {
+     return this.prisma.extractionSession.findUnique({ 
+       where: { id },
+       include: { batches: true } 
+     });
+  }
+
+  async updateBatchSize(extractionSessionId: string, newBatchSize: number) {
+    const session = await this.prisma.extractionSession.findUnique({
+      where: { id: extractionSessionId },
+    });
+
+    if (!session) {
+      throw new Error('Extraction session not found');
+    }
+
+    const remainingItems = session.totalItems - session.processedItems;
+    const newTotalBatches = Math.ceil(remainingItems / newBatchSize);
+    
+    await this.prisma.extractionSession.update({
+      where: { id: extractionSessionId },
+      data: {
+        batchSize: newBatchSize,
+        totalBatches: session.currentBatch + newTotalBatches - 1,
+      },
+    });
+
+    return { success: true, batchSize: newBatchSize };
+  }
+
+  async listExtractionSessions(locationId?: string) {
+    const where: any = {};
+    if (locationId) {
+      where.locationIds = { has: locationId };
+    }
+
+    return this.prisma.extractionSession.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+  }
+
+  async approveBatch(
+    batchId: string,
+    extractionApproved: boolean,
+    manualInputApproved: boolean,
+    approvedCosts: Array<{
+      productId: string;
+      cost: Prisma.Decimal;
+      source: string;
+      notes?: string | null;
+      supplierId?: string | null;
+      supplierName?: string | null;
+      isPreferred?: boolean;
+    }>,
+    supplierInitialsUpdates?: Array<{ supplierName: string; initials: string[] }> | null,
+    entriesToAddToHistory?: Array<{
+      productId: string;
+      supplierName: string;
+      supplierId?: string | null;
+      cost: number;
+      effectiveAt?: Date;
+    }> | null,
+    approvedBy?: string | null,
+    effectiveAt?: Date | null,
+  ): Promise<{ nextBatchAvailable: boolean; lastApprovedProductId?: string | null }> {
+    // 1. Validate Batch
+    const session = await this.prisma.extractionSession.findUnique({
+      where: { id: batchId },
+    });
+
+    if (!session) {
+      throw new Error('Extraction session not found');
+    }
+    
+    if (!session.cutoverId) {
+       throw new Error('Extraction session is not linked to a cutover');
+    }
+
+    // 2. Store approvals
+    await this.storeCostApprovals(
+      session.cutoverId,
+      approvedCosts,
+      approvedBy,
+      effectiveAt,
+      entriesToAddToHistory
+    );
+
+    // 3. Update Supplier Initials if provided
+    if (supplierInitialsUpdates && supplierInitialsUpdates.length > 0) {
+      const currentLearned = (session.learnedSupplierInitials as Record<string, string[]>) || {};
+      const updatedLearned = { ...currentLearned };
+      
+      for (const update of supplierInitialsUpdates) {
+        updatedLearned[update.supplierName] = update.initials;
+      }
+      
+      await this.prisma.extractionSession.update({
+        where: { id: batchId },
+        data: { learnedSupplierInitials: updatedLearned },
+      });
+    }
+
+    // 4. Check if there's a next batch
+    const isComplete = session.totalBatches !== null && session.currentBatch >= session.totalBatches;
+    const nextBatchAvailable = !isComplete;
+
+    return {
+      nextBatchAvailable,
+      lastApprovedProductId: approvedCosts.length > 0 ? approvedCosts[approvedCosts.length - 1].productId : null,
+    };
+  }
+
+  async storeCostApprovals(
+    cutoverId: string,
+    approvedCosts: Array<{
+      productId: string;
+      cost: Prisma.Decimal;
+      source: string;
+      notes?: string | null;
+      supplierId?: string | null;
+      supplierName?: string | null;
+      isPreferred?: boolean;
+    }>,
+    approvedBy?: string | null,
+    effectiveAt?: Date | null,
+    entriesToAddToHistory?: Array<{
+      productId: string;
+      supplierName: string;
+      supplierId?: string | null;
+      cost: number;
+      effectiveAt?: Date;
+    }> | null,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+        // Bulk upsert not directly supported in Prisma easily without raw query or loop
+        // Loop is fine for batch sizes ~50-100
+        for (const ac of approvedCosts) {
+            await tx.costApproval.upsert({
+                where: {
+                    cutoverId_productId: {
+                        cutoverId: cutoverId,
+                        productId: ac.productId
+                    }
+                },
+                create: {
+                    cutoverId: cutoverId,
+                    productId: ac.productId,
+                    approvedCost: ac.cost,
+                    source: ac.source,
+                    notes: ac.notes,
+                    migrationStatus: 'APPROVED',
+                    approvedBy: approvedBy || null,
+                    approvedAt: new Date(), // Now
+                },
+                update: {
+                    approvedCost: ac.cost,
+                    source: ac.source,
+                    notes: ac.notes,
+                    migrationStatus: 'APPROVED',
+                    approvedBy: approvedBy || null,
+                    approvedAt: new Date(),
+                }
+            });
+
+            // Update Supplier Product if provided
+            if (ac.supplierId || ac.supplierName) {
+                // Determine supplier ID if only name provided
+                let supplierId = ac.supplierId;
+                if (!supplierId && ac.supplierName) {
+                    const sup = await this.supplierService.findOrCreateSupplier(ac.supplierName);
+                    supplierId = sup.id;
+                }
+
+                if (supplierId) {
+                    await tx.supplierProduct.upsert({
+                        where: {
+                            supplierId_productId: {
+                                supplierId: supplierId,
+                                productId: ac.productId
+                            }
+                        },
+                        create: {
+                            supplierId: supplierId,
+                            productId: ac.productId,
+                            cost: ac.cost,
+                            isPreferred: ac.isPreferred || false,
+                            notes: ac.notes
+                        },
+                        update: {
+                            cost: ac.cost,
+                            isPreferred: ac.isPreferred || false,
+                            notes: ac.notes
+                        }
+                    });
+                }
+            }
+        }
+
+        // Process extra history entries
+        if (entriesToAddToHistory && entriesToAddToHistory.length > 0) {
+            for (const entry of entriesToAddToHistory) {
+                let supplierId = entry.supplierId;
+                if (!supplierId && entry.supplierName) {
+                    const sup = await this.supplierService.findOrCreateSupplier(entry.supplierName);
+                    supplierId = sup.id;
+                }
+
+                if (supplierId) {
+                    await tx.supplierCostHistory.create({
+                        data: {
+                            productId: entry.productId,
+                            supplierId: supplierId,
+                            unitCost: new Prisma.Decimal(entry.cost),
+                            effectiveAt: entry.effectiveAt || new Date(),
+                            source: 'MIGRATION_HISTORY',
+                            isCurrent: false // History entries usually aren't current unless most recent
+                        }
+                    });
+                }
+            }
+        }
+    });
+  }
+
+  async getCostApprovals(
+    cutoverId: string,
+  ): Promise<{ productId: string; cost: Prisma.Decimal }[]> {
+    const approvals = await this.prisma.costApproval.findMany({
+      where: { 
+          cutoverId: cutoverId,
+          migrationStatus: 'APPROVED'
+      },
+      select: {
+        productId: true,
+        approvedCost: true,
+      },
+    });
+
+    return approvals.map((a) => ({
+      productId: a.productId,
+      cost: a.approvedCost,
+    }));
   }
 
   private generateUUID(): string {
     return randomUUID();
   }
   
-  async previewCutover(input: CutoverInput) {
-      // Placeholder - likely similar logic to extractCosts or execute but read-only
-      // For conflict resolution, I'm assuming the existing method was sufficient or I should have copied it.
-      // I'll leave a stub or copy if I had it. 
-      // The original Read showed previewCutover.
-      return { locations: [], totalProducts: 0, productsWithCost: 0, productsMissingCost: 0, estimatedOpeningBalances: 0, warnings: [] };
+  async previewCutover(
+    input: CutoverInput,
+    approvedCosts?: { productId: string; cost: Prisma.Decimal }[],
+  ): Promise<{
+    locations: LocationPreview[];
+    totalProducts: number;
+    productsWithCost: number;
+    productsMissingCost: number;
+    estimatedOpeningBalances: number;
+    warnings: MigrationWarning[];
+  }> {
+    const locations: LocationPreview[] = [];
+    let totalProducts = 0;
+    let productsWithCost = 0;
+    let productsMissingCost = 0;
+    const warnings: MigrationWarning[] = [];
+
+    const approvedCostsMap = new Map<string, Prisma.Decimal>();
+    if (approvedCosts) {
+      for (const approvedCost of approvedCosts) {
+        approvedCostsMap.set(approvedCost.productId, approvedCost.cost);
+      }
+    }
+
+    for (const locationId of input.locationIds) {
+      const location = await this.prisma.location.findUnique({
+        where: { id: locationId },
+      });
+
+      if (!location || !location.squareId) {
+        warnings.push({
+          locationId: locationId,
+          message: 'Location does not have Square ID configured',
+          recommendation: 'Configure Square ID for location',
+        });
+        continue;
+      }
+
+      let squareInventory;
+      try {
+        squareInventory = await this.squareInventory.fetchSquareInventory(
+          location.squareId,
+        );
+      } catch (error) {
+        warnings.push({
+          locationId: locationId,
+          message: `Failed to fetch Square inventory for location ${location.name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+        continue;
+      }
+
+      // Optimization: Batch process
+      // 1. Collect IDs
+      const catalogObjectIds = squareInventory.map((item) => item.catalogObjectId);
+
+      // 2. Batch resolve products
+      const variationToProductMap =
+        await this.catalogMapper.batchResolveProductsFromSquareVariations(
+          catalogObjectIds,
+          locationId,
+        );
+
+      // 3. Batch fetch catalog objects (needed for DESCRIPTION basis or just name fallback)
+      let catalogObjectsMap = new Map();
+      if (input.costBasis === 'DESCRIPTION') {
+         try {
+            catalogObjectsMap = await this.squareInventory.batchFetchSquareCatalogObjects(catalogObjectIds);
+         } catch (e) {
+             warnings.push({ locationId, message: 'Failed to batch fetch catalog objects' });
+         }
+      }
+
+      // 4. Fetch products
+      const productIds = Array.from(variationToProductMap.values());
+      const products = await this.prisma.product.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, name: true },
+      });
+      const productsMap = new Map(products.map((p) => [p.id, p]));
+
+      // 5. Batch fetch average costs if needed
+      let averageCostsMap = new Map<string, Prisma.Decimal>();
+      if (input.costBasis === 'AVERAGE_COST') {
+        const supplierProducts = await this.prisma.supplierProduct.findMany({
+          where: { productId: { in: productIds } },
+          select: { productId: true, cost: true },
+        });
+
+        // Group by product and calculate average
+        const productCosts = new Map<string, Prisma.Decimal[]>();
+        for (const sp of supplierProducts) {
+          if (!productCosts.has(sp.productId)) {
+            productCosts.set(sp.productId, []);
+          }
+          productCosts.get(sp.productId)!.push(sp.cost);
+        }
+
+        for (const [productId, costs] of productCosts.entries()) {
+          let total = new Prisma.Decimal(0);
+          for (const cost of costs) total = total.add(cost);
+          averageCostsMap.set(productId, total.div(costs.length));
+        }
+      }
+
+      const productsPreview: ProductPreview[] = [];
+
+      for (const item of squareInventory) {
+        try {
+          const productId = variationToProductMap.get(item.catalogObjectId);
+          if (!productId) {
+             continue; 
+          }
+
+          const product = productsMap.get(productId);
+          if (!product) {
+            continue;
+          }
+
+          const approvedCost = approvedCostsMap.get(productId);
+
+          let productNameForExtraction = product.name;
+          if (input.costBasis === 'DESCRIPTION') {
+            const catalogObject = catalogObjectsMap.get(item.catalogObjectId);
+            productNameForExtraction =
+              catalogObject?.itemVariationData?.name || product.name;
+          }
+
+          // Use optimized determination logic
+          let unitCost: Prisma.Decimal | null = null;
+          
+          if (input.costBasis === 'MANUAL_INPUT') {
+               // In preview, manual inputs are usually in approvedCosts
+               if (approvedCost) unitCost = approvedCost;
+          } else if (input.costBasis === 'DESCRIPTION') {
+              if (approvedCost) {
+                  unitCost = approvedCost;
+              } else {
+                  const extractionResult = this.costExtraction.extractCostFromDescription(productNameForExtraction);
+                   if (
+                      extractionResult.selectedCost !== null &&
+                      extractionResult.selectedCost !== undefined
+                    ) {
+                      unitCost = new Prisma.Decimal(extractionResult.selectedCost);
+                    }
+              }
+          } else if (input.costBasis === 'SQUARE_COST') {
+               // Assuming batchFetchSquareCosts is implemented or we rely on determineUnitCost which returns null currently
+               unitCost = null; 
+          } else if (input.costBasis === 'AVERAGE_COST') {
+              unitCost = averageCostsMap.get(productId) || null;
+          }
+
+          const hasCost = unitCost !== null;
+
+          productsPreview.push({
+            productId: productId,
+            productName: product.name,
+            quantity: item.quantity,
+            unitCost: unitCost ? unitCost.toNumber() : null,
+            costSource: hasCost ? input.costBasis : null,
+            hasCost: hasCost,
+          });
+
+          totalProducts++;
+          if (hasCost) {
+            productsWithCost++;
+          } else {
+            productsMissingCost++;
+          }
+        } catch (error) {
+          warnings.push({
+            productId: undefined,
+            locationId: locationId,
+            message: `Error processing item: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          });
+        }
+      }
+
+      locations.push({
+        locationId: locationId,
+        locationName: location.name,
+        products: productsPreview,
+        totalProducts: productsPreview.length,
+        productsWithCost: productsPreview.filter((p) => p.hasCost).length,
+        productsMissingCost: productsPreview.filter((p) => !p.hasCost).length,
+      });
+    }
+
+    return {
+      locations: locations,
+      totalProducts: totalProducts,
+      productsWithCost: productsWithCost,
+      productsMissingCost: productsMissingCost,
+      estimatedOpeningBalances: productsWithCost,
+      warnings: warnings,
+    };
   }
 }
