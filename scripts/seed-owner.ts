@@ -4,20 +4,23 @@
  * Usage: npx ts-node scripts/seed-owner.ts
  */
 
-import { config } from 'dotenv';
-// Load .env BEFORE importing PrismaClient
-config();
-
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 import * as crypto from 'crypto';
 
-const prisma = new PrismaClient({
-  datasources: {
-    db: {
-      url: process.env.DATABASE_URL,
-    },
-  },
-});
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  console.error('❌ DATABASE_URL environment variable is not set.');
+  console.error('   Create a .env file with: DATABASE_URL="postgresql://user:password@localhost:5432/farmacia_db"');
+  process.exit(1);
+}
+
+const pool = new Pool({ connectionString });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 // Simple password hashing (matches auth.service.ts)
 function hashPassword(password: string): { hash: string; salt: string } {
