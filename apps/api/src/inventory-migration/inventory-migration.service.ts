@@ -13,6 +13,7 @@ import {
   CutoverLock,
   LocationPreview,
   ProductPreview,
+  ItemToProcess,
 } from './types';
 import {
   MigrationError as MigrationErrorClass,
@@ -132,7 +133,7 @@ export class InventoryMigrationService {
 
   /**
    * Extract costs from all products for migration preview and approval
-   * OPTIMIZED: Bulk pre-fetching and improved resume logic
+   * OPTIMIZED: Bulk pre-fetching and improved resume logic with caching
    */
   async extractCostsForMigration(
     locationIds: string[],
@@ -141,31 +142,28 @@ export class InventoryMigrationService {
     extractionSessionId?: string | null,
     newBatchSize?: number | null,
     recursionDepth: number = 0,
+    cachedItems?: ItemToProcess[]
   ): Promise<CostApprovalRequest> {
-    interface ItemToProcess {
-      locationId: string;
-      locationName: string;
-      squareInventoryItem: any;
-      itemKey: string;
-    }
-
     const sessionId = extractionSessionId || this.generateUUID();
     let dbSession = await this.prisma.extractionSession.findUnique({ where: { id: sessionId } });
 
     // 1) Collect inventory items across selected locations
-    const allItems: ItemToProcess[] = [];
-    for (const locationId of locationIds) {
-      const location = await this.prisma.location.findUnique({ where: { id: locationId } });
-      if (!location?.squareId) continue;
+    let allItems: ItemToProcess[] = cachedItems || [];
+    
+    if (allItems.length === 0) {
+      for (const locationId of locationIds) {
+        const location = await this.prisma.location.findUnique({ where: { id: locationId } });
+        if (!location?.squareId) continue;
 
-      const items = await this.squareInventory.fetchSquareInventory(location.squareId);
-      for (const item of items) {
-        allItems.push({
-          locationId,
-          locationName: location.name,
-          squareInventoryItem: item,
-          itemKey: `${locationId}:${item.catalogObjectId}`,
-        });
+        const items = await this.squareInventory.fetchSquareInventory(location.squareId);
+        for (const item of items) {
+          allItems.push({
+            locationId,
+            locationName: location.name,
+            squareInventoryItem: item,
+            itemKey: `${locationId}:${item.catalogObjectId}`,
+          });
+        }
       }
     }
 
