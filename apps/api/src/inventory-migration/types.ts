@@ -74,6 +74,23 @@ export interface CostExtractionResult {
   existingCutoverId?: string; // Which cutover the approval is from
 }
 
+export interface ApprovedItemSummary {
+  productId: string;
+  productName: string | null;
+  imageUrl: string | null;
+  approvedCost: number;
+  source: string;
+  approvedAt: Date | null;
+  sellingPriceCents: number | null;
+  sellingPriceCurrency: string | null;
+}
+
+export interface SkippedItemSummary {
+  productId: string;
+  productName: string | null;
+  imageUrl: string | null;
+}
+
 export interface CostApprovalRequest {
   cutoverId: string;
   locationIds: string[];
@@ -90,6 +107,11 @@ export interface CostApprovalRequest {
   isComplete?: boolean;
   canContinue?: boolean;
   extractionSessionId?: string | null;
+  // All approved and skipped items across ALL batches in this session
+  allApprovedItems?: ApprovedItemSummary[];
+  allSkippedItems?: SkippedItemSummary[];
+  approvedCount?: number;
+  skippedCount?: number;
 }
 
 export interface CostApprovalResponse {

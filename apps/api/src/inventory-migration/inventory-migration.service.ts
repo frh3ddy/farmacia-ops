@@ -673,6 +673,46 @@ export class InventoryMigrationService {
       ]);
     }
 
+    // 13) Fetch ALL approved and skipped items for this session (across all batches)
+    const allSessionApprovals = await this.prisma.costApproval.findMany({
+      where: {
+        cutoverId: dbSession.cutoverId || sessionId,
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            squareProductName: true,
+            squareVariationName: true,
+            squareImageUrl: true,
+          },
+        },
+      },
+      orderBy: { approvedAt: 'desc' },
+    });
+
+    const allApprovedItems = allSessionApprovals
+      .filter(a => a.migrationStatus === 'APPROVED')
+      .map(a => ({
+        productId: a.productId,
+        productName: a.product?.squareProductName || a.product?.squareVariationName || a.product?.name || null,
+        imageUrl: a.product?.squareImageUrl || null,
+        approvedCost: a.approvedCost.toNumber(),
+        source: a.source,
+        approvedAt: a.approvedAt,
+        sellingPriceCents: a.sellingPriceCents,
+        sellingPriceCurrency: a.sellingPriceCurrency,
+      }));
+
+    const allSkippedItems = allSessionApprovals
+      .filter(a => a.migrationStatus === 'SKIPPED')
+      .map(a => ({
+        productId: a.productId,
+        productName: a.product?.squareProductName || a.product?.squareVariationName || a.product?.name || null,
+        imageUrl: a.product?.squareImageUrl || null,
+      }));
+
     return {
       cutoverId: sessionId,
       locationIds,
@@ -689,6 +729,11 @@ export class InventoryMigrationService {
       isComplete: dbSession.totalBatches !== null && dbSession.currentBatch >= dbSession.totalBatches,
       canContinue: dbSession.totalBatches === null || dbSession.currentBatch < dbSession.totalBatches,
       extractionSessionId: sessionId,
+      // All approved and skipped items across ALL batches in this session
+      allApprovedItems,
+      allSkippedItems,
+      approvedCount: allApprovedItems.length,
+      skippedCount: allSkippedItems.length,
     };
   }
 
