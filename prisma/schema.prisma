@@ -19,6 +19,8 @@ model Location {
   racks           Rack[]
   catalogMappings CatalogMapping[]
   cutoverLocks    CutoverLock[]
+  adjustments     InventoryAdjustment[]
+  receivings      InventoryReceiving[]
 
   createdAt DateTime @default(now())
 }
@@ -61,6 +63,8 @@ model Product {
   saleItems           SaleItem[]
   catalogMappings     CatalogMapping[]
   costApprovals       CostApproval[]
+  adjustments         InventoryAdjustment[]
+  receivings          InventoryReceiving[]
 
   createdAt DateTime @default(now())
 }
@@ -84,6 +88,7 @@ model Supplier {
 
   products    SupplierProduct[]
   costHistory SupplierCostHistory[]
+  receivings  InventoryReceiving[]
 }
 
 model SupplierProduct {
@@ -119,12 +124,20 @@ model Inventory {
   // Consumption records for FIFO audit trail
   consumptions InventoryConsumption[]
 
+  // Created by positive adjustment
+  createdByAdjustment InventoryAdjustment? @relation("AdjustmentCreatedBatch")
+
+  // Created by receiving
+  createdByReceiving InventoryReceiving? @relation("ReceivingCreatedBatch")
+
   createdAt DateTime @default(now())
 
-  @@unique([productId, locationId, source])
+  // Note: Removed unique constraint on (productId, locationId, source) to allow multiple FIFO batches
+  // Each receiving/adjustment creates a new batch with the same product/location
   @@index([productId])
   @@index([locationId])
   @@index([source])
+  @@index([receivedAt]) // Important for FIFO ordering
 }
 
 model Sale {
@@ -181,14 +194,125 @@ model InventoryConsumption {
   consumedAt DateTime @default(now())
 
   // Relations
-  inventory Inventory @relation(fields: [inventoryId], references: [id])
-  saleItem  SaleItem? @relation(fields: [saleItemId], references: [id])
+  inventory  Inventory            @relation(fields: [inventoryId], references: [id])
+  saleItem   SaleItem?            @relation(fields: [saleItemId], references: [id])
+  adjustment InventoryAdjustment? @relation(fields: [adjustmentId], references: [id])
 
   // Indexes for efficient queries
   @@index([inventoryId])
   @@index([saleItemId])
   @@index([adjustmentId])
   @@index([consumedAt])
+}
+
+// ============================================================================
+// Inventory Adjustments
+// Records inventory changes not from sales (damage, theft, expired, corrections)
+// This is APPEND-ONLY and IMMUTABLE for audit integrity
+// ============================================================================
+model InventoryAdjustment {
+  id         String @id @default(uuid())
+  locationId String
+  productId  String
+
+  // Adjustment details
+  type          AdjustmentType
+  quantity      Int // Positive = add inventory, Negative = remove inventory
+  reason        String? // Human-readable reason
+  notes         String? // Additional notes
+
+  // Cost tracking
+  unitCost      Decimal // Cost per unit (for valuation)
+  totalCost     Decimal // |quantity| * unitCost (always positive for reporting)
+
+  // For positive adjustments: reference to created inventory batch
+  createdBatchId String? @unique
+
+  // Audit metadata
+  adjustedAt    DateTime @default(now())
+  adjustedBy    String? // User ID who made the adjustment
+
+  // Cutover validation
+  effectiveDate DateTime @default(now()) // Date the adjustment applies to
+
+  // Relations
+  location      Location @relation(fields: [locationId], references: [id])
+  product       Product  @relation(fields: [productId], references: [id])
+  createdBatch  Inventory? @relation("AdjustmentCreatedBatch", fields: [createdBatchId], references: [id])
+
+  // Consumption records (for negative adjustments - FIFO trail)
+  consumptions  InventoryConsumption[]
+
+  @@index([locationId])
+  @@index([productId])
+  @@index([type])
+  @@index([adjustedAt])
+  @@index([effectiveDate])
+}
+
+enum AdjustmentType {
+  DAMAGE          // Product damaged, unsellable
+  THEFT           // Product stolen/missing
+  EXPIRED         // Product past expiration
+  COUNT_CORRECTION // Physical count doesn't match system
+  FOUND           // Product found (positive adjustment)
+  RETURN          // Customer return (positive adjustment)
+  TRANSFER_OUT    // Transferred to another location (negative)
+  TRANSFER_IN     // Received from another location (positive)
+  WRITE_OFF       // General write-off
+  OTHER           // Other reason (requires notes)
+}
+
+// ============================================================================
+// Inventory Receiving
+// Records inventory receipts from suppliers/purchases
+// Links to Inventory batches for FIFO tracking
+// ============================================================================
+model InventoryReceiving {
+  id         String @id @default(uuid())
+  locationId String
+  productId  String
+  supplierId String?
+
+  // Receiving details
+  quantity      Int
+  unitCost      Decimal
+  totalCost     Decimal // quantity * unitCost
+
+  // Reference numbers
+  invoiceNumber   String?  // Supplier invoice number
+  purchaseOrderId String?  // Internal PO reference
+  batchNumber     String?  // Lot/batch number from supplier
+  
+  // Product tracking
+  expiryDate      DateTime? // Product expiration date
+  manufacturingDate DateTime? // Manufacturing date if known
+
+  // Created inventory batch reference
+  inventoryBatchId String @unique
+
+  // Square sync tracking
+  squareSynced    Boolean @default(false)
+  squareSyncedAt  DateTime?
+  squareSyncError String?
+
+  // Audit metadata
+  receivedAt   DateTime @default(now())
+  receivedBy   String?  // User ID who received
+  notes        String?
+
+  // Relations
+  location       Location   @relation(fields: [locationId], references: [id])
+  product        Product    @relation(fields: [productId], references: [id])
+  supplier       Supplier?  @relation(fields: [supplierId], references: [id])
+  inventoryBatch Inventory  @relation("ReceivingCreatedBatch", fields: [inventoryBatchId], references: [id])
+
+  @@index([locationId])
+  @@index([productId])
+  @@index([supplierId])
+  @@index([receivedAt])
+  @@index([invoiceNumber])
+  @@index([batchNumber])
 }
 
 model Expense {
