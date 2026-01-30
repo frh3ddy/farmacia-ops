@@ -339,6 +339,11 @@ export class InventoryMigrationService {
       ]),
     );
 
+    // Debug: Log cache status
+    const withPrice = cachedMappings.filter((m: any) => m.priceCents !== null).length;
+    const withSyncDate = cachedMappings.filter((m: any) => m.priceSyncedAt !== null).length;
+    this.logger.log(`[EXTRACTION] Found ${cachedMappings.length} catalog mappings for ${variationIds.length} variations (${withPrice} with price, ${withSyncDate} with sync date)`);
+
     // 9) Identify variations needing Square fetch (missing or stale prices)
     const PRICE_STALE_HOURS = 24;
     const now = new Date();
@@ -370,15 +375,25 @@ export class InventoryMigrationService {
       try {
         const batchResults = await this.squareInventory.batchFetchSquareCatalogObjects(fetchIds);
         
+        // Collect price updates for batch processing
+        const priceUpdates: Array<{ vid: string; priceCents: number; currency: string }> = [];
+        
         for (const [vid, data] of batchResults) {
             catalogDataMap.set(vid, data);
             
-            // Update CatalogMapping with fresh price (best-effort, non-blocking)
             const priceCents = data.variationPriceCents;
             const currency = data.variationCurrency;
             if (priceCents !== null && priceCents !== undefined && currency) {
-              this.prisma.catalogMapping
-                .updateMany({
+              priceUpdates.push({ vid, priceCents, currency });
+            }
+        }
+        
+        // Batch update CatalogMapping prices (blocking to ensure cache is populated)
+        if (priceUpdates.length > 0) {
+          try {
+            await Promise.all(
+              priceUpdates.map(({ vid, priceCents, currency }) =>
+                this.prisma.catalogMapping.updateMany({
                   where: { squareVariationId: vid },
                   data: {
                     priceCents: new Prisma.Decimal(priceCents),
@@ -386,10 +401,12 @@ export class InventoryMigrationService {
                     priceSyncedAt: new Date(),
                   } as any,
                 })
-                .catch((e) =>
-                  this.logger.warn(`Failed to update price cache for ${vid}:`, e),
-                );
-            }
+              )
+            );
+            this.logger.log(`[EXTRACTION] Updated ${priceUpdates.length} prices in cache`);
+          } catch (e) {
+            this.logger.warn(`[PRICE_CACHE_UPDATE] Failed to update price cache:`, e);
+          }
         }
       } catch (e) {
           this.logger.warn(`[CATALOG_FETCH_ERROR] Failed to batch fetch variations:`, e);
