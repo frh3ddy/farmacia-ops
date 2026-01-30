@@ -436,9 +436,23 @@ export class InventoryMigrationController {
         newBatchSize || null,
       );
 
+      // Get summary of all approved/skipped items for this session
+      const approvalsSummary = await this.migrationService.getApprovalsSummary(result.cutoverId);
+
       return {
         success: true,
         result,
+        // Include summary of all approved/skipped items across all batches
+        approvalsSummary: {
+          approvedCount: approvalsSummary.approvedCount,
+          skippedCount: approvalsSummary.skippedCount,
+          pendingCount: approvalsSummary.pendingCount,
+          approvedItems: approvalsSummary.approvedItems.map(item => ({
+            ...item,
+            approvedAt: item.approvedAt?.toISOString() || null,
+          })),
+          skippedItems: approvalsSummary.skippedItems,
+        },
         message: 'Cost extraction completed. Please review and approve.',
       };
     } catch (error) {
@@ -653,6 +667,27 @@ export class InventoryMigrationController {
     } catch (error) {
       throw new HttpException(
         { success: false, message: `Failed to get extraction session: ${error}` },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get('approvals-summary/:cutoverId')
+  async getApprovalsSummary(@Param('cutoverId') cutoverId: string) {
+    try {
+      const summary = await this.migrationService.getApprovalsSummary(cutoverId);
+      
+      return {
+        success: true,
+        ...summary,
+        approvedItems: summary.approvedItems.map(item => ({
+          ...item,
+          approvedAt: item.approvedAt?.toISOString() || null,
+        })),
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to get approvals summary: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
