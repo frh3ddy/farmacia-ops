@@ -436,25 +436,19 @@ export class InventoryMigrationController {
         newBatchSize || null,
       );
 
-      // Get summary of all approved/skipped items across ALL sessions (historical)
-      const approvalsSummary = await this.migrationService.getApprovalsSummary(result.cutoverId, true);
+      // Serialize dates in the result's allApprovedItems
+      const serializedResult = {
+        ...result,
+        allApprovedItems: result.allApprovedItems?.map(item => ({
+          ...item,
+          approvedAt: item.approvedAt?.toISOString() || null,
+        })) || [],
+        allSkippedItems: result.allSkippedItems || [],
+      };
 
       return {
         success: true,
-        result,
-        // Include summary of all approved/skipped items across all batches AND all sessions
-        approvalsSummary: {
-          approvedCount: approvalsSummary.approvedCount,
-          skippedCount: approvalsSummary.skippedCount,
-          pendingCount: approvalsSummary.pendingCount,
-          currentSessionApprovedCount: approvalsSummary.currentSessionApprovedCount,
-          currentSessionSkippedCount: approvalsSummary.currentSessionSkippedCount,
-          approvedItems: approvalsSummary.approvedItems.map(item => ({
-            ...item,
-            approvedAt: item.approvedAt?.toISOString() || null,
-          })),
-          skippedItems: approvalsSummary.skippedItems,
-        },
+        result: serializedResult,
         message: 'Cost extraction completed. Please review and approve.',
       };
     } catch (error) {
