@@ -6,10 +6,23 @@ import {
 } from './types';
 import { SquareApiError } from './errors';
 
+// Cache entry for inventory items
+interface InventoryCacheEntry {
+  items: SquareInventoryItem[];
+  cachedAt: Date;
+  locationId: string;
+}
+
 @Injectable()
 export class SquareInventoryService {
   private readonly logger = new Logger(SquareInventoryService.name);
   private squareClient: SquareClient | null = null;
+  
+  // In-memory cache for inventory items, keyed by locationId
+  private inventoryCache = new Map<string, InventoryCacheEntry>();
+  
+  // Cache TTL in milliseconds (5 minutes - inventory doesn't change that often during migration)
+  private readonly INVENTORY_CACHE_TTL_MS = 5 * 60 * 1000;
 
   /**
    * Get or create Square client
@@ -36,12 +49,44 @@ export class SquareInventoryService {
   }
 
   /**
+   * Clear the inventory cache for a specific location or all locations
+   */
+  clearInventoryCache(locationId?: string): void {
+    if (locationId) {
+      this.inventoryCache.delete(locationId);
+      this.logger.log(`Cleared inventory cache for location ${locationId}`);
+    } else {
+      this.inventoryCache.clear();
+      this.logger.log('Cleared all inventory cache');
+    }
+  }
+
+  /**
+   * Check if cached inventory is still valid
+   */
+  private isCacheValid(entry: InventoryCacheEntry): boolean {
+    const age = Date.now() - entry.cachedAt.getTime();
+    return age < this.INVENTORY_CACHE_TTL_MS;
+  }
+
+  /**
    * Fetch Square inventory counts for a location
    * Implements pagination to fetch all items (not just the first 1000)
+   * Uses in-memory caching to avoid repeated fetches during batch processing
    */
   async fetchSquareInventory(
     locationId: string,
+    skipCache: boolean = false,
   ): Promise<SquareInventoryItem[]> {
+    // Check cache first (unless explicitly skipped)
+    if (!skipCache) {
+      const cached = this.inventoryCache.get(locationId);
+      if (cached && this.isCacheValid(cached)) {
+        this.logger.log(`Using cached inventory for location ${locationId} (${cached.items.length} items, cached ${Math.round((Date.now() - cached.cachedAt.getTime()) / 1000)}s ago)`);
+        return cached.items;
+      }
+    }
+
     const client = this.getSquareClient();
     const allItems: SquareInventoryItem[] = [];
     let cursor: string | undefined = undefined;
@@ -127,6 +172,15 @@ export class SquareInventoryService {
       } while (cursor); // Continue while there's a cursor for next page
 
       this.logger.log(`Total inventory items fetched: ${allItems.length}`);
+      
+      // Cache the results
+      this.inventoryCache.set(locationId, {
+        items: allItems,
+        cachedAt: new Date(),
+        locationId,
+      });
+      this.logger.log(`Cached inventory for location ${locationId}`);
+      
       return allItems;
 
     } catch (error) {
