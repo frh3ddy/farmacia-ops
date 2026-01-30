@@ -61,7 +61,65 @@ export class CatalogMapperService {
     // Step 5: Return product ID
     return product.id;
   }
+
+  /**
+   * Batch resolve products from Square variations
+   * Returns a Map of squareVariationId -> productId
+   */
+  async batchResolveProductsFromSquareVariations(
+    squareVariationIds: string[],
+    locationId: string,
+  ): Promise<Map<string, string>> {
+    if (squareVariationIds.length === 0) {
+      return new Map();
+    }
+
+    // Step 1: Fetch all potential mappings
+    const mappings = await this.prisma.catalogMapping.findMany({
+      where: {
+        squareVariationId: { in: squareVariationIds },
+        OR: [
+          { locationId: locationId },
+          { locationId: null },
+        ],
+      },
+    });
+
+    // Step 2: Prioritize mappings (location-specific > global)
+    const variationToProductMap = new Map<string, string>();
+    const variationToMappingType = new Map<string, 'LOCATION' | 'GLOBAL'>();
+
+    for (const mapping of mappings) {
+      const currentType = mapping.locationId ? 'LOCATION' : 'GLOBAL';
+      const existingType = variationToMappingType.get(mapping.squareVariationId);
+
+      // If no existing mapping, or we found a location-specific one to replace a global one
+      if (!existingType || (currentType === 'LOCATION' && existingType === 'GLOBAL')) {
+        variationToProductMap.set(mapping.squareVariationId, mapping.productId);
+        variationToMappingType.set(mapping.squareVariationId, currentType);
+      }
+    }
+
+    // Step 3: Verify products exist
+    const productIds = Array.from(variationToProductMap.values());
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true },
+    });
+
+    const existingProductIds = new Set(products.map((p) => p.id));
+
+    // Step 4: Filter out mappings where product doesn't exist
+    for (const [variationId, productId] of variationToProductMap.entries()) {
+      if (!existingProductIds.has(productId)) {
+        variationToProductMap.delete(variationId);
+      }
+    }
+
+    return variationToProductMap;
+  }
 }
+
 
 
 
