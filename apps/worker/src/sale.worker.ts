@@ -261,6 +261,8 @@ async function deductInventory(
 /**
  * Process a single sale item: calculate FIFO cost, deduct inventory, create SaleItem record
  * All operations must be in a transaction (handled by caller)
+ * 
+ * FIFO AUDIT TRAIL: Records which inventory batches were consumed in InventoryConsumption table
  */
 async function processSaleItem(
   saleId: string,
@@ -297,6 +299,10 @@ async function processSaleItem(
     },
   });
 
+  // Step 4: Record consumption in audit trail (FIFO traceability)
+  // This creates an immutable record of which batches were consumed for this sale
+  await recordInventoryConsumption(saleItem.id, costResult.consumedBatches, client);
+
   return {
     saleId: saleItem.saleId,
     productId: saleItem.productId,
@@ -304,6 +310,56 @@ async function processSaleItem(
     price: saleItem.price,
     cost: saleItem.cost,
   };
+}
+
+/**
+ * Record inventory consumption for FIFO audit trail
+ * Creates immutable records linking sale items to consumed inventory batches
+ * 
+ * This is critical for:
+ * - Audit compliance (traceability of cost calculations)
+ * - Reconciliation (verify inventory matches consumption history)
+ * - COGS analysis (detailed cost breakdown by batch)
+ */
+async function recordInventoryConsumption(
+  saleItemId: string,
+  consumedBatches: ConsumedBatch[],
+  client: Omit<
+    PrismaClient,
+    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+  >,
+): Promise<void> {
+  // Batch fetch unit costs for all consumed batches
+  const batchIds = consumedBatches.map(b => b.batchId);
+  const inventoryBatches = await client.inventory.findMany({
+    where: { id: { in: batchIds } },
+    select: { id: true, unitCost: true },
+  });
+  
+  const unitCostMap = new Map(inventoryBatches.map(b => [b.id, b.unitCost]));
+
+  // Create consumption records
+  const consumptionRecords = consumedBatches.map(batch => {
+    const unitCost = unitCostMap.get(batch.batchId) || new Prisma.Decimal(0);
+    return {
+      inventoryId: batch.batchId,
+      saleItemId: saleItemId,
+      quantity: batch.quantityConsumed,
+      unitCost: unitCost,
+      totalCost: batch.costContribution,
+    };
+  });
+
+  // Batch insert all consumption records
+  if (consumptionRecords.length > 0) {
+    await client.inventoryConsumption.createMany({
+      data: consumptionRecords,
+    });
+    
+    console.log(
+      `[FIFO_AUDIT] Recorded ${consumptionRecords.length} consumption records for saleItem ${saleItemId}`,
+    );
+  }
 }
 
 /**

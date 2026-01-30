@@ -116,13 +116,15 @@ model Inventory {
   location Location @relation(fields: [locationId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
 
+  // Consumption records for FIFO audit trail
+  consumptions InventoryConsumption[]
+
   createdAt DateTime @default(now())
 
-
+  @@unique([productId, locationId, source])
   @@index([productId])
   @@index([locationId])
   @@index([source])
-  @@unique([productId, locationId, source])
 }
 
 model Sale {
@@ -152,6 +154,41 @@ model SaleItem {
 
   sale    Sale    @relation(fields: [saleId], references: [id])
   product Product @relation(fields: [productId], references: [id])
+
+  // Consumption records for FIFO audit trail
+  consumptions InventoryConsumption[]
+}
+
+// ============================================================================
+// FIFO Audit Trail - InventoryConsumption
+// Records which inventory batches were consumed for each sale/adjustment
+// This is APPEND-ONLY and IMMUTABLE for audit integrity
+// ============================================================================
+model InventoryConsumption {
+  id String @id @default(uuid())
+
+  // Source of consumption
+  inventoryId  String // The inventory batch that was consumed
+  saleItemId   String? // If consumed by a sale (nullable for adjustments)
+  adjustmentId String? // If consumed by an adjustment (future use)
+
+  // Consumption details
+  quantity  Int // Quantity consumed from this batch
+  unitCost  Decimal // Unit cost at time of consumption (snapshot)
+  totalCost Decimal // quantity * unitCost (precomputed for reports)
+
+  // Audit metadata
+  consumedAt DateTime @default(now())
+
+  // Relations
+  inventory Inventory @relation(fields: [inventoryId], references: [id])
+  saleItem  SaleItem? @relation(fields: [saleItemId], references: [id])
+
+  // Indexes for efficient queries
+  @@index([inventoryId])
+  @@index([saleItemId])
+  @@index([adjustmentId])
+  @@index([consumedAt])
 }
 
 model Expense {
@@ -213,14 +250,14 @@ model DemandSignal {
 }
 
 model CatalogMapping {
-  id                String   @id @default(uuid())
-  squareVariationId String   // ITEM_VARIATION.id from Square
+  id                String  @id @default(uuid())
+  squareVariationId String // ITEM_VARIATION.id from Square
   productId         String
-  locationId        String?  // Optional, null = global mapping
+  locationId        String? // Optional, null = global mapping
 
   // Cached selling price from Square
   priceCents    Decimal? // Selling price in cents (from price_money.amount)
-  currency      String?  // Currency code (e.g., "USD")
+  currency      String? // Currency code (e.g., "USD")
   priceSyncedAt DateTime? // When price was last synced from Square
 
   product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -237,24 +274,24 @@ model CatalogMapping {
 }
 
 model CostApproval {
-  id             String          @id @default(uuid())
-  cutoverId      String
-  batchId        String?         // Reference to ExtractionBatch
-  productId      String
-  approvedCost   Decimal
-  source         String          // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE", "BATCH_APPROVED"
-  notes          String?
-  approvedAt     DateTime        @default(now())
-  approvedBy     String?         // User ID
+  id              String          @id @default(uuid())
+  cutoverId       String
+  batchId         String? // Reference to ExtractionBatch
+  productId       String
+  approvedCost    Decimal
+  source          String // "EXTRACTED_LAST", "EXTRACTED_SELECTED", "MANUAL_OVERRIDE", "BATCH_APPROVED"
+  notes           String?
+  approvedAt      DateTime        @default(now())
+  approvedBy      String? // User ID
   migrationStatus MigrationStatus @default(PENDING)
-  
-  // Selling price data (stored for reconstruction)
-  sellingPriceCents       Int?     // Minimum selling price in cents
-  sellingPriceCurrency     String?  // Currency code (e.g., "USD")
-  sellingPriceRangeMinCents Int?    // Minimum price in range (if multiple variations)
-  sellingPriceRangeMaxCents Int?    // Maximum price in range (if multiple variations)
 
-  product Product        @relation(fields: [productId], references: [id])
+  // Selling price data (stored for reconstruction)
+  sellingPriceCents         Int? // Minimum selling price in cents
+  sellingPriceCurrency      String? // Currency code (e.g., "USD")
+  sellingPriceRangeMinCents Int? // Minimum price in range (if multiple variations)
+  sellingPriceRangeMaxCents Int? // Maximum price in range (if multiple variations)
+
+  product Product          @relation(fields: [productId], references: [id])
   batch   ExtractionBatch? @relation(fields: [batchId], references: [id])
 
   @@unique([cutoverId, productId])
@@ -292,10 +329,9 @@ model CutoverLock {
 
   location Location? @relation(fields: [locationId], references: [id])
 
-
+  @@unique([locationId, cutoverDate])
   @@index([locationId])
   @@index([cutoverDate])
-  @@unique([locationId, cutoverDate])
 }
 
 model SupplierCostHistory {
@@ -316,68 +352,68 @@ model SupplierCostHistory {
 }
 
 model ExtractionSession {
-  id                    String   @id @default(uuid())
-  cutoverId             String?  // Optional link to cutover
-  locationIds           String[] // Array of location IDs
+  id          String   @id @default(uuid())
+  cutoverId   String? // Optional link to cutover
+  locationIds String[] // Array of location IDs
 
   // Session state
-  currentBatch          Int      @default(1)
-  totalBatches          Int?
-  totalItems            Int
-  processedItems        Int      @default(0)
-  batchSize             Int
+  currentBatch   Int  @default(1)
+  totalBatches   Int?
+  totalItems     Int
+  processedItems Int  @default(0)
+  batchSize      Int
 
   // Last approved tracking
-  lastApprovedBatchId   String?  // Last batch that was fully approved
-  lastApprovedProductId String?  // Last product ID that was approved across all batches
+  lastApprovedBatchId   String? // Last batch that was fully approved
+  lastApprovedProductId String? // Last product ID that was approved across all batches
 
   // Supplier initials learned from user corrections
-  learnedSupplierInitials Json?  // Map of supplier names to their initials arrays
+  learnedSupplierInitials Json? // Map of supplier names to their initials arrays
   // Format: { "Levic": ["L", "Lev", "Levi"], "Center": ["C", "Cent"] }
 
-  status                String   @default("IN_PROGRESS") // "IN_PROGRESS", "COMPLETED", "CANCELLED"
+  status String @default("IN_PROGRESS") // "IN_PROGRESS", "COMPLETED", "CANCELLED"
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  batches               ExtractionBatch[]
+  batches ExtractionBatch[]
 
   @@index([cutoverId])
   @@index([status])
 }
 
 model ExtractionBatch {
-  id                    String   @id @default(uuid())
-  extractionSessionId   String   // Links to extraction session
-  batchNumber           Int      // Sequential batch number (1, 2, 3, ...)
-  cutoverId             String?  // Optional link to cutover
-  locationIds           String[] // Array of location IDs
+  id                  String   @id @default(uuid())
+  extractionSessionId String // Links to extraction session
+  batchNumber         Int // Sequential batch number (1, 2, 3, ...)
+  cutoverId           String? // Optional link to cutover
+  locationIds         String[] // Array of location IDs
 
   // Batch status
-  status                String   @default("EXTRACTED") // "EXTRACTED", "APPROVED", "REJECTED"
-  extractedAt           DateTime @default(now())
-  approvedAt            DateTime?
-  approvedBy            String?  // User ID
+  status      String    @default("EXTRACTED") // "EXTRACTED", "APPROVED", "REJECTED"
+  extractedAt DateTime  @default(now())
+  approvedAt  DateTime?
+  approvedBy  String? // User ID
 
   // Product tracking
-  productIds            String[] // Array of product IDs in this batch
-  totalProducts         Int
-  productsWithExtraction Int
+  productIds                   String[] // Array of product IDs in this batch
+  totalProducts                Int
+  productsWithExtraction       Int
   productsRequiringManualInput Int
 
   // Approval tracking
-  extractionApproved    Boolean  @default(false) // Checkbox for extraction approval
-  manualInputApproved   Boolean  @default(false) // Checkbox for manual input approval
-  isFullyApproved       Boolean  @default(false) // Both checkboxes must be true
+  extractionApproved  Boolean @default(false) // Checkbox for extraction approval
+  manualInputApproved Boolean @default(false) // Checkbox for manual input approval
+  isFullyApproved     Boolean @default(false) // Both checkboxes must be true
 
   // Last approved item tracking
-  lastApprovedProductId String?  // Last product ID that was approved in this batch
+  lastApprovedProductId String? // Last product ID that was approved in this batch
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  session               ExtractionSession @relation(fields: [extractionSessionId], references: [id])
-  approvals             CostApproval[]
+  session   ExtractionSession @relation(fields: [extractionSessionId], references: [id])
+  approvals CostApproval[]
 
   @@index([extractionSessionId])
   @@index([cutoverId])
