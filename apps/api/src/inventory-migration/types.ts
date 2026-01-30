@@ -235,6 +235,13 @@ export interface ExtractionSession {
   updatedAt: Date;
 }
 
+export interface ItemToProcess {
+  locationId: string;
+  locationName: string;
+  squareInventoryItem: any;
+  itemKey: string;
+}
+
 export interface ExtractionBatch {
   id: string;
   extractionSessionId: string;
