@@ -28,6 +28,19 @@ interface CreateAdjustmentDto {
   syncToSquare?: boolean; // If true, also update Square inventory
 }
 
+// Helper to extract error message
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function getErrorStatus(error: unknown): number {
+  if (error && typeof error === 'object' && 'status' in error) {
+    return (error as { status: number }).status;
+  }
+  return HttpStatus.INTERNAL_SERVER_ERROR;
+}
+
 // ============================================================================
 // Controller
 // ============================================================================
@@ -112,10 +125,9 @@ export class InventoryAdjustmentController {
       throw new HttpException(
         {
           success: false,
-          message: error.message || 'Failed to create adjustment',
-          error: error.name,
+          message: getErrorMessage(error) || 'Failed to create adjustment',
         },
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+        getErrorStatus(error)
       );
     }
   }
@@ -214,8 +226,8 @@ export class InventoryAdjustmentController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: error.message || 'Failed to get adjustment' },
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+        { success: false, message: getErrorMessage(error) || 'Failed to get adjustment' },
+        getErrorStatus(error)
       );
     }
   }
@@ -242,8 +254,8 @@ export class InventoryAdjustmentController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: error.message || 'Failed to get adjustments' },
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+        { success: false, message: getErrorMessage(error) || 'Failed to get adjustments' },
+        getErrorStatus(error)
       );
     }
   }
@@ -278,8 +290,8 @@ export class InventoryAdjustmentController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: error.message || 'Failed to get adjustments' },
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+        { success: false, message: getErrorMessage(error) || 'Failed to get adjustments' },
+        getErrorStatus(error)
       );
     }
   }
@@ -302,8 +314,8 @@ export class InventoryAdjustmentController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: error.message || 'Failed to get summary' },
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR
+        { success: false, message: getErrorMessage(error) || 'Failed to get summary' },
+        getErrorStatus(error)
       );
     }
   }

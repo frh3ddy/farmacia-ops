@@ -131,8 +131,8 @@ export class InventoryAdjustmentService {
       const fromState = quantityChange > 0 ? 'NONE' : 'IN_STOCK';
       const toState = quantityChange > 0 ? 'IN_STOCK' : 'NONE';
 
-      // Call Square Inventory API
-      const response = await client.inventory.batchChangeInventory({
+      // Call Square Inventory API (batchCreateChanges is the current method name in Square SDK)
+      const response = await client.inventory.batchCreateChanges({
         idempotencyKey: randomUUID(),
         changes: [
           {
@@ -150,7 +150,7 @@ export class InventoryAdjustmentService {
         ],
       });
 
-      this.logger.log(`[SQUARE_SYNC] Successfully synced adjustment to Square: ${JSON.stringify(response)}`);
+      this.logger.log(`[SQUARE_SYNC] Successfully synced adjustment to Square`);
       return { synced: true };
 
     } catch (error) {
