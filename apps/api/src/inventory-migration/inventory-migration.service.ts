@@ -674,9 +674,12 @@ export class InventoryMigrationService {
     }
 
     // 13) Fetch ALL approved and skipped items for this session (across all batches)
+    const cutoverIdForQuery = dbSession.cutoverId || sessionId;
+    this.logger.log(`[EXTRACTION] Fetching approvals for cutoverId: ${cutoverIdForQuery} (dbSession.cutoverId: ${dbSession.cutoverId}, sessionId: ${sessionId})`);
+    
     const allSessionApprovals = await this.prisma.costApproval.findMany({
       where: {
-        cutoverId: dbSession.cutoverId || sessionId,
+        cutoverId: cutoverIdForQuery,
       },
       include: {
         product: {
@@ -691,6 +694,8 @@ export class InventoryMigrationService {
       },
       orderBy: { approvedAt: 'desc' },
     });
+
+    this.logger.log(`[EXTRACTION] Found ${allSessionApprovals.length} total approvals: ${allSessionApprovals.filter(a => a.migrationStatus === 'APPROVED').length} APPROVED, ${allSessionApprovals.filter(a => a.migrationStatus === 'SKIPPED').length} SKIPPED, ${allSessionApprovals.filter(a => a.migrationStatus === 'PENDING').length} PENDING`);
 
     const allApprovedItems = allSessionApprovals
       .filter(a => a.migrationStatus === 'APPROVED')
@@ -1194,6 +1199,7 @@ export class InventoryMigrationService {
     sellingPrice?: { priceCents: number; currency: string } | null,
     sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null,
   ): Promise<{ success: boolean }> {
+    this.logger.log(`[DISCARD_ITEM] cutoverId: ${cutoverId}, productId: ${productId}`);
     try {
       await this.prisma.$transaction(async (tx) => {
         const existingApproval = await tx.costApproval.findUnique({
@@ -1349,6 +1355,7 @@ export class InventoryMigrationService {
     sellingPrice?: { priceCents: number; currency: string } | null,
     sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null,
   ): Promise<{ success: boolean }> {
+    this.logger.log(`[APPROVE_ITEM] cutoverId: ${cutoverId}, productId: ${productId}, cost: ${cost}`);
     try {
       await this.prisma.$transaction(async (tx) => {
         const existingApproval = await tx.costApproval.findUnique({
