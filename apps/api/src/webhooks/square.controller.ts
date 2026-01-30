@@ -116,7 +116,7 @@ import {
       console.log('[DEBUG] [WEBHOOK] ✓ Event type matches');
 
       // Check if webhook processing is paused
-      if (this.webhookTestService.isWebhookPaused() || true) {
+      if (this.webhookTestService.isWebhookPaused()) {
         console.log('[DEBUG] [WEBHOOK] ⚠️ Webhook processing is paused, ignoring event');
         return res.status(HttpStatus.OK).send('Paused - Not Processed');
       }

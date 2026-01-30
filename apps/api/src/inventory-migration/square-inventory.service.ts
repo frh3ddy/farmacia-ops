@@ -139,26 +139,12 @@ export class SquareInventoryService {
   }
 
   /**
-   * Fetch Square catalog object for a variation ID
-   * Optimized to determine Product Name and Image without secondary API calls
+   * Helper to parse a variation object into our internal SquareCatalogObject format
    */
-  async fetchSquareCatalogObject(
-    variationId: string,
-  ): Promise<SquareCatalogObject | null> {
-    const client = this.getSquareClient();
-
-    try {
-      const response = await client.catalog.batchGet({
-        objectIds: [variationId],
-        includeRelatedObjects: true,
-      });
-
-      const objects = response.objects || [];
-      const relatedObjects = response.relatedObjects || [];
-
-      if (objects.length === 0) return null;
-
-      const variationObj = objects[0];
+  private parseCatalogObject(
+    variationObj: any, 
+    relatedObjects: any[]
+  ): SquareCatalogObject | null {
       if (variationObj.type !== 'ITEM_VARIATION') return null;
 
       // 1. Safe Data Extraction
@@ -229,6 +215,29 @@ export class SquareInventoryService {
             : null,
         variationCurrency,
       };
+  }
+
+  /**
+   * Fetch Square catalog object for a variation ID
+   * Optimized to determine Product Name and Image without secondary API calls
+   */
+  async fetchSquareCatalogObject(
+    variationId: string,
+  ): Promise<SquareCatalogObject | null> {
+    const client = this.getSquareClient();
+
+    try {
+      const response = await client.catalog.batchGet({
+        objectIds: [variationId],
+        includeRelatedObjects: true,
+      });
+
+      const objects = response.objects || [];
+      const relatedObjects = response.relatedObjects || [];
+
+      if (objects.length === 0) return null;
+
+      return this.parseCatalogObject(objects[0], relatedObjects);
 
     } catch (error) {
       // 404 handling
@@ -245,6 +254,58 @@ export class SquareInventoryService {
     }
   }
 
+  /**
+   * Batch fetch Square catalog objects for multiple variation IDs
+   */
+  async batchFetchSquareCatalogObjects(
+    variationIds: string[],
+  ): Promise<Map<string, SquareCatalogObject>> {
+    const client = this.getSquareClient();
+    const result = new Map<string, SquareCatalogObject>();
+
+    if (variationIds.length === 0) {
+      return result;
+    }
+
+    try {
+      // Square API allows up to 1000 IDs per call usually, but let's stick to safe chunks of 100
+      const chunkSize = 100;
+      for (let i = 0; i < variationIds.length; i += chunkSize) {
+        const chunk = variationIds.slice(i, i + chunkSize);
+        
+        // Include related objects to get images and parent item data (for name/desc)
+        const response = await client.catalog.batchGet({
+          objectIds: chunk,
+          includeRelatedObjects: true,
+        });
+
+        const objects = (response as any).objects || (response as any).data || [];
+        const relatedObjects = (response as any).relatedObjects || [];
+
+        for (const obj of objects) {
+           const parsed = this.parseCatalogObject(obj, relatedObjects);
+           if (parsed) {
+             result.set(parsed.id, parsed);
+           }
+        }
+      }
+
+      return result;
+    } catch (error) {
+      throw new SquareApiError(
+        `Failed to batch fetch Square catalog objects: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error,
+        'catalog.batchGet',
+      );
+    }
+  }
+
+  /**
+   * Attempt to fetch cost from Square (if available)
+   * Note: Square API may not always provide cost data
+   */
   async fetchSquareCost(variationId: string): Promise<number | null> {
     return null;
   }
