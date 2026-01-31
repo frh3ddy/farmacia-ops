@@ -67,7 +67,7 @@ async function main() {
       id: 'emp_owner',
       name: 'Store Owner',
       email: 'owner@farmacia.com',
-      passwordHash: `${passwordHash}:${passwordSalt}`, // Store as hash:salt
+      passwordHash: `${passwordSalt}:${passwordHash}`, // Store as salt:hash (matches auth.service.ts)
       pin: pinHash,
       pinSalt: pinSalt,
       isActive: true,
