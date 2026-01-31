@@ -11,7 +11,7 @@ interface DeviceActivationInput {
   email: string;
   password: string;
   deviceName: string;
-  locationId: string;
+  locationId?: string;  // Optional - auto-selects first OWNER/MANAGER location
   deviceType?: 'FIXED' | 'MOBILE';
 }
 
@@ -106,7 +106,7 @@ export class AuthService {
   // --------------------------------------------------------------------------
 
   async activateDevice(input: DeviceActivationInput) {
-    const { email, password, deviceName, locationId, deviceType = 'FIXED' } = input;
+    const { email, password, deviceName, locationId: requestedLocationId, deviceType = 'FIXED' } = input;
 
     // Find employee by email
     const employee = await this.prisma.employee.findUnique({
@@ -150,37 +150,36 @@ export class AuthService {
       );
     }
 
-    // Check employee has access to this location
-    const locationAssignment = employee.assignments.find(
-      a => a.locationId === locationId && a.isActive
+    // Find valid location assignment (OWNER or MANAGER only)
+    const validAssignments = employee.assignments.filter(
+      a => a.isActive && ['OWNER', 'MANAGER'].includes(a.role) && a.location.isActive
     );
 
-    if (!locationAssignment) {
-      throw new HttpException(
-        { success: false, message: 'You do not have access to this location' },
-        HttpStatus.FORBIDDEN
-      );
-    }
-
-    // Only OWNER or MANAGER can activate devices
-    if (!['OWNER', 'MANAGER'].includes(locationAssignment.role)) {
+    if (validAssignments.length === 0) {
       throw new HttpException(
         { success: false, message: 'Only owners or managers can activate devices' },
         HttpStatus.FORBIDDEN
       );
     }
 
-    // Verify location exists
-    const location = await this.prisma.location.findUnique({
-      where: { id: locationId },
-    });
-
-    if (!location || !location.isActive) {
-      throw new HttpException(
-        { success: false, message: 'Location not found or inactive' },
-        HttpStatus.NOT_FOUND
-      );
+    // Determine which location to use
+    let locationAssignment;
+    if (requestedLocationId) {
+      // User specified a location - verify they have access
+      locationAssignment = validAssignments.find(a => a.locationId === requestedLocationId);
+      if (!locationAssignment) {
+        throw new HttpException(
+          { success: false, message: 'You do not have owner/manager access to this location' },
+          HttpStatus.FORBIDDEN
+        );
+      }
+    } else {
+      // Auto-select first valid location (prefer OWNER over MANAGER)
+      locationAssignment = validAssignments.find(a => a.role === 'OWNER') || validAssignments[0];
     }
+
+    const location = locationAssignment.location;
+    const locationId = location.id;
 
     // Create device
     const deviceToken = this.generateDeviceToken();

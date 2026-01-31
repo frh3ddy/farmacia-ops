@@ -20,7 +20,7 @@ interface ActivateDeviceDto {
   email: string;
   password: string;
   deviceName: string;
-  locationId: string;
+  locationId?: string;  // Optional - auto-selects first location if not provided
   deviceType?: DeviceType;
 }
 
@@ -60,9 +60,9 @@ export class AuthController {
   async activateDevice(@Body() body: ActivateDeviceDto) {
     try {
       // Validate required fields
-      if (!body.email || !body.password || !body.deviceName || !body.locationId) {
+      if (!body.email || !body.password || !body.deviceName) {
         throw new HttpException(
-          { success: false, message: 'Missing required fields: email, password, deviceName, locationId' },
+          { success: false, message: 'Missing required fields: email, password, deviceName' },
           HttpStatus.BAD_REQUEST
         );
       }
@@ -71,7 +71,7 @@ export class AuthController {
         email: body.email,
         password: body.password,
         deviceName: body.deviceName,
-        locationId: body.locationId,
+        locationId: body.locationId,  // Optional - service will auto-select
         deviceType: body.deviceType,
       });
 
