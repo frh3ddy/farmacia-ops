@@ -34,7 +34,7 @@ function hashPassword(password: string): { hash: string; salt: string } {
 function hashPIN(pin: string): { hash: string; salt: string } {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto
-    .pbkdf2Sync(pin, salt, 10000, 64, 'sha512')
+    .pbkdf2Sync(pin, salt, 10000, 32, 'sha256')  // Must match auth.service.ts: 32 bytes, sha256
     .toString('hex');
   return { hash, salt };
 }
