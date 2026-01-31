@@ -31,6 +31,7 @@ const useInventoryMigrationState = () => {
   const [batchComplete, setBatchComplete] = useState(false);
   const [supplierInitialsMap, setSupplierInitialsMap] = useState({}); // Track learned initials: { supplierName: [initial1, initial2, ...] }
   const [sessionItemsByStatus, setSessionItemsByStatus] = useState(null); // Session-wide items grouped by status: { pending: [], approved: [], skipped: [] }
+  const [hideProductImageForTransition, setHideProductImageForTransition] = useState(false); // Clear image when approve/discard clicked until next product loads
   
   // Session management state
   const [existingSessions, setExistingSessions] = useState([]);
@@ -96,6 +97,7 @@ const useInventoryMigrationState = () => {
     batchComplete, setBatchComplete,
     supplierInitialsMap, setSupplierInitialsMap,
     sessionItemsByStatus, setSessionItemsByStatus,
+    hideProductImageForTransition, setHideProductImageForTransition,
     existingSessions, setExistingSessions,
     showSessionSelector, setShowSessionSelector,
     selectedSessionToResume, setSelectedSessionToResume,

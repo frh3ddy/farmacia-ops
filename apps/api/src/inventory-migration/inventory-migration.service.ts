@@ -63,6 +63,91 @@ export class InventoryMigrationService {
     return cleanSquareName || cleanVarName || fallbackName;
   }
 
+  /**
+   * Compute timeline-aware dates for extracted cost entries.
+   * Rules: no future dates, sequential order (each >= previous), "(no date)" uses today or day after previous.
+   */
+  private computeTimelineAwareDates(
+    entries: Array<{ month?: string | null; day?: number | null; originalLine?: string }>,
+    refDate: Date,
+  ): string[] {
+    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'];
+    const refYear = refDate.getFullYear();
+    const today = new Date();
+
+    let effectiveRefYear = refYear;
+    for (const entry of entries) {
+      if (entry.month) {
+        const monthIndex = MONTH_NAMES.indexOf(entry.month);
+        if (monthIndex !== -1) {
+          const day = entry.day ?? 1;
+          let year = refYear;
+          let candidate = new Date(year, monthIndex, day);
+          while (candidate > today && year > refYear - 5) {
+            year--;
+            candidate = new Date(year, monthIndex, day);
+          }
+          if (year < effectiveRefYear) {
+            effectiveRefYear = year;
+          }
+        }
+      }
+    }
+    const effectiveRefDate = new Date(refDate);
+    effectiveRefDate.setFullYear(effectiveRefYear);
+
+    const clampDay = (year: number, monthIndex: number, day: number): Date => {
+      const d = new Date(year, monthIndex, day);
+      if (d.getMonth() !== monthIndex) {
+        const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+        return new Date(year, monthIndex, Math.min(day, lastDay));
+      }
+      return d;
+    };
+
+    const toISO = (d: Date): string => d.toISOString().split('T')[0];
+
+    const result: string[] = [];
+    let prevDate: Date | null = null;
+
+    for (const entry of entries) {
+      if (entry.month) {
+        const monthIndex = MONTH_NAMES.indexOf(entry.month);
+        if (monthIndex === -1) {
+          const fallback: Date = prevDate
+            ? new Date(prevDate.getTime() + 86400000)
+            : effectiveRefDate;
+          result.push(toISO(fallback));
+          prevDate = fallback;
+          continue;
+        }
+
+        const day = entry.day ?? 1;
+        const yearMatch = entry.originalLine?.match(/\b(19|20)\d{2}\b/);
+        let year = yearMatch ? parseInt(yearMatch[0], 10) : refYear;
+
+        let candidate = clampDay(year, monthIndex, day);
+
+        while (candidate > today) {
+          year--;
+          candidate = clampDay(year, monthIndex, day);
+        }
+
+        result.push(toISO(candidate));
+        prevDate = candidate;
+      } else {
+        const fallback: Date = prevDate
+          ? new Date(Math.max(effectiveRefDate.getTime(), prevDate.getTime() + 86400000))
+          : effectiveRefDate;
+        result.push(toISO(fallback));
+        prevDate = fallback;
+      }
+    }
+
+    return result;
+  }
+
   private buildPriceGuard(
     sellingPrice: { priceCents: number; currency: string } | null,
     selectedCost: number | null | undefined,
@@ -293,6 +378,7 @@ export class InventoryMigrationService {
     batchSize?: number | null,
     extractionSessionId?: string | null,
     newBatchSize?: number | null,
+    cutoverDate?: string | null,
     recursionDepth: number = 0,
     cachedItems?: ItemToProcess[]
   ): Promise<CostApprovalRequest> {
@@ -710,12 +796,23 @@ export class InventoryMigrationService {
       } else {
         const extraction = this.costExtraction.extractCostFromDescription(productName, productDescription);
 
+        const refDate = cutoverDate
+          ? (() => {
+              const d = new Date(cutoverDate);
+              return isNaN(d.getTime()) ? new Date() : d;
+            })()
+          : new Date();
+        const timelineDates = this.computeTimelineAwareDates(
+          extraction.extractedEntries,
+          refDate,
+        );
+
         const enrichedEntries = await Promise.all(
           extraction.extractedEntries.map(async (entry, idx) => {
             const inferred = this.inferSupplierNameFromInitials(entry.supplier, (dbSession!.learnedSupplierInitials as any) || {});
             const term = inferred || entry.supplier;
             const suggestions = await this.supplierService.suggestSuppliers(term, 1);
-            const defaultDateString = new Date().toISOString().split('T')[0];
+            const effectiveDateString = timelineDates[idx] ?? refDate.toISOString().split('T')[0];
 
             return {
               ...entry,
@@ -725,7 +822,7 @@ export class InventoryMigrationService {
               addToHistory: true,
               editedSupplierName: null,
               editedCost: null,
-              editedEffectiveDate: defaultDateString,
+              editedEffectiveDate: effectiveDateString,
               isSelected: idx === extraction.extractedEntries.length - 1,
             };
           }),
@@ -786,6 +883,7 @@ export class InventoryMigrationService {
         null,
         sessionId,
         null,
+        cutoverDate ?? null,
         recursionDepth + 1,
       );
     }

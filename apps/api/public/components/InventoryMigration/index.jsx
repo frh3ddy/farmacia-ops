@@ -167,6 +167,7 @@ const InventoryMigration = () => {
           batchSize: continueExtraction ? null : state.batchSize,
           newBatchSize: continueExtraction ? (newBatchSize || (state.batchSize && state.batchSize > 0 ? state.batchSize : null)) : null,
           extractionSessionId: sessionIdToUse,
+          cutoverDate: state.cutoverDate || null,
         }),
       });
 
@@ -402,6 +403,7 @@ const InventoryMigration = () => {
                   batchSize: null,
                   newBatchSize: state.batchSize && state.batchSize > 0 ? state.batchSize : null,
                   extractionSessionId: result.extractionSessionId || sessionIdToUse,
+                  cutoverDate: state.cutoverDate || null,
                 }),
               });
               
@@ -597,6 +599,7 @@ const InventoryMigration = () => {
           locationIds: [state.selectedLocationId],
           costBasis: state.costBasis,
           batchSize: state.batchSize,
+          cutoverDate: state.cutoverDate || null,
         }),
       });
       const data = await response.json();
@@ -749,6 +752,9 @@ const InventoryMigration = () => {
     const sellingPrice = item?.sellingPrice || null;
     const sellingPriceRange = item?.sellingPriceRange || null;
     
+    // Clear product image immediately when discard is clicked
+    state.setHideProductImageForTransition(true);
+    
     try {
       const response = await fetch('/admin/inventory/cutover/discard-item', {
         method: 'POST',
@@ -783,11 +789,15 @@ const InventoryMigration = () => {
             return Math.max(0, prev - 1);
           }
         });
+        
+        state.setHideProductImageForTransition(false);
       } else {
         state.setError(data.message || 'Failed to discard item');
+        state.setHideProductImageForTransition(false);
       }
     } catch (err) {
       state.setError(err.message || 'Failed to discard item');
+      state.setHideProductImageForTransition(false);
     }
   };
 
@@ -846,6 +856,7 @@ const InventoryMigration = () => {
           batchSize: null,
           newBatchSize: state.batchSize && state.batchSize > 0 ? state.batchSize : null,
           extractionSessionId: state.extractionSessionId,
+          cutoverDate: state.cutoverDate || null,
         }),
       });
       
@@ -1181,6 +1192,9 @@ const InventoryMigration = () => {
       source = 'MANUAL_INPUT';
     }
     
+    // Clear product image immediately when approve is clicked
+    state.setHideProductImageForTransition(true);
+    
     try {
       const entriesToSend = hasExtraction && edited.extractedEntries
         ? edited.extractedEntries.map(entry => ({
@@ -1366,8 +1380,11 @@ const InventoryMigration = () => {
           return Math.max(0, prev - 1);
         }
       });
+      
+      state.setHideProductImageForTransition(false);
     } catch (err) {
       state.setError(err.message || 'Failed to approve item');
+      state.setHideProductImageForTransition(false);
     }
   };
 
@@ -1536,6 +1553,7 @@ const InventoryMigration = () => {
         setBatchComplete={state.setBatchComplete}
         supplierInitialsMap={state.supplierInitialsMap}
         setSupplierInitialsMap={state.setSupplierInitialsMap}
+        hideProductImageForTransition={state.hideProductImageForTransition}
         loading={state.loading}
         error={state.error}
         setError={state.setError}

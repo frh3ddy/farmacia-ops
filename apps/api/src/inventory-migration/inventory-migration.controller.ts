@@ -464,6 +464,7 @@ export class InventoryMigrationController {
         batchSize,
         body.extractionSessionId || null,
         newBatchSize || null,
+        body.cutoverDate || null,
       );
 
       // Serialize dates in the result's allApprovedItems

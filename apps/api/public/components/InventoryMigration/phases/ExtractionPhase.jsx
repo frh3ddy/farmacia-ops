@@ -27,6 +27,7 @@ const ExtractionPhase = ({
   setBatchComplete,
   supplierInitialsMap,
   setSupplierInitialsMap,
+  hideProductImageForTransition,
   sessionItemsByStatus,
   loading,
   error,
@@ -210,6 +211,7 @@ const ExtractionPhase = ({
             onApprove={handleApproveItem}
             onDiscard={handleDiscardItem}
             setError={setError}
+            hideProductImageForTransition={hideProductImageForTransition}
           />
         )}
 

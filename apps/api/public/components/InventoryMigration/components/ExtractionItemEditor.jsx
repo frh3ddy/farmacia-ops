@@ -17,6 +17,7 @@ const ExtractionItemEditor = ({
   onApprove,
   onDiscard,
   setError,
+  hideProductImageForTransition = false,
 }) => {
   // Helper function to format cents to dollars
   const formatCentsToDollars = (cents) => {
@@ -32,6 +33,22 @@ const ExtractionItemEditor = ({
 
   // State for showing/hiding selling price details
   const [showPriceDetails, setShowPriceDetails] = React.useState(false);
+
+  // Preload next 5-10 product images ahead of time for smoother transitions
+  React.useEffect(() => {
+    const extracting = groupedResults?.extracting || [];
+    if (extracting.length === 0) return;
+    const startIdx = currentExtractingIndex + 1;
+    const endIdx = Math.min(startIdx + 10, extracting.length);
+    for (let i = startIdx; i < endIdx; i++) {
+      const item = extracting[i];
+      const url = item?.imageUrl;
+      if (url && typeof url === 'string') {
+        const img = new Image();
+        img.src = url;
+      }
+    }
+  }, [groupedResults?.extracting, currentExtractingIndex]);
 
   // Fix: Move setState call from render to useEffect
   React.useEffect(() => {
@@ -370,13 +387,29 @@ const ExtractionItemEditor = ({
                                       year = parseInt(yearMatch[0]);
                                     } else if (cutoverDate) {
                                       year = new Date(cutoverDate).getFullYear();
+                                    } else {
+                                      year = new Date().getFullYear();
                                     }
-                                    if (year) {
+                                    if (year != null) {
                                       const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
                                         'July', 'August', 'September', 'October', 'November', 'December'];
                                       const monthIndex = monthNames.indexOf(entry.month);
                                       if (monthIndex !== -1) {
-                                        const date = new Date(year, monthIndex, 1);
+                                        const day = entry.day ?? 1;
+                                        let date = new Date(year, monthIndex, day);
+                                        if (date.getMonth() !== monthIndex) {
+                                          const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+                                          date = new Date(year, monthIndex, Math.min(day, lastDay));
+                                        }
+                                        const today = new Date();
+                                        while (date > today) {
+                                          year--;
+                                          date = new Date(year, monthIndex, day);
+                                          if (date.getMonth() !== monthIndex) {
+                                            const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+                                            date = new Date(year, monthIndex, Math.min(day, lastDay));
+                                          }
+                                        }
                                         extractedDate = date.toISOString().split('T')[0];
                                       }
                                     }
@@ -562,10 +595,10 @@ const ExtractionItemEditor = ({
                     <p className="text-sm text-gray-600 mt-1">{result.originalDescription}</p>
                   )}
                   <div className="mt-4 bg-gray-100 rounded-lg p-8 flex items-center justify-center min-h-[200px]">
-                    {result.imageUrl ? (
+                    {result.imageUrl && !hideProductImageForTransition ? (
                       <img src={result.imageUrl} alt={result.productName} className="max-w-full max-h-48 object-contain" />
                     ) : (
-                      <div className="text-gray-400 text-sm">No image available</div>
+                      <div className="text-gray-400 text-sm">{hideProductImageForTransition ? 'Loading next product...' : 'No image available'}</div>
                     )}
                   </div>
                 </div>

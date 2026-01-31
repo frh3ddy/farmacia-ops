@@ -9,7 +9,7 @@ import {
 // Value: The standardized English month name
 const MONTH_MAP: Record<string, string> = {
   // Enero
-  enero: 'January', enro: 'January', ennero: 'January',
+  enero: 'January', ene: 'January', enro: 'January', ennero: 'January',
   // Febrero
   febrero: 'February', feb: 'February', febreo: 'February', febero: 'February', febre: 'February',
   // Marzo
@@ -81,9 +81,25 @@ export class CostExtractionService {
       return result;
     }
 
-    const lines = combinedText.split(/\r?\n/);
-    let lineNumber = 0;
+    let lines = combinedText.split(/\r?\n/);
 
+    // Merge month-only lines (e.g. "mayo" on its own line) with the previous cost line
+    // Format: "Ba $20.00\nmayo" -> "Ba $20.00 mayo"
+    const MONTH_ONLY_REGEX = new RegExp(`^\\s*((?:\\d{1,2}\\s+)?(?:${SORTED_KEYS.join('|')})|(?:${SORTED_KEYS.join('|')})\\s*(?:\\d{1,2})?)\\s*$`, 'i');
+    const mergedLines: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const hasCurrency = line.includes('$') || line.includes('💲');
+      if (hasCurrency) {
+        mergedLines.push(line);
+      } else if (mergedLines.length > 0 && MONTH_ONLY_REGEX.test(line)) {
+        mergedLines[mergedLines.length - 1] = `${mergedLines[mergedLines.length - 1]} ${line}`;
+      }
+    }
+    lines = mergedLines;
+
+    let lineNumber = 0;
     for (const rawLine of lines) {
       lineNumber++;
       const line = rawLine.trim();
@@ -137,7 +153,29 @@ export class CostExtractionService {
       const monthRaw = monthMatch ? monthMatch[1].toLowerCase() : null;
       const month = monthRaw ? MONTH_MAP[monthRaw] : null;
 
-      // 4. Determine Confidence
+      // 4. Extract Day (when month is present)
+      // Patterns: "1 mar", "10 ene", "3 dec" (day before month) or "mar 1", "ene 10" (month before day)
+      let day: number | null = null;
+      if (monthMatch && month) {
+        const monthStart = monthMatch.index!;
+        const monthEnd = monthStart + monthMatch[0].length;
+        // Day before month: (\d{1,2})\s+ immediately before month
+        const dayBeforeMatch = line.slice(0, monthStart).match(/(\d{1,2})\s*$/);
+        if (dayBeforeMatch) {
+          const d = parseInt(dayBeforeMatch[1], 10);
+          if (d >= 1 && d <= 31) day = d;
+        }
+        // Day after month: \s+(\d{1,2}) immediately after month
+        if (day === null) {
+          const dayAfterMatch = line.slice(monthEnd).match(/^\s*(\d{1,2})\b/);
+          if (dayAfterMatch) {
+            const d = parseInt(dayAfterMatch[1], 10);
+            if (d >= 1 && d <= 31) day = d;
+          }
+        }
+      }
+
+      // 5. Determine Confidence
       let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'HIGH';
       if (!month) confidence = 'MEDIUM';
       if (supplier === 'General') confidence = 'MEDIUM'; 
@@ -148,6 +186,7 @@ export class CostExtractionService {
         supplier,
         amount,
         month,
+        day: day ?? undefined,
         lineNumber,
         originalLine: line,
         confidence,

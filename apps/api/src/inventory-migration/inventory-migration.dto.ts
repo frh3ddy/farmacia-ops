@@ -3,6 +3,7 @@ export interface ExtractCostsRequest {
   costBasis: 'DESCRIPTION';
   batchSize?: number | string | null;
   extractionSessionId?: string | null;
+  cutoverDate?: string | null;
 }
 
 export interface ApproveBatchRequest {
