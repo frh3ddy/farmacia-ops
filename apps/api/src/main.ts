@@ -94,11 +94,21 @@ async function bootstrap() {
       next: express.NextFunction
     ) => {
       const path = req.path;
+      // List of API route prefixes that should NOT serve static HTML
+      const apiPrefixes = [
+        "/api",
+        "/admin",
+        "/webhooks",
+        "/locations",
+        "/auth",
+        "/employees",
+        "/inventory",
+        "/expenses",
+      ];
+      const isApiRoute = apiPrefixes.some(prefix => path.startsWith(prefix));
+      
       if (
-        !path.startsWith("/api") &&
-        !path.startsWith("/admin") &&
-        !path.startsWith("/webhooks") &&
-        !path.startsWith("/locations") &&
+        !isApiRoute &&
         path !== "/" &&
         !path.includes(".")
       ) {
