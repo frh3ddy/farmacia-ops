@@ -57,6 +57,8 @@ export class CostExtractionService {
   private static readonly SUPPLIER_REGEX = /([A-Za-z0-9][A-Za-z0-9\s'.-]{0,15})\s*[\$💲]/;
   private static readonly AMOUNT_REGEX = /[\$💲]\s*(\d+[.,]?\d*)/;
   private static readonly MONTH_REGEX = new RegExp(MONTH_REGEX_STRING, 'i');
+  // Matches MM/DD/YYYY or MM-DD-YYYY at start of line
+  private static readonly DATE_PREFIX_REGEX = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s+/;
 
   extractCostFromDescription(
     productName: string,
@@ -125,19 +127,20 @@ export class CostExtractionService {
       // Sanity check
       if (isNaN(amount) || amount < 0 || amount > 10000) continue;
 
-      // 2. Extract Supplier
+      // 2. Check for date prefix (MM/DD/YYYY or MM-DD-YYYY) at start of line
+      const datePrefixMatch = line.match(CostExtractionService.DATE_PREFIX_REGEX);
+      const lineForSupplier = datePrefixMatch ? line.slice(datePrefixMatch[0].length) : line;
+
+      // 3. Extract Supplier (use line without date prefix if present)
       let supplier = 'General';
-      
-      // Try specific regex first
-      const supplierMatch = line.match(CostExtractionService.SUPPLIER_REGEX);
+      const supplierMatch = lineForSupplier.match(CostExtractionService.SUPPLIER_REGEX);
       
       if (supplierMatch) {
         supplier = supplierMatch[1].trim();
       } else {
-        // Fallback: Check text before the $
-        const dollarIndex = line.search(/[\$💲]/);
+        const dollarIndex = lineForSupplier.search(/[\$💲]/);
         if (dollarIndex > 0) {
-          const prefix = line.substring(0, dollarIndex).trim();
+          const prefix = lineForSupplier.substring(0, dollarIndex).trim();
           // Heuristic: If prefix is short (<= 3 words, <= 15 chars), it's likely a code/supplier
           // If it's long, it's likely the product name, so we default to "General"
           const words = prefix.split(/\s+/);
@@ -147,35 +150,55 @@ export class CostExtractionService {
         }
       }
 
-      // 3. Extract Month
-      // Since regex is built from keys, if it matches, the key exists.
-      const monthMatch = line.match(CostExtractionService.MONTH_REGEX);
-      const monthRaw = monthMatch ? monthMatch[1].toLowerCase() : null;
-      const month = monthRaw ? MONTH_MAP[monthRaw] : null;
-
-      // 4. Extract Day (when month is present)
-      // Patterns: "1 mar", "10 ene", "3 dec" (day before month) or "mar 1", "ene 10" (month before day)
+      // 4. Extract Month, Day, Year
+      let month: string | null = null;
       let day: number | null = null;
-      if (monthMatch && month) {
-        const monthStart = monthMatch.index!;
-        const monthEnd = monthStart + monthMatch[0].length;
-        // Day before month: (\d{1,2})\s+ immediately before month
-        const dayBeforeMatch = line.slice(0, monthStart).match(/(\d{1,2})\s*$/);
-        if (dayBeforeMatch) {
-          const d = parseInt(dayBeforeMatch[1], 10);
-          if (d >= 1 && d <= 31) day = d;
+      let extractedYear: number | null = null;
+
+      if (datePrefixMatch) {
+        const monthNum = parseInt(datePrefixMatch[1], 10);
+        const dayNum = parseInt(datePrefixMatch[2], 10);
+        const yearNum = parseInt(datePrefixMatch[3], 10);
+        if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31 && yearNum >= 1900 && yearNum <= 2100) {
+          const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December'];
+          month = MONTH_NAMES[monthNum - 1];
+          day = dayNum;
+          extractedYear = yearNum;
         }
-        // Day after month: \s+(\d{1,2}) immediately after month
-        if (day === null) {
-          const dayAfterMatch = line.slice(monthEnd).match(/^\s*(\d{1,2})\b/);
-          if (dayAfterMatch) {
-            const d = parseInt(dayAfterMatch[1], 10);
+      }
+
+      if (!month) {
+        const monthMatch = line.match(CostExtractionService.MONTH_REGEX);
+        const monthRaw = monthMatch ? monthMatch[1].toLowerCase() : null;
+        month = monthRaw ? MONTH_MAP[monthRaw] : null;
+      }
+
+      // 5. Extract Day (when month from month name, not date prefix)
+      // Patterns: "1 mar", "10 ene", "3 dec" (day before month) or "mar 1", "ene 10" (month before day)
+      if (day === null && month) {
+        const monthMatch = line.match(CostExtractionService.MONTH_REGEX);
+        if (monthMatch) {
+          const monthStart = monthMatch.index!;
+          const monthEnd = monthStart + monthMatch[0].length;
+          // Day before month: (\d{1,2})\s+ immediately before month (avoid matching amount like 22.00)
+          const dayBeforeMatch = line.slice(0, monthStart).match(/(\d{1,2})\s*$/);
+          if (dayBeforeMatch) {
+            const d = parseInt(dayBeforeMatch[1], 10);
             if (d >= 1 && d <= 31) day = d;
+          }
+          // Day after month: \s+(\d{1,2}) immediately after month
+          if (day === null) {
+            const dayAfterMatch = line.slice(monthEnd).match(/^\s*(\d{1,2})\b/);
+            if (dayAfterMatch) {
+              const d = parseInt(dayAfterMatch[1], 10);
+              if (d >= 1 && d <= 31) day = d;
+            }
           }
         }
       }
 
-      // 5. Determine Confidence
+      // 6. Determine Confidence
       let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'HIGH';
       if (!month) confidence = 'MEDIUM';
       if (supplier === 'General') confidence = 'MEDIUM'; 
@@ -187,6 +210,7 @@ export class CostExtractionService {
         amount,
         month,
         day: day ?? undefined,
+        extractedYear: extractedYear ?? undefined,
         lineNumber,
         originalLine: line,
         confidence,

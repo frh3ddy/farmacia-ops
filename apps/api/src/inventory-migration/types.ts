@@ -17,6 +17,7 @@ export interface ExtractedCostEntry {
   amount: number;
   month?: string | null;
   day?: number | null;
+  extractedYear?: number | null;
   lineNumber?: number | null;
   originalLine: string;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';

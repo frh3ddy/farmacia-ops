@@ -65,37 +65,18 @@ export class InventoryMigrationService {
 
   /**
    * Compute timeline-aware dates for extracted cost entries.
-   * Rules: no future dates, sequential order (each >= previous), "(no date)" uses today or day after previous.
+   * Rules: no future dates, sequential order (each > previous), "(no date)" uses day after previous.
+   * Uses iterative baseline: if bumping year for order would exceed today, retry with earlier baseline.
    */
   private computeTimelineAwareDates(
-    entries: Array<{ month?: string | null; day?: number | null; originalLine?: string }>,
+    entries: Array<{ month?: string | null; day?: number | null; extractedYear?: number | null; originalLine?: string }>,
     refDate: Date,
   ): string[] {
     const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December'];
     const refYear = refDate.getFullYear();
     const today = new Date();
-
-    let effectiveRefYear = refYear;
-    for (const entry of entries) {
-      if (entry.month) {
-        const monthIndex = MONTH_NAMES.indexOf(entry.month);
-        if (monthIndex !== -1) {
-          const day = entry.day ?? 1;
-          let year = refYear;
-          let candidate = new Date(year, monthIndex, day);
-          while (candidate > today && year > refYear - 5) {
-            year--;
-            candidate = new Date(year, monthIndex, day);
-          }
-          if (year < effectiveRefYear) {
-            effectiveRefYear = year;
-          }
-        }
-      }
-    }
-    const effectiveRefDate = new Date(refDate);
-    effectiveRefDate.setFullYear(effectiveRefYear);
+    today.setHours(23, 59, 59, 999);
 
     const clampDay = (year: number, monthIndex: number, day: number): Date => {
       const d = new Date(year, monthIndex, day);
@@ -108,44 +89,105 @@ export class InventoryMigrationService {
 
     const toISO = (d: Date): string => d.toISOString().split('T')[0];
 
-    const result: string[] = [];
-    let prevDate: Date | null = null;
+    // Try baseline years from refYear down; use earliest that produces valid timeline
+    for (let offset = 0; offset <= 5; offset++) {
+      const effectiveRefYear = refYear - offset;
+      const effectiveRefDate = new Date(refDate);
+      effectiveRefDate.setFullYear(effectiveRefYear);
 
-    for (const entry of entries) {
-      if (entry.month) {
-        const monthIndex = MONTH_NAMES.indexOf(entry.month);
-        if (monthIndex === -1) {
+      const result: string[] = [];
+      let prevDate: Date | null = null;
+      let valid = true;
+
+      for (const entry of entries) {
+        if (entry.month) {
+          const monthIndex = MONTH_NAMES.indexOf(entry.month);
+          if (monthIndex === -1) {
+            const fallback: Date = prevDate
+              ? new Date(prevDate.getTime() + 86400000)
+              : effectiveRefDate;
+            if (fallback > today) {
+              valid = false;
+              break;
+            }
+            result.push(toISO(fallback));
+            prevDate = fallback;
+            continue;
+          }
+
+          const day = entry.day ?? 1;
+          const yearMatch = entry.originalLine?.match(/\b(19|20)\d{2}\b/);
+          const extractedYearVal = entry.extractedYear ?? (yearMatch ? parseInt(yearMatch[0], 10) : effectiveRefYear);
+
+          let year = extractedYearVal;
+          let candidate = clampDay(year, monthIndex, day);
+
+          // Ensure not in future
+          while (candidate > today && year > effectiveRefYear - 2) {
+            year--;
+            candidate = clampDay(year, monthIndex, day);
+          }
+          if (candidate > today) {
+            valid = false;
+            break;
+          }
+
+          // Ensure strictly after previous (chronological order)
+          while (prevDate && candidate <= prevDate && year < refYear + 2) {
+            year++;
+            candidate = clampDay(year, monthIndex, day);
+          }
+          if (prevDate && candidate <= prevDate) {
+            valid = false;
+            break;
+          }
+          if (candidate > today) {
+            valid = false;
+            break;
+          }
+
+          result.push(toISO(candidate));
+          prevDate = candidate;
+        } else {
           const fallback: Date = prevDate
-            ? new Date(prevDate.getTime() + 86400000)
+            ? new Date(Math.max(effectiveRefDate.getTime(), prevDate.getTime() + 86400000))
             : effectiveRefDate;
+          if (fallback > today) {
+            valid = false;
+            break;
+          }
           result.push(toISO(fallback));
           prevDate = fallback;
-          continue;
         }
+      }
 
-        const day = entry.day ?? 1;
-        const yearMatch = entry.originalLine?.match(/\b(19|20)\d{2}\b/);
-        let year = yearMatch ? parseInt(yearMatch[0], 10) : refYear;
-
-        let candidate = clampDay(year, monthIndex, day);
-
-        while (candidate > today) {
-          year--;
-          candidate = clampDay(year, monthIndex, day);
-        }
-
-        result.push(toISO(candidate));
-        prevDate = candidate;
-      } else {
-        const fallback: Date = prevDate
-          ? new Date(Math.max(effectiveRefDate.getTime(), prevDate.getTime() + 86400000))
-          : effectiveRefDate;
-        result.push(toISO(fallback));
-        prevDate = fallback;
+      if (valid) {
+        return result;
       }
     }
 
-    return result;
+    // Fallback: return best-effort using refYear (may have ordering issues)
+    const effectiveRefDate = new Date(refDate);
+    const fallbackResult: string[] = [];
+    let fallbackPrevDate: Date | null = null;
+    for (const entry of entries) {
+      if (entry.month) {
+        const monthIndex = MONTH_NAMES.indexOf(entry.month);
+        const day = entry.day ?? 1;
+        const yearMatch = entry.originalLine?.match(/\b(19|20)\d{2}\b/);
+        const year = entry.extractedYear ?? (yearMatch ? parseInt(yearMatch[0], 10) : refYear);
+        const candidate: Date = monthIndex !== -1
+          ? clampDay(year, monthIndex, day)
+          : (fallbackPrevDate ? new Date(fallbackPrevDate.getTime() + 86400000) : effectiveRefDate);
+        fallbackResult.push(toISO(candidate));
+        fallbackPrevDate = candidate;
+      } else {
+        const fallbackDate: Date = fallbackPrevDate ? new Date(fallbackPrevDate.getTime() + 86400000) : effectiveRefDate;
+        fallbackResult.push(toISO(fallbackDate));
+        fallbackPrevDate = fallbackDate;
+      }
+    }
+    return fallbackResult;
   }
 
   private buildPriceGuard(
