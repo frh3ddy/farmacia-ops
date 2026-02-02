@@ -5,11 +5,14 @@ import {
   Body,
   Param,
   Query,
+  Req,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { AdjustmentType } from '@prisma/client';
+import { AuthGuard, RoleGuard, LocationGuard, Roles, Public } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -46,19 +49,27 @@ function getErrorStatus(error: unknown): number {
 // ============================================================================
 
 @Controller('inventory/adjustments')
+@UseGuards(AuthGuard, RoleGuard, LocationGuard)
 export class InventoryAdjustmentController {
   constructor(private readonly adjustmentService: InventoryAdjustmentService) {}
 
   // --------------------------------------------------------------------------
-  // Create adjustment
+  // Create adjustment - OWNER, MANAGER only
   // --------------------------------------------------------------------------
   @Post()
-  async createAdjustment(@Body() body: CreateAdjustmentDto) {
+  @Roles('OWNER', 'MANAGER')
+  async createAdjustment(@Body() body: CreateAdjustmentDto, @Req() req: any) {
     try {
+      const currentEmployee = req.employee;
+      const currentLocation = req.currentLocation;
+
+      // Use current location if not specified
+      const locationId = body.locationId || currentLocation.locationId;
+
       // Validate required fields
-      if (!body.locationId || !body.productId || !body.type || body.quantity === undefined) {
+      if (!body.productId || !body.type || body.quantity === undefined) {
         throw new HttpException(
-          { success: false, message: 'Missing required fields: locationId, productId, type, quantity' },
+          { success: false, message: 'Missing required fields: productId, type, quantity' },
           HttpStatus.BAD_REQUEST
         );
       }
@@ -93,7 +104,7 @@ export class InventoryAdjustmentController {
       }
 
       const result = await this.adjustmentService.createAdjustment({
-        locationId: body.locationId,
+        locationId,
         productId: body.productId,
         type: body.type,
         quantity: body.quantity,
@@ -101,7 +112,7 @@ export class InventoryAdjustmentController {
         notes: body.notes,
         unitCost: body.unitCost,
         effectiveDate,
-        adjustedBy: body.adjustedBy,
+        adjustedBy: currentEmployee.id,
         syncToSquare: body.syncToSquare,
       });
 
@@ -133,75 +144,83 @@ export class InventoryAdjustmentController {
   }
 
   // --------------------------------------------------------------------------
-  // Quick adjustment endpoints (convenience methods)
+  // Quick adjustment endpoints (convenience methods) - OWNER, MANAGER only
   // --------------------------------------------------------------------------
   @Post('damage')
-  async recordDamage(@Body() body: Omit<CreateAdjustmentDto, 'type'>) {
+  @Roles('OWNER', 'MANAGER')
+  async recordDamage(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.DAMAGE,
       quantity: -Math.abs(body.quantity), // Always negative
-    });
+    }, req);
   }
 
   @Post('theft')
-  async recordTheft(@Body() body: Omit<CreateAdjustmentDto, 'type'>) {
+  @Roles('OWNER', 'MANAGER')
+  async recordTheft(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.THEFT,
       quantity: -Math.abs(body.quantity), // Always negative
-    });
+    }, req);
   }
 
   @Post('expired')
-  async recordExpired(@Body() body: Omit<CreateAdjustmentDto, 'type'>) {
+  @Roles('OWNER', 'MANAGER')
+  async recordExpired(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.EXPIRED,
       quantity: -Math.abs(body.quantity), // Always negative
-    });
+    }, req);
   }
 
   @Post('found')
-  async recordFound(@Body() body: Omit<CreateAdjustmentDto, 'type'>) {
+  @Roles('OWNER', 'MANAGER')
+  async recordFound(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.FOUND,
       quantity: Math.abs(body.quantity), // Always positive
-    });
+    }, req);
   }
 
   @Post('return')
-  async recordReturn(@Body() body: Omit<CreateAdjustmentDto, 'type'>) {
+  @Roles('OWNER', 'MANAGER')
+  async recordReturn(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.RETURN,
       quantity: Math.abs(body.quantity), // Always positive
-    });
+    }, req);
   }
 
   @Post('count-correction')
-  async recordCountCorrection(@Body() body: Omit<CreateAdjustmentDto, 'type'>) {
+  @Roles('OWNER', 'MANAGER')
+  async recordCountCorrection(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.COUNT_CORRECTION,
       // Keep original sign - can be positive or negative
-    });
+    }, req);
   }
 
   @Post('write-off')
-  async recordWriteOff(@Body() body: Omit<CreateAdjustmentDto, 'type'>) {
+  @Roles('OWNER', 'MANAGER')
+  async recordWriteOff(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.WRITE_OFF,
       quantity: -Math.abs(body.quantity), // Always negative
-    });
+    }, req);
   }
 
   // --------------------------------------------------------------------------
-  // Query endpoints
+  // Query endpoints - OWNER, MANAGER can view all adjustments
   // --------------------------------------------------------------------------
   @Get(':id')
+  @Roles('OWNER', 'MANAGER')
   async getAdjustment(@Param('id') id: string) {
     try {
       const adjustment = await this.adjustmentService.getAdjustment(id);
@@ -233,6 +252,7 @@ export class InventoryAdjustmentController {
   }
 
   @Get('product/:productId')
+  @Roles('OWNER', 'MANAGER')
   async getAdjustmentsByProduct(
     @Param('productId') productId: string,
     @Query('locationId') locationId?: string
@@ -261,6 +281,7 @@ export class InventoryAdjustmentController {
   }
 
   @Get('location/:locationId')
+  @Roles('OWNER', 'MANAGER')
   async getAdjustmentsByLocation(
     @Param('locationId') locationId: string,
     @Query('startDate') startDate?: string,
@@ -297,6 +318,7 @@ export class InventoryAdjustmentController {
   }
 
   @Get('location/:locationId/summary')
+  @Roles('OWNER', 'MANAGER')
   async getAdjustmentSummary(
     @Param('locationId') locationId: string,
     @Query('startDate') startDate?: string,
@@ -321,9 +343,10 @@ export class InventoryAdjustmentController {
   }
 
   // --------------------------------------------------------------------------
-  // Utility endpoints
+  // Utility endpoints - Public
   // --------------------------------------------------------------------------
   @Get('types/list')
+  @Public()
   getAdjustmentTypes() {
     const types = Object.values(AdjustmentType).map(type => ({
       value: type,

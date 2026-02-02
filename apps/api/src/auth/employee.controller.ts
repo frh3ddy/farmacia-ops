@@ -5,15 +5,16 @@ import {
   Put,
   Delete,
   Body,
-  Headers,
   Query,
   Param,
+  Req,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
-import { AuthService } from './auth.service';
 import { EmployeeRole } from '@prisma/client';
+import { AuthGuard, RoleGuard, Roles, Public } from './guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -78,56 +79,24 @@ const ROLE_HIERARCHY: Record<EmployeeRole, number> = {
 // ============================================================================
 
 @Controller('employees')
+@UseGuards(AuthGuard, RoleGuard)
 export class EmployeeController {
   constructor(
-    private readonly employeeService: EmployeeService,
-    private readonly authService: AuthService
+    private readonly employeeService: EmployeeService
   ) {}
-
-  // --------------------------------------------------------------------------
-  // Helper: Validate Session and Check Role
-  // --------------------------------------------------------------------------
-  private async validateSessionAndRole(
-    sessionToken: string,
-    requiredRoles: EmployeeRole[]
-  ) {
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
-    const { employee, currentLocation } = await this.authService.validateSession(sessionToken);
-
-    if (!currentLocation) {
-      throw new HttpException(
-        { success: false, message: 'No location context' },
-        HttpStatus.FORBIDDEN
-      );
-    }
-
-    if (!requiredRoles.includes(currentLocation.role)) {
-      throw new HttpException(
-        { success: false, message: `Requires one of: ${requiredRoles.join(', ')}` },
-        HttpStatus.FORBIDDEN
-      );
-    }
-
-    return { employee, currentLocation };
-  }
 
   // --------------------------------------------------------------------------
   // Create Employee
   // --------------------------------------------------------------------------
   @Post()
+  @Roles('OWNER')
   async createEmployee(
     @Body() body: CreateEmployeeDto,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee, currentLocation } = 
-        await this.validateSessionAndRole(sessionToken, ['OWNER']);
+      const currentEmployee = req.employee;
+      const currentLocation = req.currentLocation;
 
       // Validate required fields
       if (!body.name || !body.locationId || !body.role) {
@@ -182,13 +151,11 @@ export class EmployeeController {
   // Get Employee
   // --------------------------------------------------------------------------
   @Get(':id')
+  @Roles('OWNER', 'MANAGER')
   async getEmployee(
-    @Param('id') employeeId: string,
-    @Headers('x-session-token') sessionToken: string
+    @Param('id') employeeId: string
   ) {
     try {
-      await this.validateSessionAndRole(sessionToken, ['OWNER', 'MANAGER']);
-
       const employee = await this.employeeService.getEmployee(employeeId);
 
       return {
@@ -208,18 +175,16 @@ export class EmployeeController {
   // List Employees
   // --------------------------------------------------------------------------
   @Get()
+  @Roles('OWNER', 'MANAGER')
   async listEmployees(
-    @Headers('x-session-token') sessionToken: string,
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('role') role?: EmployeeRole,
     @Query('isActive') isActive?: string,
     @Query('limit') limit?: string
   ) {
     try {
-      const { currentLocation } = await this.validateSessionAndRole(
-        sessionToken,
-        ['OWNER', 'MANAGER']
-      );
+      const currentLocation = req.currentLocation;
 
       // If not OWNER, restrict to current location
       const targetLocationId = 
@@ -250,16 +215,14 @@ export class EmployeeController {
   // Update Employee
   // --------------------------------------------------------------------------
   @Put(':id')
+  @Roles('OWNER')
   async updateEmployee(
     @Param('id') employeeId: string,
     @Body() body: UpdateEmployeeDto,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee } = await this.validateSessionAndRole(
-        sessionToken,
-        ['OWNER']
-      );
+      const currentEmployee = req.employee;
 
       const result = await this.employeeService.updateEmployee(
         employeeId,
@@ -285,15 +248,13 @@ export class EmployeeController {
   // Deactivate Employee
   // --------------------------------------------------------------------------
   @Delete(':id')
+  @Roles('OWNER')
   async deactivateEmployee(
     @Param('id') employeeId: string,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee } = await this.validateSessionAndRole(
-        sessionToken,
-        ['OWNER']
-      );
+      const currentEmployee = req.employee;
 
       // Prevent self-deactivation
       if (employeeId === currentEmployee.id) {
@@ -322,14 +283,15 @@ export class EmployeeController {
   // Set PIN
   // --------------------------------------------------------------------------
   @Post(':id/pin')
+  @Roles('OWNER', 'MANAGER')
   async setPIN(
     @Param('id') employeeId: string,
     @Body() body: SetPINDto,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee, currentLocation } = 
-        await this.validateSessionAndRole(sessionToken, ['OWNER', 'MANAGER']);
+      const currentEmployee = req.employee;
+      const currentLocation = req.currentLocation;
 
       // Validate PIN format
       if (!body.pin || !/^\d{4,6}$/.test(body.pin)) {
@@ -357,7 +319,7 @@ export class EmployeeController {
         // Can't set PIN for equal or higher role (unless OWNER)
         if (
           currentLocation.role !== 'OWNER' &&
-          ROLE_HIERARCHY[targetAssignment.role as EmployeeRole] >= ROLE_HIERARCHY[currentLocation.role]
+          ROLE_HIERARCHY[targetAssignment.role as EmployeeRole] >= ROLE_HIERARCHY[currentLocation.role as EmployeeRole]
         ) {
           throw new HttpException(
             { success: false, message: 'Cannot manage employees of equal or higher role' },
@@ -388,15 +350,13 @@ export class EmployeeController {
   // Reset PIN Lockout
   // --------------------------------------------------------------------------
   @Post(':id/pin/reset-lockout')
+  @Roles('OWNER', 'MANAGER')
   async resetPINLockout(
     @Param('id') employeeId: string,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee } = await this.validateSessionAndRole(
-        sessionToken,
-        ['OWNER', 'MANAGER']
-      );
+      const currentEmployee = req.employee;
 
       await this.employeeService.resetPINLockout(employeeId, currentEmployee.id);
 
@@ -417,16 +377,14 @@ export class EmployeeController {
   // Set Password (for device activation capability)
   // --------------------------------------------------------------------------
   @Post(':id/password')
+  @Roles('OWNER')
   async setPassword(
     @Param('id') employeeId: string,
     @Body() body: SetPasswordDto,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee } = await this.validateSessionAndRole(
-        sessionToken,
-        ['OWNER']
-      );
+      const currentEmployee = req.employee;
 
       if (!body.password || body.password.length < 8) {
         throw new HttpException(
@@ -458,16 +416,14 @@ export class EmployeeController {
   // Assign to Location
   // --------------------------------------------------------------------------
   @Post(':id/locations')
+  @Roles('OWNER')
   async assignLocation(
     @Param('id') employeeId: string,
     @Body() body: AssignLocationDto,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee } = await this.validateSessionAndRole(
-        sessionToken,
-        ['OWNER']
-      );
+      const currentEmployee = req.employee;
 
       if (!body.locationId || !body.role) {
         throw new HttpException(
@@ -501,17 +457,15 @@ export class EmployeeController {
   // Update Location Assignment
   // --------------------------------------------------------------------------
   @Put(':id/locations/:locationId')
+  @Roles('OWNER')
   async updateLocationAssignment(
     @Param('id') employeeId: string,
     @Param('locationId') locationId: string,
     @Body() body: UpdateAssignmentDto,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee } = await this.validateSessionAndRole(
-        sessionToken,
-        ['OWNER']
-      );
+      const currentEmployee = req.employee;
 
       const result = await this.employeeService.updateLocationAssignment(
         employeeId,
@@ -538,16 +492,14 @@ export class EmployeeController {
   // Remove Location Assignment
   // --------------------------------------------------------------------------
   @Delete(':id/locations/:locationId')
+  @Roles('OWNER')
   async removeLocationAssignment(
     @Param('id') employeeId: string,
     @Param('locationId') locationId: string,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: any
   ) {
     try {
-      const { employee: currentEmployee } = await this.validateSessionAndRole(
-        sessionToken,
-        ['OWNER']
-      );
+      const currentEmployee = req.employee;
 
       await this.employeeService.removeLocationAssignment(
         employeeId,
@@ -569,9 +521,10 @@ export class EmployeeController {
   }
 
   // --------------------------------------------------------------------------
-  // Get Employee Roles (for dropdowns)
+  // Get Employee Roles (for dropdowns) - Public endpoint
   // --------------------------------------------------------------------------
   @Get('roles/list')
+  @Public()
   async getEmployeeRoles() {
     return {
       success: true,

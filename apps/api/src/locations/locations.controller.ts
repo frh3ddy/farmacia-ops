@@ -1,8 +1,10 @@
-import { Controller, Get, Post, HttpCode, HttpStatus, HttpException } from '@nestjs/common';
+import { Controller, Get, Post, HttpCode, HttpStatus, HttpException, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationsService } from './locations.service';
+import { AuthGuard, RoleGuard, Roles, Public } from '../auth/guards/auth.guard';
 
 @Controller()
+@UseGuards(AuthGuard, RoleGuard)
 export class LocationsController {
   constructor(
     private readonly prisma: PrismaService,
@@ -10,6 +12,7 @@ export class LocationsController {
   ) {}
 
   @Get()
+  @Public()  // Health check is public
   async healthCheck() {
     return {
       message: 'Farmacia Ops API',
@@ -19,6 +22,7 @@ export class LocationsController {
   }
 
   @Get('locations')
+  @Public()  // Locations list is public (needed for device activation)
   async getLocations() {
     const locations = await this.prisma.location.findMany({
       orderBy: { createdAt: 'desc' }
@@ -33,6 +37,7 @@ export class LocationsController {
 
   @Post('locations/sync')
   @HttpCode(HttpStatus.OK)
+  @Roles('OWNER')  // Only OWNER can sync locations from Square
   async syncLocations() {
     try {
       const result = await this.locationsService.syncLocationsFromSquare();

@@ -5,10 +5,14 @@ import {
   Param,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { InventoryReconciliationService } from './inventory-reconciliation.service';
+import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 
 @Controller('inventory/reconciliation')
+@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@Roles('OWNER', 'MANAGER')  // Reconciliation requires OWNER or MANAGER role
 export class InventoryReconciliationController {
   constructor(
     private readonly reconciliationService: InventoryReconciliationService,

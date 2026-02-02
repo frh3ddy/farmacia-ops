@@ -5,10 +5,13 @@ import {
   Body,
   Param,
   Query,
+  Req,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { InventoryReceivingService } from './inventory-receiving.service';
+import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -48,19 +51,27 @@ function getErrorStatus(error: unknown): number {
 // ============================================================================
 
 @Controller('inventory/receive')
+@UseGuards(AuthGuard, RoleGuard, LocationGuard)
 export class InventoryReceivingController {
   constructor(private readonly receivingService: InventoryReceivingService) {}
 
   // --------------------------------------------------------------------------
-  // Receive inventory
+  // Receive inventory - OWNER, MANAGER only
   // --------------------------------------------------------------------------
   @Post()
-  async receiveInventory(@Body() body: ReceiveInventoryDto) {
+  @Roles('OWNER', 'MANAGER')
+  async receiveInventory(@Body() body: ReceiveInventoryDto, @Req() req: any) {
     try {
+      const currentEmployee = req.employee;
+      const currentLocation = req.currentLocation;
+
+      // Use current location if not specified
+      const locationId = body.locationId || currentLocation.locationId;
+
       // Validate required fields
-      if (!body.locationId || !body.productId || !body.quantity || body.unitCost === undefined) {
+      if (!body.productId || !body.quantity || body.unitCost === undefined) {
         throw new HttpException(
-          { success: false, message: 'Missing required fields: locationId, productId, quantity, unitCost' },
+          { success: false, message: 'Missing required fields: productId, quantity, unitCost' },
           HttpStatus.BAD_REQUEST
         );
       }
@@ -106,7 +117,7 @@ export class InventoryReceivingController {
       }
 
       const result = await this.receivingService.receiveInventory({
-        locationId: body.locationId,
+        locationId,
         productId: body.productId,
         quantity: body.quantity,
         unitCost: body.unitCost,
@@ -116,7 +127,7 @@ export class InventoryReceivingController {
         batchNumber: body.batchNumber,
         expiryDate,
         manufacturingDate,
-        receivedBy: body.receivedBy,
+        receivedBy: currentEmployee.id,
         notes: body.notes,
         syncToSquare: body.syncToSquare,
       });
@@ -149,9 +160,10 @@ export class InventoryReceivingController {
   }
 
   // --------------------------------------------------------------------------
-  // Query endpoints
+  // Query endpoints - OWNER, MANAGER can view receivings
   // --------------------------------------------------------------------------
   @Get(':id')
+  @Roles('OWNER', 'MANAGER')
   async getReceiving(@Param('id') id: string) {
     try {
       const receiving = await this.receivingService.getReceiving(id);
@@ -178,6 +190,7 @@ export class InventoryReceivingController {
   }
 
   @Get('location/:locationId')
+  @Roles('OWNER', 'MANAGER')
   async getReceivingsByLocation(
     @Param('locationId') locationId: string,
     @Query('startDate') startDate?: string,
@@ -212,6 +225,7 @@ export class InventoryReceivingController {
   }
 
   @Get('product/:productId')
+  @Roles('OWNER', 'MANAGER')
   async getReceivingsByProduct(
     @Param('productId') productId: string,
     @Query('locationId') locationId?: string
@@ -236,6 +250,7 @@ export class InventoryReceivingController {
   }
 
   @Get('location/:locationId/summary')
+  @Roles('OWNER', 'MANAGER')
   async getReceivingSummary(
     @Param('locationId') locationId: string,
     @Query('startDate') startDate?: string,
@@ -260,9 +275,10 @@ export class InventoryReceivingController {
   }
 
   // --------------------------------------------------------------------------
-  // Retry Square sync
+  // Retry Square sync - OWNER only
   // --------------------------------------------------------------------------
   @Post(':id/retry-square-sync')
+  @Roles('OWNER')
   async retrySquareSync(@Param('id') id: string) {
     try {
       const result = await this.receivingService.retrySquareSync(id);

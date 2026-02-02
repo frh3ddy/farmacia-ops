@@ -6,9 +6,8 @@ import { InventoryAgingModule } from './inventory-aging/inventory-aging.module';
 import { InventoryMigrationModule } from './inventory-migration/inventory-migration.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { AuthModule } from './auth/auth.module';
+import { LocationsModule } from './locations/locations.module';
 import { PrismaService } from './prisma/prisma.service';
-import { LocationsController } from './locations/locations.controller';
-import { LocationsService } from './locations/locations.service';
 
 @Module({
   imports: [
@@ -19,9 +18,9 @@ import { LocationsService } from './locations/locations.service';
     InventoryMigrationModule,
     InventoryModule,
     AuthModule,
+    LocationsModule,
   ],
-  controllers: [LocationsController],
-  providers: [PrismaService, LocationsService],
+  providers: [PrismaService],
   exports: [PrismaService],
 })
 export class AppModule {}

@@ -2,10 +2,13 @@ import {
   Controller,
   Get,
   Query,
+  Req,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { InventoryReportsService } from './inventory-reports.service';
+import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 
 // Helper to extract error message
 function getErrorMessage(error: unknown): string {
@@ -21,22 +24,28 @@ function getErrorStatus(error: unknown): number {
 }
 
 @Controller('inventory/reports')
+@UseGuards(AuthGuard, RoleGuard, LocationGuard)
 export class InventoryReportsController {
   constructor(private readonly reportsService: InventoryReportsService) {}
 
   // --------------------------------------------------------------------------
-  // COGS Report (Cost of Goods Sold)
+  // COGS Report (Cost of Goods Sold) - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Get('cogs')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getCOGSReport(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('groupByCategory') groupByCategory?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const report = await this.reportsService.getCOGSReport({
-        locationId,
+        locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
         groupByCategory: groupByCategory === 'true',
@@ -55,16 +64,21 @@ export class InventoryReportsController {
   }
 
   // --------------------------------------------------------------------------
-  // Inventory Valuation Report
+  // Inventory Valuation Report - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Get('valuation')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getInventoryValuationReport(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('productId') productId?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const report = await this.reportsService.getInventoryValuationReport({
-        locationId,
+        locationId: targetLocationId,
         productId,
       });
 
@@ -81,17 +95,22 @@ export class InventoryReportsController {
   }
 
   // --------------------------------------------------------------------------
-  // Profit Margin Report
+  // Profit Margin Report - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Get('profit-margin')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getProfitMarginReport(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const report = await this.reportsService.getProfitMarginReport({
-        locationId,
+        locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
       });
@@ -109,17 +128,22 @@ export class InventoryReportsController {
   }
 
   // --------------------------------------------------------------------------
-  // Adjustment Impact Report
+  // Adjustment Impact Report - OWNER, MANAGER
   // --------------------------------------------------------------------------
   @Get('adjustment-impact')
+  @Roles('OWNER', 'MANAGER')
   async getAdjustmentImpactReport(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const report = await this.reportsService.getAdjustmentImpactReport({
-        locationId,
+        locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
       });
@@ -137,17 +161,22 @@ export class InventoryReportsController {
   }
 
   // --------------------------------------------------------------------------
-  // Receiving Summary Report
+  // Receiving Summary Report - OWNER, MANAGER
   // --------------------------------------------------------------------------
   @Get('receiving-summary')
+  @Roles('OWNER', 'MANAGER')
   async getReceivingSummaryReport(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const report = await this.reportsService.getReceivingSummaryReport({
-        locationId,
+        locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
       });
@@ -165,18 +194,23 @@ export class InventoryReportsController {
   }
 
   // --------------------------------------------------------------------------
-  // Profit & Loss Report (Income Statement)
+  // Profit & Loss Report (Income Statement) - OWNER, ACCOUNTANT
   // Includes: Revenue, COGS, Gross Profit, Operating Expenses, Net Profit
   // --------------------------------------------------------------------------
   @Get('profit-loss')
+  @Roles('OWNER', 'ACCOUNTANT')
   async getProfitAndLossReport(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const report = await this.reportsService.getProfitAndLossReport({
-        locationId,
+        locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
       });
@@ -194,38 +228,43 @@ export class InventoryReportsController {
   }
 
   // --------------------------------------------------------------------------
-  // Dashboard Summary (all key metrics in one call)
+  // Dashboard Summary (all key metrics in one call) - All authenticated users
   // --------------------------------------------------------------------------
   @Get('dashboard')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async getDashboardSummary(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const parsedStartDate = startDate ? new Date(startDate) : undefined;
       const parsedEndDate = endDate ? new Date(endDate) : undefined;
 
       // Fetch all reports in parallel (including P&L for net profit)
       const [cogs, valuation, adjustments, receivings, profitLoss] = await Promise.all([
         this.reportsService.getCOGSReport({
-          locationId,
+          locationId: targetLocationId,
           startDate: parsedStartDate,
           endDate: parsedEndDate,
         }),
-        this.reportsService.getInventoryValuationReport({ locationId }),
+        this.reportsService.getInventoryValuationReport({ locationId: targetLocationId }),
         this.reportsService.getAdjustmentImpactReport({
-          locationId,
+          locationId: targetLocationId,
           startDate: parsedStartDate,
           endDate: parsedEndDate,
         }),
         this.reportsService.getReceivingSummaryReport({
-          locationId,
+          locationId: targetLocationId,
           startDate: parsedStartDate,
           endDate: parsedEndDate,
         }),
         this.reportsService.getProfitAndLossReport({
-          locationId,
+          locationId: targetLocationId,
           startDate: parsedStartDate,
           endDate: parsedEndDate,
         }),
@@ -235,7 +274,7 @@ export class InventoryReportsController {
         success: true,
         data: {
           period: { startDate: parsedStartDate, endDate: parsedEndDate },
-          locationId,
+          locationId: targetLocationId,
           sales: {
             totalRevenue: cogs.summary.totalRevenue,
             totalCOGS: cogs.summary.totalCOGS,

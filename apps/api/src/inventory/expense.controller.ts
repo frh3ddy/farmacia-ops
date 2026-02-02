@@ -7,11 +7,14 @@ import {
   Body,
   Param,
   Query,
+  Req,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ExpenseService } from './expense.service';
 import { ExpenseType } from '@prisma/client';
+import { AuthGuard, RoleGuard, LocationGuard, Roles, Public } from '../auth/guards/auth.guard';
 
 // Helper functions
 function getErrorMessage(error: unknown): string {
@@ -42,18 +45,26 @@ interface CreateExpenseDto {
 }
 
 @Controller('expenses')
+@UseGuards(AuthGuard, RoleGuard, LocationGuard)
 export class ExpenseController {
   constructor(private readonly expenseService: ExpenseService) {}
 
   // --------------------------------------------------------------------------
-  // Create expense
+  // Create expense - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Post()
-  async createExpense(@Body() body: CreateExpenseDto) {
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async createExpense(@Body() body: CreateExpenseDto, @Req() req: any) {
     try {
-      if (!body.locationId || !body.type || body.amount === undefined || !body.date) {
+      const currentEmployee = req.employee;
+      const currentLocation = req.currentLocation;
+
+      // Use current location if not specified
+      const locationId = body.locationId || currentLocation.locationId;
+
+      if (!body.type || body.amount === undefined || !body.date) {
         throw new HttpException(
-          { success: false, message: 'Missing required fields: locationId, type, amount, date' },
+          { success: false, message: 'Missing required fields: type, amount, date' },
           HttpStatus.BAD_REQUEST
         );
       }
@@ -67,7 +78,7 @@ export class ExpenseController {
       }
 
       const expense = await this.expenseService.createExpense({
-        locationId: body.locationId,
+        locationId,
         type: body.type,
         amount: body.amount,
         date: new Date(body.date),
@@ -77,7 +88,7 @@ export class ExpenseController {
         isPaid: body.isPaid,
         paidAt: body.paidAt ? new Date(body.paidAt) : undefined,
         notes: body.notes,
-        createdBy: body.createdBy,
+        createdBy: currentEmployee.id,
       });
 
       return {
@@ -98,9 +109,10 @@ export class ExpenseController {
   }
 
   // --------------------------------------------------------------------------
-  // Update expense
+  // Update expense - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Put(':id')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async updateExpense(@Param('id') id: string, @Body() body: Partial<CreateExpenseDto>) {
     try {
       const expense = await this.expenseService.updateExpense(id, {
@@ -132,9 +144,10 @@ export class ExpenseController {
   }
 
   // --------------------------------------------------------------------------
-  // Delete expense
+  // Delete expense - OWNER, ACCOUNTANT only
   // --------------------------------------------------------------------------
   @Delete(':id')
+  @Roles('OWNER', 'ACCOUNTANT')
   async deleteExpense(@Param('id') id: string) {
     try {
       await this.expenseService.deleteExpense(id);
@@ -148,9 +161,10 @@ export class ExpenseController {
   }
 
   // --------------------------------------------------------------------------
-  // Get expense
+  // Get expense - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Get(':id')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getExpense(@Param('id') id: string) {
     try {
       const expense = await this.expenseService.getExpense(id);
@@ -170,10 +184,12 @@ export class ExpenseController {
   }
 
   // --------------------------------------------------------------------------
-  // List expenses
+  // List expenses - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Get()
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async listExpenses(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('type') type?: ExpenseType,
     @Query('startDate') startDate?: string,
@@ -182,8 +198,12 @@ export class ExpenseController {
     @Query('limit') limit?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      // Non-OWNER can only see their current location's expenses
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const expenses = await this.expenseService.listExpenses({
-        locationId,
+        locationId: targetLocationId,
         type,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
@@ -208,18 +228,23 @@ export class ExpenseController {
   }
 
   // --------------------------------------------------------------------------
-  // Get expense summary
+  // Get expense summary - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Get('summary/report')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getExpenseSummary(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('includeMonthly') includeMonthly?: string
   ) {
     try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
       const summary = await this.expenseService.getExpenseSummary({
-        locationId,
+        locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
         includeMonthly: includeMonthly === 'true',
@@ -235,9 +260,10 @@ export class ExpenseController {
   }
 
   // --------------------------------------------------------------------------
-  // Get expense types
+  // Get expense types - Public endpoint
   // --------------------------------------------------------------------------
   @Get('types/list')
+  @Public()
   getExpenseTypes() {
     return {
       success: true,
