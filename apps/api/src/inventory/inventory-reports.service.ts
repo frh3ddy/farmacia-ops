@@ -575,7 +575,18 @@ export class InventoryReportsService {
       totalCost: Prisma.Decimal;
     }>();
 
+    // Group by product
+    const byProduct = new Map<string, {
+      productId: string;
+      productName: string;
+      adjustmentCount: number;
+      totalQuantity: number;
+      totalLoss: Prisma.Decimal;
+      totalGain: Prisma.Decimal;
+    }>();
+
     for (const adj of adjustments) {
+      // By type aggregation
       const existing = byType.get(adj.type);
       if (existing) {
         existing.count++;
@@ -587,6 +598,27 @@ export class InventoryReportsService {
           count: 1,
           totalQuantity: Math.abs(adj.quantity),
           totalCost: adj.totalCost,
+        });
+      }
+
+      // By product aggregation
+      const productEntry = byProduct.get(adj.productId);
+      if (productEntry) {
+        productEntry.adjustmentCount++;
+        productEntry.totalQuantity += Math.abs(adj.quantity);
+        if (adj.quantity < 0) {
+          productEntry.totalLoss = productEntry.totalLoss.add(adj.totalCost);
+        } else {
+          productEntry.totalGain = productEntry.totalGain.add(adj.totalCost);
+        }
+      } else {
+        byProduct.set(adj.productId, {
+          productId: adj.productId,
+          productName: adj.product?.name || 'Unknown Product',
+          adjustmentCount: 1,
+          totalQuantity: Math.abs(adj.quantity),
+          totalLoss: adj.quantity < 0 ? adj.totalCost : new Prisma.Decimal(0),
+          totalGain: adj.quantity > 0 ? adj.totalCost : new Prisma.Decimal(0),
         });
       }
     }
@@ -615,6 +647,17 @@ export class InventoryReportsService {
         totalQuantity: t.totalQuantity,
         totalCost: t.totalCost.toString(),
       })),
+      byProduct: Array.from(byProduct.values())
+        .map(p => ({
+          productId: p.productId,
+          productName: p.productName,
+          adjustmentCount: p.adjustmentCount,
+          totalQuantity: p.totalQuantity,
+          totalLoss: p.totalLoss.toString(),
+          totalGain: p.totalGain.toString(),
+          netImpact: p.totalGain.sub(p.totalLoss).toString(),
+        }))
+        .sort((a, b) => parseFloat(b.totalLoss) - parseFloat(a.totalLoss)),
     };
   }
 
@@ -649,18 +692,44 @@ export class InventoryReportsService {
       totalCost: Prisma.Decimal;
     }>();
 
+    // Group by product
+    const byProduct = new Map<string, {
+      productId: string;
+      productName: string;
+      receivingCount: number;
+      totalQuantity: number;
+      totalCost: Prisma.Decimal;
+    }>();
+
     for (const rec of receivings) {
-      const key = rec.supplierId || 'none';
-      const existing = bySupplier.get(key);
-      if (existing) {
-        existing.count++;
-        existing.totalQuantity += rec.quantity;
-        existing.totalCost = existing.totalCost.add(rec.totalCost);
+      // By supplier aggregation
+      const supplierKey = rec.supplierId || 'none';
+      const existingSupplier = bySupplier.get(supplierKey);
+      if (existingSupplier) {
+        existingSupplier.count++;
+        existingSupplier.totalQuantity += rec.quantity;
+        existingSupplier.totalCost = existingSupplier.totalCost.add(rec.totalCost);
       } else {
-        bySupplier.set(key, {
+        bySupplier.set(supplierKey, {
           supplierId: rec.supplierId,
           supplierName: rec.supplier?.name || 'No Supplier',
           count: 1,
+          totalQuantity: rec.quantity,
+          totalCost: rec.totalCost,
+        });
+      }
+
+      // By product aggregation
+      const existingProduct = byProduct.get(rec.productId);
+      if (existingProduct) {
+        existingProduct.receivingCount++;
+        existingProduct.totalQuantity += rec.quantity;
+        existingProduct.totalCost = existingProduct.totalCost.add(rec.totalCost);
+      } else {
+        byProduct.set(rec.productId, {
+          productId: rec.productId,
+          productName: rec.product?.name || 'Unknown Product',
+          receivingCount: 1,
           totalQuantity: rec.quantity,
           totalCost: rec.totalCost,
         });
@@ -691,6 +760,18 @@ export class InventoryReportsService {
         totalQuantity: s.totalQuantity,
         totalCost: s.totalCost.toString(),
       })),
+      byProduct: Array.from(byProduct.values())
+        .map(p => ({
+          productId: p.productId,
+          productName: p.productName,
+          receivingCount: p.receivingCount,
+          totalQuantity: p.totalQuantity,
+          totalCost: p.totalCost.toString(),
+          averageCost: p.totalQuantity > 0
+            ? p.totalCost.div(p.totalQuantity).toFixed(2)
+            : '0.00',
+        }))
+        .sort((a, b) => parseFloat(b.totalCost) - parseFloat(a.totalCost)),
     };
   }
 
