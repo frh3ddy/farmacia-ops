@@ -1,7 +1,9 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
 
 @Controller('api')
+@UseGuards(AuthGuard, RoleGuard)
 export class DataController {
   constructor(private readonly prisma: PrismaService) {}
 
@@ -35,6 +37,7 @@ export class DataController {
   }
 
   @Get('catalog/mappings')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getCatalogMappings() {
     const mappings = await this.prisma.catalogMapping.findMany({
       include: {
@@ -54,6 +57,7 @@ export class DataController {
   }
 
   @Get('products')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async getProducts() {
     const products = await this.prisma.product.findMany({
       include: {
@@ -88,6 +92,7 @@ export class DataController {
   }
 
   @Get('sales')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getSales() {
     const sales = await this.prisma.sale.findMany({
       include: {
@@ -111,6 +116,7 @@ export class DataController {
   }
 
   @Get('inventory')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async getInventory() {
     const inventory = await this.prisma.inventory.findMany({
       include: {
@@ -139,6 +145,7 @@ export class DataController {
   }
 
   @Post('catalog/cleanup')
+  @Roles('OWNER')
   async cleanupCatalog(@Body() body?: { deleteProducts?: boolean }) {
     try {
       const deleteProducts = body?.deleteProducts ?? true; // Default to true for fresh start
