@@ -236,6 +236,19 @@ export class CatalogService {
   ): Promise<CatalogSyncResult> {
     const client = this.getSquareClient();
 
+    // Validate locationId if provided
+    if (locationId) {
+      const location = await this.prisma.location.findUnique({
+        where: { id: locationId },
+      });
+      if (!location) {
+        throw new Error(`Location with ID "${locationId}" not found. Please use a valid location ID from your database, not a Square location ID.`);
+      }
+      this.logger.log(`[CATALOG_SYNC] Syncing for location: ${location.name} (${locationId})`);
+    } else {
+      this.logger.log(`[CATALOG_SYNC] Syncing globally (no location specified)`);
+    }
+
     // 1. Fetch ALL Variations (using cursor pagination)
     let catalogObjects: any[] = [];
     let cursor: string | undefined = undefined;
