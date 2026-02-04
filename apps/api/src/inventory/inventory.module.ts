@@ -11,9 +11,10 @@ import { ExpenseController } from './expense.controller';
 import { ExpenseService } from './expense.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
+import { ProductsModule } from '../products/products.module';
 
 @Module({
-  imports: [forwardRef(() => AuthModule)],
+  imports: [forwardRef(() => AuthModule), ProductsModule],
   controllers: [
     InventoryReconciliationController,
     InventoryAdjustmentController,

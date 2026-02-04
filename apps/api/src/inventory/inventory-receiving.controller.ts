@@ -9,8 +9,10 @@ import {
   HttpException,
   HttpStatus,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import { InventoryReceivingService } from './inventory-receiving.service';
+import { ProductsService } from '../products/products.service';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 
 // ============================================================================
@@ -31,6 +33,9 @@ interface ReceiveInventoryDto {
   receivedBy?: string;
   notes?: string;
   syncToSquare?: boolean;
+  // Optional selling price update
+  sellingPrice?: number;
+  syncPriceToSquare?: boolean;
 }
 
 // Helper to extract error message
@@ -69,7 +74,12 @@ function parseDateString(dateStr: string): Date {
 @Controller('inventory/receive')
 @UseGuards(AuthGuard, RoleGuard, LocationGuard)
 export class InventoryReceivingController {
-  constructor(private readonly receivingService: InventoryReceivingService) {}
+  private readonly logger = new Logger(InventoryReceivingController.name);
+  
+  constructor(
+    private readonly receivingService: InventoryReceivingService,
+    private readonly productsService: ProductsService,
+  ) {}
 
   // --------------------------------------------------------------------------
   // Receive inventory - OWNER, MANAGER only
@@ -156,10 +166,39 @@ export class InventoryReceivingController {
           : ` (Square sync failed: ${result.squareSync.error})`;
       }
 
+      // Update selling price if provided
+      let priceUpdate = null;
+      if (body.sellingPrice !== undefined && body.sellingPrice > 0) {
+        try {
+          const priceResult = await this.productsService.updatePrice({
+            productId: body.productId,
+            sellingPrice: body.sellingPrice,
+            locationId,
+            syncToSquare: body.syncPriceToSquare !== false, // Default true
+          });
+          priceUpdate = {
+            previousPrice: priceResult.previousPrice,
+            newPrice: priceResult.newPrice,
+            squareSynced: priceResult.squareSynced,
+          };
+          message += priceResult.squareSynced 
+            ? ` | Price updated to $${body.sellingPrice} MXN (synced to Square)`
+            : ` | Price updated to $${body.sellingPrice} MXN locally`;
+          this.logger.log(`[RECEIVING] Price updated for product ${body.productId}: $${body.sellingPrice} MXN`);
+        } catch (priceError) {
+          this.logger.error(`[RECEIVING] Failed to update price: ${priceError}`);
+          message += ` | Price update failed: ${getErrorMessage(priceError)}`;
+          priceUpdate = { error: getErrorMessage(priceError) };
+        }
+      }
+
       return {
         success: true,
         message,
-        data: result,
+        data: {
+          ...result,
+          priceUpdate,
+        },
       };
     } catch (error) {
       if (error instanceof HttpException) {
