@@ -29,6 +29,22 @@ function getErrorStatus(error: unknown): number {
   return HttpStatus.INTERNAL_SERVER_ERROR;
 }
 
+/**
+ * Parse a date string that could be either:
+ * - Date-only: "2026-02-03" -> treated as local date (noon to avoid timezone edge cases)
+ * - Full ISO: "2026-02-03T12:00:00Z" -> parsed as-is
+ */
+function parseDateString(dateStr: string): Date {
+  // If it's a date-only string (YYYY-MM-DD), add noon time to avoid timezone issues
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    // Parse as local date at noon to avoid any timezone day-shift issues
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0);
+  }
+  // Otherwise parse as full ISO date
+  return new Date(dateStr);
+}
+
 // DTOs
 interface CreateExpenseDto {
   locationId: string;
@@ -174,12 +190,12 @@ export class ExpenseController {
         locationId,
         type: body.type,
         amount: body.amount,
-        date: new Date(body.date),
+        date: parseDateString(body.date),
         description: body.description,
         vendor: body.vendor,
         reference: body.reference,
         isPaid: body.isPaid,
-        paidAt: body.paidAt ? new Date(body.paidAt) : undefined,
+        paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
         notes: body.notes,
         createdBy: currentEmployee.id,
       });
@@ -238,12 +254,12 @@ export class ExpenseController {
       const expense = await this.expenseService.updateExpense(id, {
         type: body.type,
         amount: body.amount,
-        date: body.date ? new Date(body.date) : undefined,
+        date: body.date ? parseDateString(body.date) : undefined,
         description: body.description,
         vendor: body.vendor,
         reference: body.reference,
         isPaid: body.isPaid,
-        paidAt: body.paidAt ? new Date(body.paidAt) : undefined,
+        paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
         notes: body.notes,
       });
 
