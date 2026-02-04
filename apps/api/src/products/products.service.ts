@@ -270,7 +270,7 @@ export class ProductsService {
     const tempItemId = `#item_${idempotencyKey}`;
     const tempVariationId = `#variation_${idempotencyKey}`;
 
-    const response = await client.catalog.upsertCatalogObject({
+    const response = await client.catalog.upsert({
       idempotencyKey,
       object: {
         type: 'ITEM',
@@ -409,7 +409,7 @@ export class ProductsService {
     const client = this.getSquareClient();
 
     // First, fetch the current object to get its version
-    const retrieveResponse = await client.catalog.retrieveCatalogObject({
+    const retrieveResponse = await client.catalog.get({
       objectId: variationId,
     });
 
@@ -424,7 +424,7 @@ export class ProductsService {
     }
 
     // Update with new price
-    await client.catalog.upsertCatalogObject({
+    await client.catalog.upsert({
       idempotencyKey: randomUUID(),
       object: {
         type: 'ITEM_VARIATION',
