@@ -4,15 +4,16 @@ import { SquareClient, SquareEnvironment } from 'square';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 
-// Currency constant for Mexico
-const CURRENCY = 'MXN';
+// Currency constant - must match Square merchant account currency
+// Square merchant is configured with USD
+const CURRENCY = 'USD';
 
 export interface CreateProductInput {
   name: string;
   sku?: string;
   description?: string;
-  sellingPrice: number; // In MXN (e.g., 45.50)
-  costPrice?: number; // Initial cost price in MXN
+  sellingPrice: number; // Price in dollars (e.g., 45.50)
+  costPrice?: number; // Initial cost price in dollars
   initialStock?: number; // Initial inventory quantity
   locationId: string; // Required for inventory and Square sync
   syncToSquare?: boolean; // Default true
@@ -20,7 +21,7 @@ export interface CreateProductInput {
 
 export interface UpdatePriceInput {
   productId: string;
-  sellingPrice: number; // New price in MXN
+  sellingPrice: number; // New price in dollars
   locationId: string;
   syncToSquare?: boolean;
 }
@@ -87,14 +88,14 @@ export class ProductsService {
   }
 
   /**
-   * Convert MXN amount to cents (Square uses smallest currency unit)
+   * Convert dollar amount to cents (Square uses smallest currency unit)
    */
   private toCents(amount: number): bigint {
     return BigInt(Math.round(amount * 100));
   }
 
   /**
-   * Convert cents to MXN
+   * Convert cents to dollars
    */
   private fromCents(cents: number | bigint | null): number | null {
     if (cents === null || cents === undefined) return null;
@@ -116,7 +117,7 @@ export class ProductsService {
       syncToSquare = true,
     } = input;
 
-    this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} MXN`);
+    this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} ${CURRENCY}`);
 
     // Validate inputs
     if (!name || name.trim().length === 0) {
@@ -227,7 +228,7 @@ export class ProductsService {
         },
       });
       inventoryCreated = true;
-      this.logger.log(`[PRODUCT] Created initial inventory: ${initialStock} units @ $${costPrice} MXN`);
+      this.logger.log(`[PRODUCT] Created initial inventory: ${initialStock} units @ $${costPrice} ${CURRENCY}`);
     }
 
     // Fetch complete product with relations
@@ -322,7 +323,7 @@ export class ProductsService {
   async updatePrice(input: UpdatePriceInput): Promise<PriceUpdateResult> {
     const { productId, sellingPrice, locationId, syncToSquare = true } = input;
 
-    this.logger.log(`[PRODUCT] Updating price for product ${productId} to $${sellingPrice} MXN`);
+    this.logger.log(`[PRODUCT] Updating price for product ${productId} to $${sellingPrice} ${CURRENCY}`);
 
     if (sellingPrice < 0) {
       throw new BadRequestException('Selling price cannot be negative');
@@ -397,8 +398,8 @@ export class ProductsService {
       newPrice: sellingPrice,
       squareSynced,
       message: squareSynced
-        ? `Price updated to $${sellingPrice} MXN and synced to Square`
-        : `Price updated to $${sellingPrice} MXN locally`,
+        ? `Price updated to $${sellingPrice} ${CURRENCY} and synced to Square`
+        : `Price updated to $${sellingPrice} ${CURRENCY} locally`,
     };
   }
 
