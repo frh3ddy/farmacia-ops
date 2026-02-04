@@ -89,14 +89,18 @@ export class InventoryMigrationController {
       },
     });
 
+    const mappedSuppliers = suppliers.map((s) => ({
+      ...s,
+      initials: Array.isArray(s.initials) ? s.initials : (s.initials ? [s.initials] : []),
+      createdAt: s.createdAt.toISOString(),
+      updatedAt: s.updatedAt.toISOString(),
+    }));
+
     return {
       success: true,
-      suppliers: suppliers.map((s) => ({
-        ...s,
-        initials: Array.isArray(s.initials) ? s.initials : (s.initials ? [s.initials] : []),
-        createdAt: s.createdAt.toISOString(),
-        updatedAt: s.updatedAt.toISOString(),
-      })),
+      data: mappedSuppliers,  // iOS expects 'data'
+      suppliers: mappedSuppliers,  // Keep for backward compatibility
+      count: mappedSuppliers.length,
     };
   }
 

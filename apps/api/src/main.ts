@@ -104,6 +104,7 @@ async function bootstrap() {
         "/employees",
         "/inventory",
         "/expenses",
+        "/products",
       ];
       const isApiRoute = apiPrefixes.some(prefix => path.startsWith(prefix));
       
