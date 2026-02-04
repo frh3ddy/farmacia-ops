@@ -490,25 +490,36 @@ export class ProductsService {
       throw new Error(`Invalid variation data for ${variationId}`);
     }
 
-    // Update with new price
-    await client.catalog.object.upsert({
-      idempotencyKey: randomUUID(),
-      object: {
-        type: 'ITEM_VARIATION',
-        id: variationId,
-        version: currentObject.version,
-        itemVariationData: {
-          itemId: variationData.itemId,
-          name: variationData.name || 'Regular',
-          sku: variationData.sku,
-          pricingType: 'FIXED_PRICING',
-          priceMoney: {
-            amount: this.toCents(newPrice),
-            currency: CURRENCY,
+    try {
+      // Update with new price
+      await client.catalog.object.upsert({
+        idempotencyKey: randomUUID(),
+        object: {
+          type: 'ITEM_VARIATION',
+          id: variationId,
+          version: currentObject.version,
+          itemVariationData: {
+            itemId: variationData.itemId,
+            name: variationData.name || 'Regular',
+            sku: variationData.sku,
+            pricingType: 'FIXED_PRICING',
+            priceMoney: {
+              amount: this.toCents(newPrice),
+              currency: CURRENCY,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (error: any) {
+      // Check for location enablement error
+      const errorBody = error?.body || error?.message || '';
+      if (typeof errorBody === 'string' && errorBody.includes('is not enabled') || 
+          (typeof errorBody === 'object' && JSON.stringify(errorBody).includes('is not enabled'))) {
+        this.logger.warn(`[PRODUCT] Item not enabled at all locations in Square. Price updated locally only. Consider enabling the item at all locations in Square Dashboard.`);
+        throw new Error('Item not enabled at all locations in Square. Please enable the parent item in Square Dashboard, or update price in Square directly.');
+      }
+      throw error;
+    }
   }
 
   /**
