@@ -49,6 +49,99 @@ interface CreateExpenseDto {
 export class ExpenseController {
   constructor(private readonly expenseService: ExpenseService) {}
 
+  // ==========================================================================
+  // IMPORTANT: Specific routes MUST come before parameterized routes (:id)
+  // Otherwise NestJS will match /expenses/summary/report as /expenses/:id
+  // ==========================================================================
+
+  // --------------------------------------------------------------------------
+  // Get expense types - Public endpoint (MUST be before :id route)
+  // --------------------------------------------------------------------------
+  @Get('types/list')
+  @Public()
+  getExpenseTypes() {
+    return {
+      success: true,
+      data: this.expenseService.getExpenseTypes(),
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // Get expense summary - OWNER, MANAGER, ACCOUNTANT (MUST be before :id route)
+  // --------------------------------------------------------------------------
+  @Get('summary/report')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async getExpenseSummary(
+    @Req() req: any,
+    @Query('locationId') locationId?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('includeMonthly') includeMonthly?: string
+  ) {
+    try {
+      const currentLocation = req.currentLocation;
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
+      const summary = await this.expenseService.getExpenseSummary({
+        locationId: targetLocationId,
+        startDate: startDate ? new Date(startDate) : undefined,
+        endDate: endDate ? new Date(endDate) : undefined,
+        includeMonthly: includeMonthly === 'true',
+      });
+
+      return { success: true, data: summary };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: getErrorMessage(error) },
+        getErrorStatus(error)
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // List expenses - OWNER, MANAGER, ACCOUNTANT (base route, before :id)
+  // --------------------------------------------------------------------------
+  @Get()
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async listExpenses(
+    @Req() req: any,
+    @Query('locationId') locationId?: string,
+    @Query('type') type?: ExpenseType,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('isPaid') isPaid?: string,
+    @Query('limit') limit?: string
+  ) {
+    try {
+      const currentLocation = req.currentLocation;
+      // Non-OWNER can only see their current location's expenses
+      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+
+      const expenses = await this.expenseService.listExpenses({
+        locationId: targetLocationId,
+        type,
+        startDate: startDate ? new Date(startDate) : undefined,
+        endDate: endDate ? new Date(endDate) : undefined,
+        isPaid: isPaid !== undefined ? isPaid === 'true' : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      });
+
+      return {
+        success: true,
+        count: expenses.length,
+        data: expenses.map(e => ({
+          ...e,
+          amount: e.amount.toString(),
+        })),
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: getErrorMessage(error) },
+        getErrorStatus(error)
+      );
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Create expense - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
@@ -108,6 +201,33 @@ export class ExpenseController {
     }
   }
 
+  // ==========================================================================
+  // Parameterized routes (:id) MUST come LAST
+  // ==========================================================================
+
+  // --------------------------------------------------------------------------
+  // Get expense by ID - OWNER, MANAGER, ACCOUNTANT
+  // --------------------------------------------------------------------------
+  @Get(':id')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async getExpense(@Param('id') id: string) {
+    try {
+      const expense = await this.expenseService.getExpense(id);
+      return {
+        success: true,
+        data: {
+          ...expense,
+          amount: expense.amount.toString(),
+        },
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: getErrorMessage(error) },
+        getErrorStatus(error)
+      );
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Update expense - OWNER, MANAGER, ACCOUNTANT
   // --------------------------------------------------------------------------
@@ -158,116 +278,5 @@ export class ExpenseController {
         getErrorStatus(error)
       );
     }
-  }
-
-  // --------------------------------------------------------------------------
-  // Get expense - OWNER, MANAGER, ACCOUNTANT
-  // --------------------------------------------------------------------------
-  @Get(':id')
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async getExpense(@Param('id') id: string) {
-    try {
-      const expense = await this.expenseService.getExpense(id);
-      return {
-        success: true,
-        data: {
-          ...expense,
-          amount: expense.amount.toString(),
-        },
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // List expenses - OWNER, MANAGER, ACCOUNTANT
-  // --------------------------------------------------------------------------
-  @Get()
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async listExpenses(
-    @Req() req: any,
-    @Query('locationId') locationId?: string,
-    @Query('type') type?: ExpenseType,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-    @Query('isPaid') isPaid?: string,
-    @Query('limit') limit?: string
-  ) {
-    try {
-      const currentLocation = req.currentLocation;
-      // Non-OWNER can only see their current location's expenses
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
-
-      const expenses = await this.expenseService.listExpenses({
-        locationId: targetLocationId,
-        type,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-        isPaid: isPaid !== undefined ? isPaid === 'true' : undefined,
-        limit: limit ? parseInt(limit, 10) : undefined,
-      });
-
-      return {
-        success: true,
-        count: expenses.length,
-        data: expenses.map(e => ({
-          ...e,
-          amount: e.amount.toString(),
-        })),
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Get expense summary - OWNER, MANAGER, ACCOUNTANT
-  // --------------------------------------------------------------------------
-  @Get('summary/report')
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async getExpenseSummary(
-    @Req() req: any,
-    @Query('locationId') locationId?: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-    @Query('includeMonthly') includeMonthly?: string
-  ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
-
-      const summary = await this.expenseService.getExpenseSummary({
-        locationId: targetLocationId,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-        includeMonthly: includeMonthly === 'true',
-      });
-
-      return { success: true, data: summary };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Get expense types - Public endpoint
-  // --------------------------------------------------------------------------
-  @Get('types/list')
-  @Public()
-  getExpenseTypes() {
-    return {
-      success: true,
-      data: this.expenseService.getExpenseTypes(),
-    };
   }
 }
