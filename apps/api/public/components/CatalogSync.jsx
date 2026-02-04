@@ -1,7 +1,9 @@
 // CatalogSync Component
-const { useState } = React;
+const { useState, useEffect } = React;
 
 const CatalogSync = () => {
+  const [locations, setLocations] = useState([]);
+  const [loadingLocations, setLoadingLocations] = useState(true);
   const [locationId, setLocationId] = useState('');
   const [forceResync, setForceResync] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -9,6 +11,25 @@ const CatalogSync = () => {
   const [error, setError] = useState(null);
   const [cleaningUp, setCleaningUp] = useState(false);
   const [cleanupResult, setCleanupResult] = useState(null);
+
+  // Fetch locations on mount
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const fetchFn = window.authFetch || fetch;
+        const response = await fetchFn('/locations');
+        const data = await response.json();
+        if (data.success) {
+          setLocations(data.data || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch locations:', err);
+      } finally {
+        setLoadingLocations(false);
+      }
+    };
+    fetchLocations();
+  }, []);
 
   const handleCleanup = async () => {
     if (!confirm('This will delete all catalog mappings and ALL products. Are you sure? This cannot be undone!')) {
@@ -99,13 +120,27 @@ const CatalogSync = () => {
         )}
       </div>
       <div className="form-group">
-        <label>Location ID (optional):</label>
-        <input
-          type="text"
+        <label>Location (optional):</label>
+        <select
           value={locationId}
           onChange={(e) => setLocationId(e.target.value)}
-          placeholder="Leave empty for global sync"
-        />
+          style={{ 
+            width: '100%', 
+            padding: '8px', 
+            borderRadius: '4px', 
+            border: '1px solid #ccc',
+            backgroundColor: 'white'
+          }}
+          disabled={loadingLocations}
+        >
+          <option value="">-- Global Sync (All Locations) --</option>
+          {locations.map(loc => (
+            <option key={loc.id} value={loc.id}>
+              {loc.name} {loc.squareId ? `(${loc.squareId.slice(0, 8)}...)` : '(No Square ID)'}
+            </option>
+          ))}
+        </select>
+        {loadingLocations && <span style={{ marginLeft: '10px', color: '#666' }}>Loading locations...</span>}
       </div>
       <div className="form-group">
         <label>
