@@ -12,7 +12,7 @@ interface DeviceActivationInput {
   password: string;
   deviceName: string;
   locationId?: string;  // Optional - auto-selects first OWNER/MANAGER location
-  deviceType?: 'FIXED' | 'MOBILE';
+  deviceType?: 'FIXED' | 'MOBILE' | 'WEB';
 }
 
 interface PINLoginInput {

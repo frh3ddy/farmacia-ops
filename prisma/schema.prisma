@@ -55,6 +55,7 @@ model Device {
 enum DeviceType {
   FIXED   // iPad at counter, locked to one location
   MOBILE  // Mobile device, can switch locations
+  WEB     // Web browser session
 }
 
 // Employee - a person who can log in with PIN
