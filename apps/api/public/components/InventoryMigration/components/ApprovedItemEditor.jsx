@@ -79,7 +79,7 @@ const ApprovedItemEditor = ({
     }
     
     try {
-      const response = await fetch('/admin/inventory/cutover/approve-item', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/approve-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

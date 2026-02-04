@@ -51,7 +51,8 @@ const InventoryAging = () => {
       if (riskLevel && riskLevel.trim()) params.append('riskLevel', riskLevel.trim());
       if (limit && limit.trim()) params.append('limit', limit.trim());
       if (offset && offset.trim()) params.append('offset', offset.trim());
-      const response = await fetch(`/inventory/aging/products?${params}`);
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn(`/inventory/aging/products?${params}`);
       const data = await response.json();
       if (response.ok) {
         setProducts(data.products || []);
@@ -71,7 +72,8 @@ const InventoryAging = () => {
     try {
       const params = new URLSearchParams();
       if (locationId && locationId.trim()) params.append('locationId', locationId.trim());
-      const response = await fetch(`/inventory/aging/location?${params}`);
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn(`/inventory/aging/location?${params}`);
       const data = await response.json();
       if (response.ok) {
         setLocations(data.locations || []);

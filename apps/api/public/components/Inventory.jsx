@@ -11,13 +11,14 @@ const Inventory = () => {
   const fetchInventory = () => {
     setLoading(true);
     setError(null);
-    fetch('/api/inventory')
+    const fetchFn = window.authFetch || fetch;
+    fetchFn('/api/inventory')
       .then(res => res.json())
       .then(data => {
         if (data.success) {
           setInventory(data.data || []);
         } else {
-          setError('Failed to fetch inventory');
+          setError(data.message || 'Failed to fetch inventory');
         }
       })
       .catch(err => setError(err.message))
@@ -34,7 +35,8 @@ const Inventory = () => {
     setCreateResult(null);
 
     try {
-      const response = await fetch('/api/inventory/test', {
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/api/inventory/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

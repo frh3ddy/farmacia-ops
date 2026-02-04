@@ -18,7 +18,8 @@ const WebhookTest = () => {
 
   const fetchStatus = async () => {
     try {
-      const response = await fetch('/api/webhooks/square/test/status');
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/api/webhooks/square/test/status');
       const data = await response.json();
       if (data.success) {
         setIsPaused(data.paused || false);
@@ -32,7 +33,8 @@ const WebhookTest = () => {
 
   const handlePause = async () => {
     try {
-      const response = await fetch('/api/webhooks/square/test/pause', {
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/api/webhooks/square/test/pause', {
         method: 'POST',
       });
       const data = await response.json();
@@ -46,7 +48,8 @@ const WebhookTest = () => {
 
   const handleResume = async () => {
     try {
-      const response = await fetch('/api/webhooks/square/test/resume', {
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/api/webhooks/square/test/resume', {
         method: 'POST',
       });
       const data = await response.json();
@@ -69,7 +72,8 @@ const WebhookTest = () => {
     setResult(null);
 
     try {
-      const response = await fetch('/api/webhooks/square/test', {
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/api/webhooks/square/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

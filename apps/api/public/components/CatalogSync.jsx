@@ -20,7 +20,8 @@ const CatalogSync = () => {
     setCleanupResult(null);
 
     try {
-      const response = await fetch('/api/catalog/cleanup', {
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/api/catalog/cleanup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deleteProducts: true }),
@@ -46,7 +47,8 @@ const CatalogSync = () => {
     setResult(null);
 
     try {
-      const response = await fetch('/admin/square/catalog/sync', {
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/admin/square/catalog/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

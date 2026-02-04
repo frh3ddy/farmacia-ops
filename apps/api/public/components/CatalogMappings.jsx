@@ -10,12 +10,13 @@ const CatalogMappings = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/catalog/mappings');
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/api/catalog/mappings');
       const data = await response.json();
       if (data.success) {
         setMappings(data.data || []);
       } else {
-        setError('Failed to fetch mappings');
+        setError(data.message || 'Failed to fetch mappings');
       }
     } catch (err) {
       setError(err.message || 'Failed to fetch mappings');

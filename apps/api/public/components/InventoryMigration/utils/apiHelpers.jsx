@@ -1,5 +1,11 @@
 // API Helper Functions for Inventory Migration
 
+// Use authFetch if available (from Auth.jsx), otherwise fall back to regular fetch
+const apiFetch = (url, options) => {
+  const fetchFn = window.authFetch || fetch;
+  return fetchFn(url, options);
+};
+
 /**
  * Structured error object from API
  * @typedef {Object} ApiError
@@ -180,7 +186,7 @@ const getExtractionHealth = async (locationId = null) => {
 // Fetch locations
 const fetchLocations = async (setLocations, setError) => {
   try {
-    const response = await fetch('/locations');
+    const response = await apiFetch('/locations');
     const data = await response.json();
     if (data.success) {
       setLocations(data.data || []);
@@ -194,7 +200,7 @@ const fetchLocations = async (setLocations, setError) => {
 // Fetch all suppliers
 const fetchAllSuppliers = async (setAllSuppliers) => {
   try {
-    const response = await fetch('/admin/inventory/cutover/suppliers');
+    const response = await apiFetch('/admin/inventory/cutover/suppliers');
     const data = await response.json();
     if (data.success) {
       const suppliers = data.suppliers || [];

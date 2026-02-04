@@ -15,13 +15,15 @@ const Products = () => {
   const [suppliersError, setSuppliersError] = useState(null);
 
   useEffect(() => {
-    fetch('/api/products')
+    // Use authFetch if available (from Auth.jsx), otherwise fall back to regular fetch
+    const fetchFn = window.authFetch || fetch;
+    fetchFn('/api/products')
       .then(res => res.json())
       .then(data => {
         if (data.success) {
           setProducts(data.data || []);
         } else {
-          setError('Failed to fetch products');
+          setError(data.message || 'Failed to fetch products');
         }
       })
       .catch(err => setError(err.message))
@@ -39,9 +41,10 @@ const Products = () => {
 
     setLoadingSuppliers(true);
     setSuppliersError(null);
+    const fetchFn = window.authFetch || fetch;
 
     // Fetch suppliers
-    const fetchSuppliers = fetch(`/admin/inventory/cutover/products/${selectedProductId}/suppliers`)
+    const fetchSuppliers = fetchFn(`/admin/inventory/cutover/products/${selectedProductId}/suppliers`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
@@ -52,7 +55,7 @@ const Products = () => {
       });
 
     // Fetch cost histories
-    const fetchCostHistories = fetch(`/admin/inventory/cutover/products/${selectedProductId}/suppliers/cost-history`)
+    const fetchCostHistories = fetchFn(`/admin/inventory/cutover/products/${selectedProductId}/suppliers/cost-history`)
       .then(res => res.json())
       .then(data => {
         if (data.success) {

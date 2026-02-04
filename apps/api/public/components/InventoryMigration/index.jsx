@@ -158,7 +158,7 @@ const InventoryMigration = () => {
     const sessionIdToUse = explicitSessionId || (continueExtraction ? state.extractionSessionId : null);
 
     try {
-      const response = await fetch('/admin/inventory/cutover/extract-costs', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/extract-costs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -394,7 +394,7 @@ const InventoryMigration = () => {
             // All items in current batch are processed, automatically continue to next batch
             // Make another call to extract-costs to get the next batch
             try {
-              const continueResponse = await fetch('/admin/inventory/cutover/extract-costs', {
+              const continueResponse = await (window.authFetch || fetch)('/admin/inventory/cutover/extract-costs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -592,7 +592,7 @@ const InventoryMigration = () => {
     state.setLoading(true);
     state.setError(null);
     try {
-      const response = await fetch('/admin/inventory/cutover/extract-costs', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/extract-costs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -694,7 +694,7 @@ const InventoryMigration = () => {
     state.setError(null);
 
     try {
-      const response = await fetch('/admin/inventory/cutover/reuse-previous-approvals', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/reuse-previous-approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cutoverId, productIds }),
@@ -756,7 +756,7 @@ const InventoryMigration = () => {
     state.setHideProductImageForTransition(true);
     
     try {
-      const response = await fetch('/admin/inventory/cutover/discard-item', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/discard-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -809,7 +809,7 @@ const InventoryMigration = () => {
       return;
     }
     try {
-      const response = await fetch('/admin/inventory/cutover/restore-item', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/restore-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cutoverId, productId }),
@@ -847,7 +847,7 @@ const InventoryMigration = () => {
     state.setBatchComplete(false);
     
     try {
-      const response = await fetch('/admin/inventory/cutover/extract-costs', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/extract-costs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1208,7 +1208,7 @@ const InventoryMigration = () => {
           }))
         : [];
       
-      const response = await fetch('/admin/inventory/cutover/approve-item', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/approve-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1234,7 +1234,7 @@ const InventoryMigration = () => {
       if (initialsToAdd.length > 0) {
         try {
           for (const item of initialsToAdd) {
-            const initialResponse = await fetch('/admin/inventory/cutover/suppliers/add-initial', {
+            const initialResponse = await (window.authFetch || fetch)('/admin/inventory/cutover/suppliers/add-initial', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ supplierName: item.supplierName, initial: item.initial }),
@@ -1402,7 +1402,7 @@ const InventoryMigration = () => {
     state.setError(null);
     state.setState('migrating');
     try {
-      const response = await fetch('/admin/inventory/cutover/initiate', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1457,7 +1457,7 @@ const InventoryMigration = () => {
     }
     
     try {
-      const response = await fetch('/admin/inventory/cutover/continue', {
+      const response = await (window.authFetch || fetch)('/admin/inventory/cutover/continue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cutoverId }),

@@ -10,7 +10,8 @@ const Locations = () => {
     setLoadingLocations(true);
     setError(null);
     try {
-      const response = await fetch('/locations');
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/locations');
       const data = await response.json();
       if (data.success) {
         setLocations(data.data || []);
@@ -29,7 +30,8 @@ const Locations = () => {
     setLoadingLocations(true);
     setError(null);
     try {
-      const response = await fetch('/locations/sync', {
+      const fetchFn = window.authFetch || fetch;
+      const response = await fetchFn('/locations/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });

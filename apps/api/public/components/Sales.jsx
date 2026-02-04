@@ -8,13 +8,14 @@ const Sales = () => {
   const [expanded, setExpanded] = useState(new Set());
 
   useEffect(() => {
-    fetch('/api/sales')
+    const fetchFn = window.authFetch || fetch;
+    fetchFn('/api/sales')
       .then(res => res.json())
       .then(data => {
         if (data.success) {
           setSales(data.data || []);
         } else {
-          setError('Failed to fetch sales');
+          setError(data.message || 'Failed to fetch sales');
         }
       })
       .catch(err => setError(err.message))
