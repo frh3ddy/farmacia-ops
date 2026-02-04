@@ -330,11 +330,20 @@ export class ProductsService {
     }
 
     // Find product with catalog mapping
+    // Look for location-specific mapping first, then fall back to global mapping (locationId = null)
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
       include: {
         catalogMappings: {
-          where: { locationId },
+          where: {
+            OR: [
+              { locationId },           // Location-specific mapping
+              { locationId: null },     // Global mapping (from Square sync)
+            ],
+          },
+          orderBy: {
+            locationId: 'desc',  // Prefer location-specific (non-null) over global
+          },
         },
       },
     });
@@ -343,15 +352,18 @@ export class ProductsService {
       throw new NotFoundException(`Product ${productId} not found`);
     }
 
-    const mapping = product.catalogMappings[0];
+    // Prefer location-specific mapping, fall back to global
+    const mapping = product.catalogMappings.find(m => m.locationId === locationId) 
+                 || product.catalogMappings.find(m => m.locationId === null);
     const previousPrice = mapping ? this.fromCents(Number(mapping.priceCents)) : null;
     let squareSynced = false;
 
-    this.logger.log(`[PRODUCT] Found ${product.catalogMappings.length} catalog mapping(s) for location ${locationId}`);
+    this.logger.log(`[PRODUCT] Found ${product.catalogMappings.length} catalog mapping(s) for location ${locationId} (including global)`);
     if (mapping) {
-      this.logger.log(`[PRODUCT] Mapping: squareVariationId=${mapping.squareVariationId}, priceCents=${mapping.priceCents}`);
+      const mappingType = mapping.locationId === null ? 'GLOBAL' : 'LOCATION-SPECIFIC';
+      this.logger.log(`[PRODUCT] Using ${mappingType} mapping: squareVariationId=${mapping.squareVariationId}, priceCents=${mapping.priceCents}, mappingLocationId=${mapping.locationId}`);
     } else {
-      this.logger.log(`[PRODUCT] No existing catalog mapping found for this location`);
+      this.logger.log(`[PRODUCT] No existing catalog mapping found for this location or global`);
     }
 
     // Get location for Square sync
