@@ -494,13 +494,44 @@ export class ProductsService {
     }
 
     try {
-      // Update with new price
+      // First, ensure the parent ITEM is enabled at all locations
+      // This fixes the "ITEM is not enabled" error
+      const parentItemId = variationData.itemId;
+      if (parentItemId) {
+        try {
+          const parentResponse = await client.catalog.object.get({
+            objectId: parentItemId,
+          });
+          
+          if (parentResponse.object) {
+            const parentItem = parentResponse.object as any;
+            // Update parent item to be present at all locations
+            await client.catalog.object.upsert({
+              idempotencyKey: randomUUID(),
+              object: {
+                type: 'ITEM',
+                id: parentItemId,
+                version: parentItem.version,
+                presentAtAllLocations: true,
+                itemData: parentItem.itemData,
+              },
+            });
+            this.logger.log(`[PRODUCT] Enabled parent item ${parentItemId} at all locations`);
+          }
+        } catch (parentError) {
+          this.logger.warn(`[PRODUCT] Could not update parent item enablement: ${parentError}`);
+          // Continue anyway - the variation update might still work
+        }
+      }
+
+      // Now update the variation with new price
       await client.catalog.object.upsert({
         idempotencyKey: randomUUID(),
         object: {
           type: 'ITEM_VARIATION',
           id: variationId,
           version: currentObject.version,
+          presentAtAllLocations: true,
           itemVariationData: {
             itemId: variationData.itemId,
             name: variationData.name || 'Regular',
