@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { EmployeeService } from './employee.service';
+import { LocationsService } from '../locations/locations.service';
 import { DeviceType } from '@prisma/client';
 
 // ============================================================================
@@ -66,6 +67,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly employeeService: EmployeeService,
+    private readonly locationsService: LocationsService,
   ) {}
 
   // --------------------------------------------------------------------------
@@ -80,6 +82,73 @@ export class AuthController {
         data: status,
       };
     } catch (error) {
+      throw new HttpException(
+        { success: false, message: getErrorMessage(error) },
+        getErrorStatus(error)
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Fetch Square Locations - For setup screen (PUBLIC, only works if no employees exist)
+  // --------------------------------------------------------------------------
+  @Get('setup/square-locations')
+  async getSquareLocations() {
+    try {
+      // Only allow this if setup is needed (no employees exist)
+      const status = await this.employeeService.getSetupStatus();
+      if (!status.needsSetup) {
+        throw new HttpException(
+          { success: false, message: 'Setup already completed. Use authenticated endpoints.' },
+          HttpStatus.FORBIDDEN
+        );
+      }
+
+      const result = await this.locationsService.fetchSquareLocations();
+      return {
+        success: true,
+        data: result.locations,
+        count: result.locations.length,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: getErrorMessage(error) },
+        getErrorStatus(error)
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Sync Square Locations and Create in DB - For setup screen (PUBLIC, only works if no employees exist)
+  // --------------------------------------------------------------------------
+  @Post('setup/sync-locations')
+  async syncSquareLocationsForSetup() {
+    try {
+      // Only allow this if setup is needed (no employees exist)
+      const status = await this.employeeService.getSetupStatus();
+      if (!status.needsSetup) {
+        throw new HttpException(
+          { success: false, message: 'Setup already completed. Use authenticated endpoints.' },
+          HttpStatus.FORBIDDEN
+        );
+      }
+
+      const result = await this.locationsService.syncLocationsFromSquare();
+      
+      // Fetch the newly synced locations
+      const updatedStatus = await this.employeeService.getSetupStatus();
+      
+      return {
+        success: true,
+        message: `Synced ${result.total} locations: ${result.created} created, ${result.updated} updated`,
+        data: {
+          ...result,
+          locations: updatedStatus.locations,
+        },
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new HttpException(
         { success: false, message: getErrorMessage(error) },
         getErrorStatus(error)

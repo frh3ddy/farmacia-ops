@@ -139,5 +139,50 @@ export class LocationsService {
 
     return result;
   }
+
+  /**
+   * Fetch locations directly from Square API (without saving to database)
+   * Used during initial setup when user hasn't authenticated yet
+   */
+  async fetchSquareLocations(): Promise<{
+    locations: Array<{
+      squareId: string;
+      name: string;
+      address: string | null;
+      status: string;
+    }>;
+  }> {
+    const client = this.getSquareClient();
+
+    try {
+      const response = await client.locations.list();
+      const squareLocations = (response as any).locations || [];
+
+      return {
+        locations: squareLocations.map((loc: any) => ({
+          squareId: loc.id,
+          name: loc.name || `Location ${loc.id}`,
+          address: loc.address
+            ? [
+                loc.address.addressLine1,
+                loc.address.addressLine2,
+                loc.address.locality,
+                loc.address.administrativeDistrictLevel1,
+                loc.address.postalCode,
+              ]
+                .filter(Boolean)
+                .join(', ')
+            : null,
+          status: loc.status || 'ACTIVE',
+        })),
+      };
+    } catch (error) {
+      throw new Error(
+        `Failed to fetch locations from Square: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
 }
 

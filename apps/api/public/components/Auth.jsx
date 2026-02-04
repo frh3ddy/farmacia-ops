@@ -240,31 +240,69 @@ function SetupForm({ onSetupComplete, onSwitchToLogin }) {
   });
   const [loading, setLoading] = useState(false);
   const [loadingLocations, setLoadingLocations] = useState(true);
+  const [syncingSquare, setSyncingSquare] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   // Fetch available locations on mount
-  useEffect(() => {
-    const fetchLocations = async () => {
-      try {
-        const response = await fetch('/auth/setup/status');
-        const data = await response.json();
-        if (data.success && data.data.locations && data.data.locations.length > 0) {
-          setAvailableLocations(data.data.locations);
-          setFormData(prev => ({
-            ...prev,
-            useExistingLocation: true,
-            locationId: data.data.locations[0].id, // Pre-select first location
-          }));
-        }
-      } catch (err) {
-        console.error('Failed to fetch locations:', err);
-      } finally {
-        setLoadingLocations(false);
+  const fetchLocations = async () => {
+    setLoadingLocations(true);
+    try {
+      const response = await fetch('/auth/setup/status');
+      const data = await response.json();
+      if (data.success && data.data.locations && data.data.locations.length > 0) {
+        setAvailableLocations(data.data.locations);
+        setFormData(prev => ({
+          ...prev,
+          useExistingLocation: true,
+          locationId: data.data.locations[0].id, // Pre-select first location
+        }));
       }
-    };
+    } catch (err) {
+      console.error('Failed to fetch locations:', err);
+    } finally {
+      setLoadingLocations(false);
+    }
+  };
+
+  useEffect(() => {
     fetchLocations();
   }, []);
+
+  // Sync locations from Square
+  const handleSyncFromSquare = async () => {
+    setSyncingSquare(true);
+    setError('');
+    try {
+      const response = await fetch('/auth/setup/sync-locations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json();
+      
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'Failed to sync locations');
+      }
+      
+      // Update available locations
+      if (data.data.locations && data.data.locations.length > 0) {
+        setAvailableLocations(data.data.locations);
+        setFormData(prev => ({
+          ...prev,
+          useExistingLocation: true,
+          locationId: data.data.locations[0].id,
+        }));
+        setSuccess(`Synced ${data.data.total} location(s) from Square!`);
+        setTimeout(() => setSuccess(''), 3000);
+      } else {
+        setError('No locations found in Square');
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to sync from Square');
+    } finally {
+      setSyncingSquare(false);
+    }
+  };
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -457,7 +495,18 @@ function SetupForm({ onSetupComplete, onSwitchToLogin }) {
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Location</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-900">Location</h3>
+                <button
+                  type="button"
+                  onClick={handleSyncFromSquare}
+                  disabled={syncingSquare}
+                  className="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+                >
+                  <span className="material-icons text-sm">{syncingSquare ? 'sync' : 'cloud_download'}</span>
+                  <span>{syncingSquare ? 'Syncing...' : 'Sync from Square'}</span>
+                </button>
+              </div>
               
               {/* Show location toggle if locations exist */}
               {availableLocations.length > 0 && (
