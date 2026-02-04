@@ -306,6 +306,9 @@
   <script type="text/babel" src="components/InventoryMigration/phases/ReportPhase.jsx"></script>
   <script type="text/babel" src="components/InventoryMigration/index.jsx"></script>
 
+  <!-- Load Auth component first -->
+  <script type="text/babel" src="components/Auth.jsx"></script>
+
   <!-- Load feature components -->
   <script type="text/babel" src="components/CatalogSync.jsx"></script>
   <script type="text/babel" src="components/CatalogMappings.jsx"></script>
@@ -323,12 +326,14 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    function App() {
+    function MainApp() {
       const [activeTab, setActiveTab] = useState('catalog-sync');
 
       return (
-        <div className="max-w-7xl mx-auto bg-white rounded-xl shadow-sm p-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-6 pb-3 border-b-2 border-primary">🧪 Farmacia Ops - Kitchen Sink</h1>
+        <div>
+          <UserHeader />
+          <div className="max-w-7xl mx-auto bg-white rounded-xl shadow-sm p-6">
+            <h1 className="text-3xl font-bold text-gray-900 mb-6 pb-3 border-b-2 border-primary">🧪 Farmacia Ops - Kitchen Sink</h1>
           <div className="flex gap-2 mb-6 border-b-2 border-gray-200">
             <button 
               className={`px-5 py-3 font-medium text-sm border-b-2 transition-colors ${
@@ -444,6 +449,16 @@
             {activeTab === 'suppliers' && <Suppliers />}
           </div>
         </div>
+        </div>
+      );
+    }
+
+    // Wrapper App with Auth
+    function App() {
+      return (
+        <AuthProvider>
+          <MainApp />
+        </AuthProvider>
       );
     }
 

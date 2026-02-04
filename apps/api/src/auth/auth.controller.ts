@@ -10,6 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { EmployeeService } from './employee.service';
 import { DeviceType } from '@prisma/client';
 
 // ============================================================================
@@ -49,9 +50,65 @@ function getErrorStatus(error: unknown): number {
 // Controller
 // ============================================================================
 
+// Setup DTO
+interface InitialSetupDto {
+  ownerName: string;
+  ownerEmail: string;
+  ownerPassword: string;
+  ownerPin: string;
+  locationName: string;
+  squareLocationId?: string;
+}
+
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly employeeService: EmployeeService,
+  ) {}
+
+  // --------------------------------------------------------------------------
+  // Setup Status - Check if initial setup is needed (PUBLIC)
+  // --------------------------------------------------------------------------
+  @Get('setup/status')
+  async getSetupStatus() {
+    try {
+      const status = await this.employeeService.getSetupStatus();
+      return {
+        success: true,
+        data: status,
+      };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: getErrorMessage(error) },
+        getErrorStatus(error)
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Initial Setup - Create first owner account (PUBLIC, only works if no employees exist)
+  // --------------------------------------------------------------------------
+  @Post('setup/initial')
+  async initialSetup(@Body() body: InitialSetupDto) {
+    try {
+      const result = await this.employeeService.initialSetup({
+        ownerName: body.ownerName,
+        ownerEmail: body.ownerEmail,
+        ownerPassword: body.ownerPassword,
+        ownerPin: body.ownerPin,
+        locationName: body.locationName,
+        squareLocationId: body.squareLocationId,
+      });
+      return result;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: getErrorMessage(error) },
+        getErrorStatus(error)
+      );
+    }
+  }
 
   // --------------------------------------------------------------------------
   // Device Activation

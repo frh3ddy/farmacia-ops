@@ -752,4 +752,139 @@ export class EmployeeService {
       { value: 'ACCOUNTANT', label: 'Accountant', description: 'Expenses, reports, read-only inventory' },
     ];
   }
+
+  // --------------------------------------------------------------------------
+  // Setup Status - Check if system needs initial setup
+  // --------------------------------------------------------------------------
+
+  async getSetupStatus() {
+    const employeeCount = await this.prisma.employee.count();
+    const locationCount = await this.prisma.location.count();
+    
+    return {
+      needsSetup: employeeCount === 0,
+      hasEmployees: employeeCount > 0,
+      hasLocations: locationCount > 0,
+      employeeCount,
+      locationCount,
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // Initial Setup - Create first owner account and location
+  // --------------------------------------------------------------------------
+
+  async initialSetup(input: {
+    ownerName: string;
+    ownerEmail: string;
+    ownerPassword: string;
+    ownerPin: string;
+    locationName: string;
+    squareLocationId?: string;
+  }) {
+    // Check if setup is already done
+    const status = await this.getSetupStatus();
+    if (!status.needsSetup) {
+      throw new HttpException(
+        { success: false, message: 'Setup has already been completed. An owner account already exists.' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // Validate inputs
+    if (!input.ownerName || input.ownerName.trim().length < 2) {
+      throw new HttpException(
+        { success: false, message: 'Owner name must be at least 2 characters' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    if (!input.ownerEmail || !input.ownerEmail.includes('@')) {
+      throw new HttpException(
+        { success: false, message: 'Valid email is required' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    if (!input.ownerPassword || input.ownerPassword.length < 6) {
+      throw new HttpException(
+        { success: false, message: 'Password must be at least 6 characters' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    if (!input.ownerPin || !/^\d{4,6}$/.test(input.ownerPin)) {
+      throw new HttpException(
+        { success: false, message: 'PIN must be 4-6 digits' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    if (!input.locationName || input.locationName.trim().length < 2) {
+      throw new HttpException(
+        { success: false, message: 'Location name must be at least 2 characters' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // Create location and owner in a transaction
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Create location
+      const location = await tx.location.create({
+        data: {
+          name: input.locationName.trim(),
+          squareId: input.squareLocationId || null,
+          isActive: true,
+        },
+      });
+
+      // 2. Create owner employee
+      const passwordHash = this.hashPassword(input.ownerPassword);
+      const pinSalt = crypto.randomBytes(16).toString('hex');
+      const pinHash = this.authService.hashPIN(input.ownerPin, pinSalt);
+
+      const owner = await tx.employee.create({
+        data: {
+          name: input.ownerName.trim(),
+          email: input.ownerEmail.toLowerCase().trim(),
+          passwordHash,
+          pin: pinHash,
+          pinSalt,
+          isActive: true,
+        },
+      });
+
+      // 3. Assign owner to location
+      const assignment = await tx.employeeLocationAssignment.create({
+        data: {
+          employeeId: owner.id,
+          locationId: location.id,
+          role: 'OWNER',
+          isActive: true,
+        },
+      });
+
+      return {
+        owner: {
+          id: owner.id,
+          name: owner.name,
+          email: owner.email,
+        },
+        location: {
+          id: location.id,
+          name: location.name,
+        },
+        assignment: {
+          id: assignment.id,
+          role: assignment.role,
+        },
+      };
+    });
+
+    return {
+      success: true,
+      message: 'Initial setup completed successfully',
+      data: result,
+    };
+  }
 }
