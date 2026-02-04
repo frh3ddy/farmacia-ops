@@ -7,6 +7,7 @@ import { InventoryMigrationModule } from './inventory-migration/inventory-migrat
 import { InventoryModule } from './inventory/inventory.module';
 import { AuthModule } from './auth/auth.module';
 import { LocationsModule } from './locations/locations.module';
+import { ProductsModule } from './products/products.module';
 import { PrismaService } from './prisma/prisma.service';
 
 @Module({
@@ -19,6 +20,7 @@ import { PrismaService } from './prisma/prisma.service';
     InventoryModule,
     AuthModule,
     LocationsModule,
+    ProductsModule,
   ],
   providers: [PrismaService],
   exports: [PrismaService],
