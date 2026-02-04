@@ -759,14 +759,23 @@ export class EmployeeService {
 
   async getSetupStatus() {
     const employeeCount = await this.prisma.employee.count();
-    const locationCount = await this.prisma.location.count();
+    const locations = await this.prisma.location.findMany({
+      select: {
+        id: true,
+        name: true,
+        squareId: true,
+        isActive: true,
+      },
+      orderBy: { name: 'asc' },
+    });
     
     return {
       needsSetup: employeeCount === 0,
       hasEmployees: employeeCount > 0,
-      hasLocations: locationCount > 0,
+      hasLocations: locations.length > 0,
       employeeCount,
-      locationCount,
+      locationCount: locations.length,
+      locations, // Include available locations for selection
     };
   }
 
@@ -779,7 +788,8 @@ export class EmployeeService {
     ownerEmail: string;
     ownerPassword: string;
     ownerPin: string;
-    locationName: string;
+    locationId?: string;      // Use existing location
+    locationName?: string;    // Create new location with this name
     squareLocationId?: string;
   }) {
     // Check if setup is already done
@@ -820,23 +830,40 @@ export class EmployeeService {
       );
     }
 
-    if (!input.locationName || input.locationName.trim().length < 2) {
+    // Must provide either locationId or locationName
+    if (!input.locationId && (!input.locationName || input.locationName.trim().length < 2)) {
       throw new HttpException(
-        { success: false, message: 'Location name must be at least 2 characters' },
+        { success: false, message: 'Either select an existing location or provide a new location name (at least 2 characters)' },
         HttpStatus.BAD_REQUEST
       );
     }
 
     // Create location and owner in a transaction
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Create location
-      const location = await tx.location.create({
-        data: {
-          name: input.locationName.trim(),
-          squareId: input.squareLocationId || null,
-          isActive: true,
-        },
-      });
+      let location;
+      
+      // 1. Get or create location
+      if (input.locationId) {
+        // Use existing location
+        location = await tx.location.findUnique({
+          where: { id: input.locationId },
+        });
+        if (!location) {
+          throw new HttpException(
+            { success: false, message: 'Selected location not found' },
+            HttpStatus.NOT_FOUND
+          );
+        }
+      } else {
+        // Create new location
+        location = await tx.location.create({
+          data: {
+            name: input.locationName!.trim(),
+            squareId: input.squareLocationId || null,
+            isActive: true,
+          },
+        });
+      }
 
       // 2. Create owner employee
       const passwordHash = this.hashPassword(input.ownerPassword);

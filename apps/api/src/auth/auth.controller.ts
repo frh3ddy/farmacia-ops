@@ -56,7 +56,8 @@ interface InitialSetupDto {
   ownerEmail: string;
   ownerPassword: string;
   ownerPin: string;
-  locationName: string;
+  locationId?: string;        // Use existing location
+  locationName?: string;      // Create new location
   squareLocationId?: string;
 }
 
@@ -97,6 +98,7 @@ export class AuthController {
         ownerEmail: body.ownerEmail,
         ownerPassword: body.ownerPassword,
         ownerPin: body.ownerPin,
+        locationId: body.locationId,
         locationName: body.locationName,
         squareLocationId: body.squareLocationId,
       });

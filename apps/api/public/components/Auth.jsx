@@ -226,6 +226,7 @@ function LoginForm({ onLogin, onSwitchToSetup }) {
 
 // Setup Form Component (Initial Owner Creation)
 function SetupForm({ onSetupComplete, onSwitchToLogin }) {
+  const [availableLocations, setAvailableLocations] = useState([]);
   const [formData, setFormData] = useState({
     ownerName: '',
     ownerEmail: '',
@@ -233,11 +234,37 @@ function SetupForm({ onSetupComplete, onSwitchToLogin }) {
     confirmPassword: '',
     ownerPin: '',
     confirmPin: '',
-    locationName: '',
+    locationId: '',       // For selecting existing location
+    locationName: '',     // For creating new location
+    useExistingLocation: false, // Will be set when locations are loaded
   });
   const [loading, setLoading] = useState(false);
+  const [loadingLocations, setLoadingLocations] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Fetch available locations on mount
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const response = await fetch('/auth/setup/status');
+        const data = await response.json();
+        if (data.success && data.data.locations && data.data.locations.length > 0) {
+          setAvailableLocations(data.data.locations);
+          setFormData(prev => ({
+            ...prev,
+            useExistingLocation: true,
+            locationId: data.data.locations[0].id, // Pre-select first location
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch locations:', err);
+      } finally {
+        setLoadingLocations(false);
+      }
+    };
+    fetchLocations();
+  }, []);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -268,17 +295,36 @@ function SetupForm({ onSetupComplete, onSwitchToLogin }) {
       return;
     }
 
+    // Validate location
+    if (formData.useExistingLocation && !formData.locationId) {
+      setError('Please select a location');
+      setLoading(false);
+      return;
+    }
+    if (!formData.useExistingLocation && !formData.locationName) {
+      setError('Please enter a location name');
+      setLoading(false);
+      return;
+    }
+
     try {
+      const requestBody = {
+        ownerName: formData.ownerName,
+        ownerEmail: formData.ownerEmail,
+        ownerPassword: formData.ownerPassword,
+        ownerPin: formData.ownerPin,
+      };
+      
+      if (formData.useExistingLocation) {
+        requestBody.locationId = formData.locationId;
+      } else {
+        requestBody.locationName = formData.locationName;
+      }
+
       const response = await fetch('/auth/setup/initial', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ownerName: formData.ownerName,
-          ownerEmail: formData.ownerEmail,
-          ownerPassword: formData.ownerPassword,
-          ownerPin: formData.ownerPin,
-          locationName: formData.locationName,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
@@ -412,18 +458,71 @@ function SetupForm({ onSetupComplete, onSwitchToLogin }) {
 
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Location</h3>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Pharmacy Name</label>
-                <input
-                  type="text"
-                  name="locationName"
-                  value={formData.locationName}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  placeholder="My Pharmacy"
-                  required
-                />
-              </div>
+              
+              {/* Show location toggle if locations exist */}
+              {availableLocations.length > 0 && (
+                <div className="flex items-center space-x-4 mb-4">
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="locationChoice"
+                      checked={formData.useExistingLocation}
+                      onChange={() => setFormData({ ...formData, useExistingLocation: true, locationId: availableLocations[0]?.id || '' })}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">Use existing location</span>
+                  </label>
+                  <label className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="locationChoice"
+                      checked={!formData.useExistingLocation}
+                      onChange={() => setFormData({ ...formData, useExistingLocation: false, locationId: '' })}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">Create new location</span>
+                  </label>
+                </div>
+              )}
+
+              {/* Existing location selector */}
+              {formData.useExistingLocation && availableLocations.length > 0 ? (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Select Location</label>
+                  <select
+                    name="locationId"
+                    value={formData.locationId}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
+                    required
+                  >
+                    <option value="">Select a location...</option>
+                    {availableLocations.map(loc => (
+                      <option key={loc.id} value={loc.id}>
+                        {loc.name} {loc.squareId ? `(Square: ${loc.squareId.slice(0, 8)}...)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {availableLocations.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {availableLocations.length} location(s) available from Square sync
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Pharmacy Name</label>
+                  <input
+                    type="text"
+                    name="locationName"
+                    value={formData.locationName}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                    placeholder="My Pharmacy"
+                    required={!formData.useExistingLocation}
+                  />
+                </div>
+              )}
             </div>
 
             <button
