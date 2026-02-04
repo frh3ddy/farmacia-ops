@@ -46,6 +46,22 @@ function getErrorStatus(error: unknown): number {
   return HttpStatus.INTERNAL_SERVER_ERROR;
 }
 
+/**
+ * Parse a date string that could be either:
+ * - Date-only: "2026-02-03" -> treated as local date (noon to avoid timezone edge cases)
+ * - Full ISO: "2026-02-03T12:00:00Z" -> parsed as-is
+ */
+function parseDateString(dateStr: string): Date {
+  // If it's a date-only string (YYYY-MM-DD), add noon time to avoid timezone issues
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    // Parse as local date at noon to avoid any timezone day-shift issues
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0);
+  }
+  // Otherwise parse as full ISO date
+  return new Date(dateStr);
+}
+
 // ============================================================================
 // Controller
 // ============================================================================
@@ -97,7 +113,7 @@ export class InventoryReceivingController {
       let manufacturingDate: Date | undefined;
 
       if (body.expiryDate) {
-        expiryDate = new Date(body.expiryDate);
+        expiryDate = parseDateString(body.expiryDate);
         if (isNaN(expiryDate.getTime())) {
           throw new HttpException(
             { success: false, message: 'Invalid expiryDate format' },
@@ -107,7 +123,7 @@ export class InventoryReceivingController {
       }
 
       if (body.manufacturingDate) {
-        manufacturingDate = new Date(body.manufacturingDate);
+        manufacturingDate = parseDateString(body.manufacturingDate);
         if (isNaN(manufacturingDate.getTime())) {
           throw new HttpException(
             { success: false, message: 'Invalid manufacturingDate format' },
