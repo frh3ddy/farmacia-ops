@@ -347,6 +347,13 @@ export class ProductsService {
     const previousPrice = mapping ? this.fromCents(Number(mapping.priceCents)) : null;
     let squareSynced = false;
 
+    this.logger.log(`[PRODUCT] Found ${product.catalogMappings.length} catalog mapping(s) for location ${locationId}`);
+    if (mapping) {
+      this.logger.log(`[PRODUCT] Mapping: squareVariationId=${mapping.squareVariationId}, priceCents=${mapping.priceCents}`);
+    } else {
+      this.logger.log(`[PRODUCT] No existing catalog mapping found for this location`);
+    }
+
     // Step 1: Update in Square if applicable
     if (syncToSquare && mapping && !mapping.squareVariationId.startsWith('local_')) {
       try {

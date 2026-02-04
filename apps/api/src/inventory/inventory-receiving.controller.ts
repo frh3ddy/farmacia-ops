@@ -182,9 +182,9 @@ export class InventoryReceivingController {
             squareSynced: priceResult.squareSynced,
           };
           message += priceResult.squareSynced 
-            ? ` | Price updated to $${body.sellingPrice} MXN (synced to Square)`
-            : ` | Price updated to $${body.sellingPrice} MXN locally`;
-          this.logger.log(`[RECEIVING] Price updated for product ${body.productId}: $${body.sellingPrice} MXN`);
+            ? ` | Price updated to $${body.sellingPrice} (synced to Square)`
+            : ` | Price updated to $${body.sellingPrice} locally`;
+          this.logger.log(`[RECEIVING] Price updated for product ${body.productId}: $${body.sellingPrice} (squareSynced: ${priceResult.squareSynced})`);
         } catch (priceError) {
           this.logger.error(`[RECEIVING] Failed to update price: ${priceError}`);
           message += ` | Price update failed: ${getErrorMessage(priceError)}`;
