@@ -354,20 +354,58 @@ export class ProductsService {
       this.logger.log(`[PRODUCT] No existing catalog mapping found for this location`);
     }
 
+    // Get location for Square sync
+    const location = await this.prisma.location.findUnique({
+      where: { id: locationId },
+    });
+
     // Step 1: Update in Square if applicable
-    if (syncToSquare && mapping && !mapping.squareVariationId.startsWith('local_')) {
-      try {
-        await this.updatePriceInSquare(mapping.squareVariationId, sellingPrice);
-        squareSynced = true;
-        this.logger.log(`[PRODUCT] Price updated in Square for variation ${mapping.squareVariationId}`);
-      } catch (error) {
-        this.logger.error(`[PRODUCT] Failed to update price in Square: ${error}`);
-        // Continue with local update
+    if (syncToSquare && mapping) {
+      // Check if this is a local-only product that needs to be synced to Square first
+      if (mapping.squareVariationId.startsWith('local_')) {
+        this.logger.log(`[PRODUCT] Product is local-only, attempting to sync to Square first...`);
+        try {
+          // Create the product in Square
+          const squareResult = await this.createProductInSquare({
+            name: product.name,
+            sku: product.sku || undefined,
+            description: product.squareDescription || undefined,
+            sellingPrice,
+            locationId: location?.squareId || undefined,
+          });
+          
+          // Update the catalog mapping with the real Square variation ID
+          await this.prisma.catalogMapping.update({
+            where: { id: mapping.id },
+            data: {
+              squareVariationId: squareResult.variationId,
+              priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
+              priceSyncedAt: new Date(),
+            },
+          });
+          
+          squareSynced = true;
+          this.logger.log(`[PRODUCT] Product synced to Square: Item=${squareResult.itemId}, Variation=${squareResult.variationId}`);
+        } catch (error) {
+          this.logger.error(`[PRODUCT] Failed to sync local product to Square: ${error}`);
+          // Continue with local update only
+        }
+      } else {
+        // Product already exists in Square, just update the price
+        try {
+          await this.updatePriceInSquare(mapping.squareVariationId, sellingPrice);
+          squareSynced = true;
+          this.logger.log(`[PRODUCT] Price updated in Square for variation ${mapping.squareVariationId}`);
+        } catch (error) {
+          this.logger.error(`[PRODUCT] Failed to update price in Square: ${error}`);
+          // Continue with local update
+        }
       }
     }
 
-    // Step 2: Update local catalog mapping
-    if (mapping) {
+    // Step 2: Update local catalog mapping (only if not already updated during Square sync)
+    if (mapping && !squareSynced) {
+      // Only update locally if Square sync didn't already update the mapping
       await this.prisma.catalogMapping.update({
         where: { id: mapping.id },
         data: {
@@ -375,7 +413,16 @@ export class ProductsService {
           priceSyncedAt: new Date(),
         },
       });
-    } else {
+    } else if (mapping && squareSynced && !mapping.squareVariationId.startsWith('local_')) {
+      // For existing Square products, update the local price after Square sync
+      await this.prisma.catalogMapping.update({
+        where: { id: mapping.id },
+        data: {
+          priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
+          priceSyncedAt: new Date(),
+        },
+      });
+    } else if (!mapping) {
       // Create new mapping if none exists
       await this.prisma.catalogMapping.create({
         data: {
