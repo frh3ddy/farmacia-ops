@@ -79,6 +79,9 @@ export class ProductsService {
         squareEnvironment = SquareEnvironment.Production;
       }
 
+      this.logger.log(`[SQUARE] Initializing Square client with environment: ${squareEnvironment === SquareEnvironment.Sandbox ? 'SANDBOX' : 'PRODUCTION'}`);
+      this.logger.log(`[SQUARE] Environment vars: NODE_ENV=${nodeEnv}, SQUARE_ENVIRONMENT=${squareEnv}, RAILWAY_ENVIRONMENT=${railwayEnv}`);
+
       this.squareClient = new SquareClient({
         token: squareAccessToken,
         environment: squareEnvironment,
