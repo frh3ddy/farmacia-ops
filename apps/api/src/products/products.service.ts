@@ -408,7 +408,7 @@ export class ProductsService {
       } else {
         // Product already exists in Square, just update the price
         try {
-          await this.updatePriceInSquare(mapping.squareVariationId, sellingPrice);
+          await this.updatePriceInSquare(mapping.squareVariationId, sellingPrice, location?.squareId || undefined);
           squareSynced = true;
           this.logger.log(`[PRODUCT] Price updated in Square for variation ${mapping.squareVariationId}`);
         } catch (error) {
@@ -475,7 +475,7 @@ export class ProductsService {
   /**
    * Update price in Square
    */
-  private async updatePriceInSquare(variationId: string, newPrice: number): Promise<void> {
+  private async updatePriceInSquare(variationId: string, newPrice: number, squareLocationId?: string): Promise<void> {
     const client = this.getSquareClient();
 
     // First, fetch the current object to get its version
@@ -493,25 +493,35 @@ export class ProductsService {
       throw new Error(`Invalid variation data for ${variationId}`);
     }
 
+    // Build the upsert object
+    const upsertObject: any = {
+      type: 'ITEM_VARIATION',
+      id: variationId,
+      version: currentObject.version,
+      itemVariationData: {
+        itemId: variationData.itemId,
+        name: variationData.name || 'Regular',
+        sku: variationData.sku,
+        pricingType: 'FIXED_PRICING',
+        priceMoney: {
+          amount: this.toCents(newPrice),
+          currency: CURRENCY,
+        },
+      },
+    };
+
+    // If we have a specific location, set presentAtLocationIds instead of global
+    if (squareLocationId) {
+      upsertObject.presentAtLocationIds = [squareLocationId];
+      upsertObject.presentAtAllLocations = false;
+      this.logger.log(`[PRODUCT] Updating price for variation ${variationId} at location ${squareLocationId}`);
+    }
+
     try {
       // Update the variation with new price
       await client.catalog.object.upsert({
         idempotencyKey: randomUUID(),
-        object: {
-          type: 'ITEM_VARIATION',
-          id: variationId,
-          version: currentObject.version,
-          itemVariationData: {
-            itemId: variationData.itemId,
-            name: variationData.name || 'Regular',
-            sku: variationData.sku,
-            pricingType: 'FIXED_PRICING',
-            priceMoney: {
-              amount: this.toCents(newPrice),
-              currency: CURRENCY,
-            },
-          },
-        },
+        object: upsertObject,
       });
     } catch (error: any) {
       // Parse Square error response
@@ -521,7 +531,7 @@ export class ProductsService {
       
       // Check for location enablement mismatch error
       if (errorString.includes('is not enabled') || errorString.includes('is enabled at all future locations')) {
-        this.logger.error(`[PRODUCT] Square price update failed - Location enablement mismatch. Parent Item: ${parentItemId}, Variation: ${variationId}`);
+        this.logger.error(`[PRODUCT] Square price update failed - Location enablement mismatch. Parent Item: ${parentItemId}, Variation: ${variationId}, Location: ${squareLocationId || 'global'}`);
         
         // Parse the specific error details if available
         let errorDetail = '';
