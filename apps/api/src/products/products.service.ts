@@ -494,44 +494,13 @@ export class ProductsService {
     }
 
     try {
-      // First, ensure the parent ITEM is enabled at all locations
-      // This fixes the "ITEM is not enabled" error
-      const parentItemId = variationData.itemId;
-      if (parentItemId) {
-        try {
-          const parentResponse = await client.catalog.object.get({
-            objectId: parentItemId,
-          });
-          
-          if (parentResponse.object) {
-            const parentItem = parentResponse.object as any;
-            // Update parent item to be present at all locations
-            await client.catalog.object.upsert({
-              idempotencyKey: randomUUID(),
-              object: {
-                type: 'ITEM',
-                id: parentItemId,
-                version: parentItem.version,
-                presentAtAllLocations: true,
-                itemData: parentItem.itemData,
-              },
-            });
-            this.logger.log(`[PRODUCT] Enabled parent item ${parentItemId} at all locations`);
-          }
-        } catch (parentError) {
-          this.logger.warn(`[PRODUCT] Could not update parent item enablement: ${parentError}`);
-          // Continue anyway - the variation update might still work
-        }
-      }
-
-      // Now update the variation with new price
+      // Update the variation with new price
       await client.catalog.object.upsert({
         idempotencyKey: randomUUID(),
         object: {
           type: 'ITEM_VARIATION',
           id: variationId,
           version: currentObject.version,
-          presentAtAllLocations: true,
           itemVariationData: {
             itemId: variationData.itemId,
             name: variationData.name || 'Regular',
@@ -545,12 +514,19 @@ export class ProductsService {
         },
       });
     } catch (error: any) {
-      // Check for location enablement error
+      // Check for location enablement error and provide clear message
       const errorBody = error?.body || error?.message || '';
-      if (typeof errorBody === 'string' && errorBody.includes('is not enabled') || 
-          (typeof errorBody === 'object' && JSON.stringify(errorBody).includes('is not enabled'))) {
-        this.logger.warn(`[PRODUCT] Item not enabled at all locations in Square. Price updated locally only. Consider enabling the item at all locations in Square Dashboard.`);
-        throw new Error('Item not enabled at all locations in Square. Please enable the parent item in Square Dashboard, or update price in Square directly.');
+      const errorString = typeof errorBody === 'string' ? errorBody : JSON.stringify(errorBody);
+      
+      if (errorString.includes('is not enabled')) {
+        // Extract details from error for better messaging
+        const parentItemId = variationData.itemId;
+        this.logger.error(`[PRODUCT] Square price update failed: Item or variation not enabled at required location(s). Parent Item ID: ${parentItemId}, Variation ID: ${variationId}`);
+        throw new Error(
+          `Cannot update price in Square: The item (${parentItemId}) or variation (${variationId}) is not enabled at the required location(s). ` +
+          `Please enable the item at all locations in Square Dashboard (Items & Orders → Item Library → Find item → Locations tab), ` +
+          `or update the price directly in Square Dashboard.`
+        );
       }
       throw error;
     }
