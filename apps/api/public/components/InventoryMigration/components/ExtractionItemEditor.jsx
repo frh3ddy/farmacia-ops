@@ -588,7 +588,6 @@ const ExtractionItemEditor = ({
 
               {/* Right Column: Product Review */}
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-gray-900 uppercase tracking-wide">Product Review</h3>
                 <div>
                   <h4 className="font-semibold text-gray-900 text-base">{result.productName}</h4>
                   {result.originalDescription && result.originalDescription !== result.productName && (
@@ -648,7 +647,6 @@ const ExtractionItemEditor = ({
                 ) : null}
                 
                 <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-                  <h5 className="text-sm font-semibold text-gray-700 mb-3 uppercase">Currently Selected</h5>
                   <div className="space-y-2">
                     <div>
                       <span className="text-xs text-gray-600">Supplier:</span>
