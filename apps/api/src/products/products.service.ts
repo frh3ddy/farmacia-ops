@@ -514,20 +514,37 @@ export class ProductsService {
         },
       });
     } catch (error: any) {
-      // Check for location enablement error and provide clear message
+      // Parse Square error response
       const errorBody = error?.body || error?.message || '';
       const errorString = typeof errorBody === 'string' ? errorBody : JSON.stringify(errorBody);
+      const parentItemId = variationData.itemId;
       
-      if (errorString.includes('is not enabled')) {
-        // Extract details from error for better messaging
-        const parentItemId = variationData.itemId;
-        this.logger.error(`[PRODUCT] Square price update failed: Item or variation not enabled at required location(s). Parent Item ID: ${parentItemId}, Variation ID: ${variationId}`);
+      // Check for location enablement mismatch error
+      if (errorString.includes('is not enabled') || errorString.includes('is enabled at all future locations')) {
+        this.logger.error(`[PRODUCT] Square price update failed - Location enablement mismatch. Parent Item: ${parentItemId}, Variation: ${variationId}`);
+        
+        // Parse the specific error details if available
+        let errorDetail = '';
+        try {
+          const parsed = typeof errorBody === 'string' ? JSON.parse(errorBody) : errorBody;
+          if (parsed.errors && parsed.errors[0]?.detail) {
+            errorDetail = parsed.errors[0].detail;
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        
         throw new Error(
-          `Cannot update price in Square: The item (${parentItemId}) or variation (${variationId}) is not enabled at the required location(s). ` +
-          `Please enable the item at all locations in Square Dashboard (Items & Orders → Item Library → Find item → Locations tab), ` +
-          `or update the price directly in Square Dashboard.`
+          `Cannot update price in Square: Location enablement mismatch between the item and its variation. ` +
+          `The variation (${variationId}) and its parent item (${parentItemId}) have different location settings. ` +
+          `${errorDetail ? `Square says: "${errorDetail}" ` : ''}` +
+          `To fix: Go to Square Dashboard → Items & Orders → Item Library → Find this item → Locations tab → ` +
+          `Enable the PARENT ITEM at the same locations as the variation, or update the price directly in Square.`
         );
       }
+      
+      // Re-throw other errors with context
+      this.logger.error(`[PRODUCT] Square price update failed: ${errorString}`);
       throw error;
     }
   }
