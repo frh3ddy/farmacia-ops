@@ -98,7 +98,7 @@ export class InventoryAdjustmentService {
     locationId: string,
     productId: string,
     quantityChange: number,
-    reason: string
+    adjustmentType: string
   ): Promise<{ synced: boolean; error?: string }> {
     const client = this.getSquareClient();
     if (!client) {
@@ -126,13 +126,37 @@ export class InventoryAdjustmentService {
         return { synced: false, error: 'Product not mapped to Square catalog' };
       }
 
-      // Determine the adjustment type for Square
-      // Square uses: PHYSICAL_COUNT, RECEIVE_STOCK, SALE, WASTE, SHRINKAGE, etc.
-      const fromState = quantityChange > 0 ? 'NONE' : 'IN_STOCK';
-      const toState = quantityChange > 0 ? 'IN_STOCK' : 'NONE';
+      // Determine the correct state transition based on adjustment type
+      // Square supported transitions:
+      // - NONE → IN_STOCK (receiving)
+      // - IN_STOCK → SOLD (sale)
+      // - IN_STOCK → WASTE (damage, expired, theft, write-off)
+      // - UNLINKED_RETURN → IN_STOCK (returns)
+      
+      let fromState: 'NONE' | 'IN_STOCK' | 'UNLINKED_RETURN';
+      let toState: 'IN_STOCK' | 'WASTE';
+      
+      if (quantityChange > 0) {
+        // Positive adjustment (adding inventory)
+        // For RETURN type, use UNLINKED_RETURN → IN_STOCK
+        // For FOUND or other positive types, use NONE → IN_STOCK
+        if (adjustmentType === 'RETURN') {
+          fromState = 'UNLINKED_RETURN';
+          toState = 'IN_STOCK';
+        } else {
+          fromState = 'NONE';
+          toState = 'IN_STOCK';
+        }
+      } else {
+        // Negative adjustment (removing inventory)
+        // Use IN_STOCK → WASTE for most negative adjustments
+        // (WASTE covers damage, expired, theft, write-off, etc.)
+        fromState = 'IN_STOCK';
+        toState = 'WASTE';
+      }
 
-      // Call Square Inventory API (batchCreateChanges is the current method name in Square SDK)
-      this.logger.log(`[SQUARE_SYNC] Syncing adjustment: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${Math.abs(quantityChange)}, fromState=${fromState}, toState=${toState}`);
+      // Call Square Inventory API
+      this.logger.log(`[SQUARE_SYNC] Syncing adjustment: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${Math.abs(quantityChange)}, ${fromState} → ${toState}, type=${adjustmentType}`);
       
       const response = await client.inventory.batchCreateChanges({
         idempotencyKey: randomUUID(),
@@ -143,10 +167,10 @@ export class InventoryAdjustmentService {
               catalogObjectId: catalogMapping.squareVariationId,
               locationId: location.squareId,
               quantity: Math.abs(quantityChange).toString(),
-              fromState,
-              toState,
+              fromState: fromState as any,
+              toState: toState as any,
               occurredAt: new Date().toISOString(),
-              referenceId: `adjustment-${Date.now()}`,
+              referenceId: `adjustment-${adjustmentType}-${Date.now()}`,
             },
           },
         ],
@@ -321,7 +345,7 @@ export class InventoryAdjustmentService {
         input.locationId,
         input.productId,
         input.quantity, // negative
-        input.reason || input.type
+        input.type // Pass the adjustment type for proper state transition
       );
     }
 
@@ -418,7 +442,7 @@ export class InventoryAdjustmentService {
         input.locationId,
         input.productId,
         input.quantity, // positive
-        input.reason || input.type
+        input.type // Pass the adjustment type for proper state transition
       );
     }
 
