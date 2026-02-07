@@ -11,14 +11,23 @@ import {
 } from './errors';
 import { mapVariationToProduct } from './catalog.mapper';
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error('DATABASE_URL environment variable is not set');
-}
+// Lazy initialization of database connection (env vars loaded by worker.ts first)
+let pool: Pool | null = null;
+let prisma: PrismaClient | null = null;
 
-const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+function getPrisma(): PrismaClient {
+  if (!prisma) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error('DATABASE_URL environment variable is not set');
+    }
+    pool = new Pool({ connectionString });
+    const adapter = new PrismaPg(pool);
+    prisma = new PrismaClient({ adapter });
+    console.log('[DEBUG] [SALE_WORKER] Prisma client initialized');
+  }
+  return prisma;
+}
 
 // ============================================================================
 // Utility Functions
@@ -168,7 +177,7 @@ async function calculateFIFOCost(
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
   >,
 ): Promise<FIFOCostResult> {
-  const client = tx || prisma;
+  const client = tx || getPrisma();
 
   // Step 1: Query inventory batches (FIFO order - NON-NEGOTIABLE)
   const batches = await client.inventory.findMany({
@@ -236,7 +245,7 @@ async function deductInventory(
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
   >,
 ): Promise<void> {
-  const client = tx || prisma;
+  const client = tx || getPrisma();
 
   for (const consumedBatch of consumedBatches) {
     const updated = await client.inventory.update({
@@ -275,7 +284,7 @@ async function processSaleItem(
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
   >,
 ): Promise<SaleItemOutput> {
-  const client = tx || prisma;
+  const client = tx || getPrisma();
 
   // Step 1: Calculate FIFO cost (this queries inventory)
   const costResult = await calculateFIFOCost(
@@ -498,7 +507,7 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   // Check if sale with squareId already exists (idempotency)
   console.log('[DEBUG] Checking for existing sale with squareId:', squareId);
-  const existing = await prisma.sale.findUnique({
+  const existing = await getPrisma().sale.findUnique({
     where: { squareId },
   });
   if (existing) {
@@ -612,7 +621,7 @@ export async function processSaleJob(job: Job): Promise<void> {
       productId = await mapVariationToProduct(
         catalogObjectId,
         locationId,
-        prisma,
+        getPrisma(),
       );
       console.log(`[DEBUG] ✓ Product mapped for line item ${i + 1}:`, {
         variationId: catalogObjectId,
@@ -720,7 +729,7 @@ export async function processSaleJob(job: Job): Promise<void> {
   let itemCount: number;
 
   try {
-    const result = await prisma.$transaction(
+    const result = await getPrisma().$transaction(
       async (tx) => {
         // Find or create Location based on Square location ID
         let location = await tx.location.findUnique({
