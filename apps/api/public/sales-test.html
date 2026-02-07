@@ -460,7 +460,7 @@
     
     function checkAuth() {
       if (!authToken) {
-        authToken = prompt('Enter your auth token (JWT):');
+        authToken = prompt('Enter your Session Token (from PIN login X-Session-Token):');
         if (authToken) {
           localStorage.setItem('authToken', authToken);
         }
@@ -468,7 +468,7 @@
       if (authToken) {
         loadLocations();
       } else {
-        showStatus('Please provide an auth token to continue', 'warning');
+        showStatus('Please provide a session token to continue. Get it from PIN login response.', 'warning');
       }
     }
     
@@ -485,7 +485,7 @@
         ...options,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`,
+          'X-Session-Token': authToken,
           ...options.headers,
         },
       });
