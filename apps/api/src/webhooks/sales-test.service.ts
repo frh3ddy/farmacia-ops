@@ -226,13 +226,13 @@ export class SalesTestService {
         name: item.product.name,
         quantity: String(item.quantity),
         catalogObjectId: item.squareVariationId,
-        catalogVersion: BigInt(1),
+        catalogVersion: 1,
         basePriceMoney: {
-          amount: BigInt(Math.round(item.price * 100)),
+          amount: Math.round(item.price * 100),
           currency: 'MXN',
         },
         totalMoney: {
-          amount: BigInt(Math.round(lineTotal * 100)),
+          amount: Math.round(lineTotal * 100),
           currency: 'MXN',
         },
       };
@@ -258,11 +258,11 @@ export class SalesTestService {
             created_at: new Date().toISOString(),
             status: 'COMPLETED',
             amount_money: {
-              amount: BigInt(Math.round(totalAmount * 100)),
+              amount: Math.round(totalAmount * 100),
               currency: 'MXN',
             },
             total_money: {
-              amount: BigInt(Math.round(totalAmount * 100)),
+              amount: Math.round(totalAmount * 100),
               currency: 'MXN',
             },
           },
@@ -273,7 +273,7 @@ export class SalesTestService {
           locationId: location.squareId,
           lineItems: orderLineItems,
           totalMoney: {
-            amount: BigInt(Math.round(totalAmount * 100)),
+            amount: Math.round(totalAmount * 100),
             currency: 'MXN',
           },
         },
