@@ -507,7 +507,7 @@ export async function processSaleJob(job: Job): Promise<void> {
   }
   console.log('[DEBUG] ✓ No existing sale found, proceeding...');
 
-  // Phase 2: Fetch Order Data from Square
+  // Phase 2: Fetch Order Data from Square (or use test data)
   console.log('[DEBUG] Validating order_id...');
   if (!orderId) {
     console.error('[DEBUG] ERROR: Payment object missing order_id');
@@ -519,35 +519,43 @@ export async function processSaleJob(job: Job): Promise<void> {
   console.log('[DEBUG] ✓ Order ID found:', orderId);
 
   let order;
-  try {
-    console.log('[DEBUG] Fetching order from Square API...');
-    const client = getSquareClient();
-    console.log('[DEBUG] Square client initialized, calling orders.get()');
-    const response = await client.orders.get({
-      orderId: orderId,
-    });
-    console.log('[DEBUG] Square API response received');
-    order = response.order;
+  
+  // Check if this is a test event with embedded order data
+  const testOrderData = job.data?.payload?._testOrderData;
+  if (testOrderData) {
+    console.log('[DEBUG] Using test order data (bypassing Square API)');
+    order = testOrderData;
+  } else {
+    try {
+      console.log('[DEBUG] Fetching order from Square API...');
+      const client = getSquareClient();
+      console.log('[DEBUG] Square client initialized, calling orders.get()');
+      const response = await client.orders.get({
+        orderId: orderId,
+      });
+      console.log('[DEBUG] Square API response received');
+      order = response.order;
 
-    if (!order) {
-      console.error('[DEBUG] ERROR: Order not found in Square response');
+      if (!order) {
+        console.error('[DEBUG] ERROR: Order not found in Square response');
+        throw new SaleValidationError(
+          `Order ${orderId} not found in Square`,
+          { orderId, squareId },
+        );
+      }
+      console.log('[DEBUG] ✓ Order fetched successfully, order ID:', order.id);
+    } catch (error) {
+      console.error('[DEBUG] ERROR: Failed to fetch order from Square:', {
+        error: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        orderId,
+        squareId,
+      });
       throw new SaleValidationError(
-        `Order ${orderId} not found in Square`,
+        `Failed to fetch order from Square: ${error instanceof Error ? error.message : String(error)}`,
         { orderId, squareId },
       );
     }
-    console.log('[DEBUG] ✓ Order fetched successfully, order ID:', order.id);
-  } catch (error) {
-    console.error('[DEBUG] ERROR: Failed to fetch order from Square:', {
-      error: error instanceof Error ? error.message : String(error),
-      errorStack: error instanceof Error ? error.stack : undefined,
-      orderId,
-      squareId,
-    });
-    throw new SaleValidationError(
-      `Failed to fetch order from Square: ${error instanceof Error ? error.message : String(error)}`,
-      { orderId, squareId },
-    );
   }
 
   // Extract line items from order

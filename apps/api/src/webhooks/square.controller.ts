@@ -6,16 +6,20 @@ import {
     Req,
     Res,
     Body,
+    Query,
     HttpStatus,
     HttpCode,
     RawBodyRequest,
     BadRequestException,
-    UnauthorizedException
+    UnauthorizedException,
+    UseGuards,
   } from '@nestjs/common';
   import { Request, Response } from 'express';
   import { WebhooksHelper } from 'square';
   import { SaleQueue } from '../queues/sale.queue';
   import { WebhookTestService } from './webhook-test.service';
+  import { SalesTestService, CreateTestSaleInput } from './sales-test.service';
+  import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
   
   @Controller('webhooks/square')
   export class SquareWebhookController {
@@ -137,6 +141,7 @@ import {
     constructor(
       private readonly saleQueue: SaleQueue,
       private readonly webhookTestService: WebhookTestService,
+      private readonly salesTestService: SalesTestService,
     ) {}
     
     @Get('test/status')
@@ -226,6 +231,131 @@ import {
         return {
           success: false,
           message: `Failed to enqueue test webhook: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    }
+  }
+
+  // ============================================================================
+  // Sales Testing Controller - For testing sales with real product data
+  // ============================================================================
+  @Controller('api/sales-test')
+  @UseGuards(AuthGuard, RoleGuard)
+  export class SalesTestController {
+    constructor(private readonly salesTestService: SalesTestService) {}
+
+    /**
+     * Get all active locations for sale testing
+     */
+    @Get('locations')
+    @Roles('OWNER', 'MANAGER')
+    async getLocations() {
+      try {
+        const locations = await this.salesTestService.getLocations();
+        return {
+          success: true,
+          data: locations,
+          count: locations.length,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : 'Failed to get locations',
+        };
+      }
+    }
+
+    /**
+     * Get products with inventory for a specific location
+     * Only returns products that can be sold (have inventory and Square mapping)
+     */
+    @Get('products')
+    @Roles('OWNER', 'MANAGER')
+    async getProducts(@Query('locationId') locationId: string) {
+      if (!locationId) {
+        return {
+          success: false,
+          message: 'locationId query parameter is required',
+        };
+      }
+
+      try {
+        const products = await this.salesTestService.getProductsWithInventory(locationId);
+        return {
+          success: true,
+          data: products,
+          count: products.length,
+          summary: {
+            totalProducts: products.length,
+            withSquareMapping: products.filter(p => p.hasSquareMapping).length,
+            totalInventoryUnits: products.reduce((sum, p) => sum + p.totalInventory, 0),
+          },
+        };
+      } catch (error) {
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : 'Failed to get products',
+        };
+      }
+    }
+
+    /**
+     * Create a test sale with specified products
+     * This simulates a Square payment webhook and processes it through the worker
+     * 
+     * Request body:
+     * {
+     *   "locationId": "uuid",
+     *   "lineItems": [
+     *     { "productId": "uuid", "quantity": 1, "priceOverride": 19.99 }
+     *   ]
+     * }
+     */
+    @Post('create')
+    @Roles('OWNER', 'MANAGER')
+    @HttpCode(200)
+    async createTestSale(@Body() input: CreateTestSaleInput) {
+      if (!input.locationId) {
+        return {
+          success: false,
+          message: 'locationId is required',
+        };
+      }
+
+      if (!input.lineItems || !Array.isArray(input.lineItems) || input.lineItems.length === 0) {
+        return {
+          success: false,
+          message: 'lineItems array is required and must not be empty',
+        };
+      }
+
+      try {
+        const result = await this.salesTestService.createTestSale(input);
+        return result;
+      } catch (error) {
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : 'Failed to create test sale',
+        };
+      }
+    }
+
+    /**
+     * Get queue status for monitoring
+     */
+    @Get('queue-status')
+    @Roles('OWNER', 'MANAGER')
+    async getQueueStatus() {
+      try {
+        const status = await this.salesTestService.getQueueStatus();
+        return {
+          success: true,
+          data: status,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : 'Failed to get queue status',
         };
       }
     }
