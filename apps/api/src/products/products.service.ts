@@ -454,18 +454,52 @@ export class ProductsService {
       });
     }
 
-    // Fetch updated product
+    // Fetch updated product with all required fields including inventory
     const updatedProduct = await this.prisma.product.findUnique({
       where: { id: productId },
       include: {
+        category: true,
         catalogMappings: {
+          where: {
+            OR: [
+              { locationId },        // Location-specific mapping
+              { locationId: null },  // Global mapping (from Square sync)
+            ],
+          },
+          orderBy: {
+            locationId: 'desc',  // Prefer location-specific (non-null) over global
+          },
           include: { location: true },
+        },
+        inventories: {
+          where: { locationId },
         },
       },
     });
 
+    // Calculate total inventory
+    const totalInventory = updatedProduct?.inventories.reduce((sum, inv) => sum + inv.quantity, 0) || 0;
+    
+    // Calculate average cost from inventory
+    const totalCost = updatedProduct?.inventories.reduce(
+      (sum, inv) => sum + (inv.quantity * Number(inv.unitCost)),
+      0
+    ) || 0;
+    const averageCost = totalInventory > 0 ? totalCost / totalInventory : null;
+
+    // Get the preferred mapping for the response
+    const responseMapping = updatedProduct?.catalogMappings.find(m => m.locationId === locationId) 
+                         || updatedProduct?.catalogMappings.find(m => m.locationId === null);
+
     return {
-      product: updatedProduct,
+      product: updatedProduct ? {
+        ...updatedProduct,
+        sellingPrice,
+        currency: CURRENCY,
+        totalInventory,
+        averageCost,
+        hasSquareSync: responseMapping ? !responseMapping.squareVariationId.startsWith('local_') : false,
+      } : null,
       previousPrice,
       newPrice: sellingPrice,
       squareSynced,
@@ -617,6 +651,11 @@ export class ProductsService {
            || product.catalogMappings.find(m => m.locationId === null))
         : product.catalogMappings[0];
       const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
+      
+      // Debug logging
+      if (product.inventories.length > 0 || totalInventory > 0) {
+        this.logger.debug(`[PRODUCT] ${product.name}: inventories=${product.inventories.length} batches, totalInventory=${totalInventory}`);
+      }
       
       return {
         ...product,
