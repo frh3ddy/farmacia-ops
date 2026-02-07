@@ -31,6 +31,7 @@ interface UpdatePriceDto {
   sellingPrice: number;
   locationId?: string;
   syncToSquare?: boolean;
+  applyToAllLocations?: boolean;  // If true, update price at all Square locations
 }
 
 // Helper functions
@@ -207,6 +208,7 @@ export class ProductsController {
         sellingPrice: body.sellingPrice,
         locationId,
         syncToSquare: body.syncToSquare !== false,
+        applyToAllLocations: body.applyToAllLocations === true,
       };
 
       const result = await this.productsService.updatePrice(input);

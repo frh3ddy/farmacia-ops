@@ -24,6 +24,7 @@ export interface UpdatePriceInput {
   sellingPrice: number; // New price in dollars
   locationId: string;
   syncToSquare?: boolean;
+  applyToAllLocations?: boolean; // If true, update price at all Square locations
 }
 
 export interface ProductResult {
@@ -324,9 +325,9 @@ export class ProductsService {
    * Update product selling price and sync to Square
    */
   async updatePrice(input: UpdatePriceInput): Promise<PriceUpdateResult> {
-    const { productId, sellingPrice, locationId, syncToSquare = true } = input;
+    const { productId, sellingPrice, locationId, syncToSquare = true, applyToAllLocations = false } = input;
 
-    this.logger.log(`[PRODUCT] Updating price for product ${productId} to $${sellingPrice} ${CURRENCY}`);
+    this.logger.log(`[PRODUCT] Updating price for product ${productId} to $${sellingPrice} ${CURRENCY}${applyToAllLocations ? ' (all locations)' : ''}`);
 
     if (sellingPrice < 0) {
       throw new BadRequestException('Selling price cannot be negative');
@@ -408,9 +409,11 @@ export class ProductsService {
       } else {
         // Product already exists in Square, just update the price
         try {
-          await this.updatePriceInSquare(mapping.squareVariationId, sellingPrice, location?.squareId || undefined);
+          // If applyToAllLocations is true, don't pass a specific location (will use presentAtAllLocations)
+          const targetSquareLocationId = applyToAllLocations ? undefined : (location?.squareId || undefined);
+          await this.updatePriceInSquare(mapping.squareVariationId, sellingPrice, targetSquareLocationId, applyToAllLocations);
           squareSynced = true;
-          this.logger.log(`[PRODUCT] Price updated in Square for variation ${mapping.squareVariationId}`);
+          this.logger.log(`[PRODUCT] Price updated in Square for variation ${mapping.squareVariationId}${applyToAllLocations ? ' (all locations)' : ''}`);
         } catch (error) {
           this.logger.error(`[PRODUCT] Failed to update price in Square: ${error}`);
           // Continue with local update
@@ -474,8 +477,17 @@ export class ProductsService {
 
   /**
    * Update price in Square
+   * @param variationId - Square variation ID
+   * @param newPrice - New price in dollars
+   * @param squareLocationId - Specific Square location ID (optional)
+   * @param applyToAllLocations - If true, apply price to all locations
    */
-  private async updatePriceInSquare(variationId: string, newPrice: number, squareLocationId?: string): Promise<void> {
+  private async updatePriceInSquare(
+    variationId: string, 
+    newPrice: number, 
+    squareLocationId?: string,
+    applyToAllLocations: boolean = false
+  ): Promise<void> {
     const client = this.getSquareClient();
 
     // First, fetch the current object to get its version
@@ -510,12 +522,18 @@ export class ProductsService {
       },
     };
 
-    // If we have a specific location, set presentAtLocationIds instead of global
-    if (squareLocationId) {
+    // Determine location scope
+    if (applyToAllLocations) {
+      // Apply to all current and future locations
+      upsertObject.presentAtAllLocations = true;
+      this.logger.log(`[PRODUCT] Updating price for variation ${variationId} at ALL locations`);
+    } else if (squareLocationId) {
+      // Apply to specific location only
       upsertObject.presentAtLocationIds = [squareLocationId];
       upsertObject.presentAtAllLocations = false;
       this.logger.log(`[PRODUCT] Updating price for variation ${variationId} at location ${squareLocationId}`);
     }
+    // If neither is set, don't specify location (keeps existing location settings)
 
     try {
       // Update the variation with new price
