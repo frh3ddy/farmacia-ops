@@ -23,6 +23,13 @@ function getErrorStatus(error: unknown): number {
   return HttpStatus.INTERNAL_SERVER_ERROR;
 }
 
+// Helper to set date to end of day (23:59:59.999) to include all records from that day
+function endOfDay(date: Date): Date {
+  const result = new Date(date);
+  result.setUTCHours(23, 59, 59, 999);
+  return result;
+}
+
 @Controller('inventory/reports')
 @UseGuards(AuthGuard, RoleGuard, LocationGuard)
 export class InventoryReportsController {
@@ -47,7 +54,7 @@ export class InventoryReportsController {
       const report = await this.reportsService.getCOGSReport({
         locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
+        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
         groupByCategory: groupByCategory === 'true',
       });
 
@@ -112,7 +119,7 @@ export class InventoryReportsController {
       const report = await this.reportsService.getProfitMarginReport({
         locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
+        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
       });
 
       return {
@@ -145,7 +152,7 @@ export class InventoryReportsController {
       const report = await this.reportsService.getAdjustmentImpactReport({
         locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
+        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
       });
 
       return {
@@ -178,7 +185,7 @@ export class InventoryReportsController {
       const report = await this.reportsService.getReceivingSummaryReport({
         locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
+        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
       });
 
       return {
@@ -212,7 +219,7 @@ export class InventoryReportsController {
       const report = await this.reportsService.getProfitAndLossReport({
         locationId: targetLocationId,
         startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
+        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
       });
 
       return {
@@ -243,7 +250,10 @@ export class InventoryReportsController {
       const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
       const parsedStartDate = startDate ? new Date(startDate) : undefined;
-      const parsedEndDate = endDate ? new Date(endDate) : undefined;
+      // Use end of day for endDate to include all records from that day
+      // This fixes timezone issues where records created late in the day (local time)
+      // have UTC timestamps that fall on the next day
+      const parsedEndDate = endDate ? endOfDay(new Date(endDate)) : undefined;
 
       // Fetch all reports in parallel (including P&L for net profit)
       const [cogs, valuation, adjustments, receivings, profitLoss] = await Promise.all([
