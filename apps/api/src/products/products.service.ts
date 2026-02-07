@@ -585,7 +585,15 @@ export class ProductsService {
       include: {
         category: true,
         catalogMappings: {
-          where: locationId ? { locationId } : undefined,
+          where: locationId ? {
+            OR: [
+              { locationId },        // Location-specific mapping
+              { locationId: null },  // Global mapping (from Square sync)
+            ],
+          } : undefined,
+          orderBy: {
+            locationId: 'desc',  // Prefer location-specific (non-null) over global
+          },
           include: {
             location: true,
           },
@@ -603,7 +611,11 @@ export class ProductsService {
 
     // Transform products to include computed fields
     const transformedProducts = products.map((product) => {
-      const mapping = product.catalogMappings[0];
+      // Prefer location-specific mapping, fall back to global
+      const mapping = locationId 
+        ? (product.catalogMappings.find(m => m.locationId === locationId) 
+           || product.catalogMappings.find(m => m.locationId === null))
+        : product.catalogMappings[0];
       const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
       
       return {
@@ -631,7 +643,15 @@ export class ProductsService {
       include: {
         category: true,
         catalogMappings: {
-          where: locationId ? { locationId } : undefined,
+          where: locationId ? {
+            OR: [
+              { locationId },        // Location-specific mapping
+              { locationId: null },  // Global mapping (from Square sync)
+            ],
+          } : undefined,
+          orderBy: {
+            locationId: 'desc',  // Prefer location-specific (non-null) over global
+          },
           include: {
             location: true,
           },
@@ -652,7 +672,11 @@ export class ProductsService {
       throw new NotFoundException(`Product ${productId} not found`);
     }
 
-    const mapping = product.catalogMappings[0];
+    // Prefer location-specific mapping, fall back to global
+    const mapping = locationId 
+      ? (product.catalogMappings.find(m => m.locationId === locationId) 
+         || product.catalogMappings.find(m => m.locationId === null))
+      : product.catalogMappings[0];
     const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
     
     // Calculate average cost from inventory
