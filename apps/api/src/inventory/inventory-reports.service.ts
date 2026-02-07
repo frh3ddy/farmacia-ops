@@ -556,6 +556,8 @@ export class InventoryReportsService {
   }) {
     const { locationId, startDate, endDate } = options;
 
+    this.logger.log(`[ADJUSTMENT_REPORT] Fetching adjustments - locationId: ${locationId}, startDate: ${startDate?.toISOString()}, endDate: ${endDate?.toISOString()}`);
+
     const adjustments = await this.prisma.inventoryAdjustment.findMany({
       where: {
         ...(locationId && { locationId }),
@@ -566,6 +568,8 @@ export class InventoryReportsService {
         product: { select: { id: true, name: true } },
       },
     });
+
+    this.logger.log(`[ADJUSTMENT_REPORT] Found ${adjustments.length} adjustments`);
 
     // Group by type
     const byType = new Map<string, {
@@ -631,6 +635,8 @@ export class InventoryReportsService {
     const totalGain = adjustments
       .filter(a => a.quantity > 0)
       .reduce((sum, a) => sum.add(a.totalCost), new Prisma.Decimal(0));
+
+    this.logger.log(`[ADJUSTMENT_REPORT] Summary - totalAdjustments: ${adjustments.length}, totalLoss: ${totalLoss.toString()}, totalGain: ${totalGain.toString()}, netImpact: ${totalGain.sub(totalLoss).toString()}`);
 
     return {
       period: { startDate, endDate },
