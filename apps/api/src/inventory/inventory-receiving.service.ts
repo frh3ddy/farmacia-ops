@@ -117,7 +117,9 @@ export class InventoryReceivingService {
 
       // Call Square Inventory API - RECEIVE_STOCK increases inventory
       // batchCreateChanges is the current method name in Square SDK
-      await client.inventory.batchCreateChanges({
+      this.logger.log(`[SQUARE_SYNC] Syncing receiving: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${quantity}`);
+      
+      const response = await client.inventory.batchCreateChanges({
         idempotencyKey: randomUUID(),
         changes: [
           {
@@ -135,7 +137,7 @@ export class InventoryReceivingService {
         ],
       });
 
-      this.logger.log(`[SQUARE_SYNC] Successfully synced receiving to Square`);
+      this.logger.log(`[SQUARE_SYNC] Successfully synced receiving to Square. Response counts: ${JSON.stringify(response.counts || 'no counts')}`);
       return { synced: true };
 
     } catch (error) {
