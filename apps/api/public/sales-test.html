@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sales Testing - Farmacia Ops</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.6;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    header {
+      background: #1a73e8;
+      color: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+    }
+    
+    header h1 {
+      font-size: 24px;
+      margin-bottom: 5px;
+    }
+    
+    header p {
+      opacity: 0.9;
+      font-size: 14px;
+    }
+    
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .card h2 {
+      font-size: 18px;
+      margin-bottom: 15px;
+      color: #1a73e8;
+      border-bottom: 2px solid #e0e0e0;
+      padding-bottom: 10px;
+    }
+    
+    .form-group {
+      margin-bottom: 15px;
+    }
+    
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+    
+    select, input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    
+    select:focus, input:focus {
+      outline: none;
+      border-color: #1a73e8;
+    }
+    
+    button {
+      background: #1a73e8;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    button:hover {
+      background: #1557b0;
+    }
+    
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    
+    button.secondary {
+      background: #f5f5f5;
+      color: #333;
+      border: 1px solid #ddd;
+    }
+    
+    button.secondary:hover {
+      background: #e0e0e0;
+    }
+    
+    button.danger {
+      background: #dc3545;
+    }
+    
+    button.danger:hover {
+      background: #c82333;
+    }
+    
+    button.success {
+      background: #28a745;
+    }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    .product-list {
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+    }
+    
+    .product-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 15px;
+      border-bottom: 1px solid #e0e0e0;
+      transition: background 0.2s;
+    }
+    
+    .product-item:last-child {
+      border-bottom: none;
+    }
+    
+    .product-item:hover {
+      background: #f8f9fa;
+    }
+    
+    .product-item.selected {
+      background: #e3f2fd;
+    }
+    
+    .product-info {
+      flex: 1;
+    }
+    
+    .product-name {
+      font-weight: 600;
+      font-size: 14px;
+    }
+    
+    .product-details {
+      font-size: 12px;
+      color: #666;
+      margin-top: 2px;
+    }
+    
+    .product-stock {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    
+    .product-stock.low {
+      background: #fff3e0;
+      color: #ef6c00;
+    }
+    
+    .quantity-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: 15px;
+    }
+    
+    .quantity-control button {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      font-size: 18px;
+      border-radius: 50%;
+    }
+    
+    .quantity-control input {
+      width: 60px;
+      text-align: center;
+      padding: 6px;
+    }
+    
+    .cart {
+      background: #f8f9fa;
+      border-radius: 6px;
+      padding: 15px;
+    }
+    
+    .cart-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    
+    .cart-item:last-child {
+      border-bottom: none;
+    }
+    
+    .cart-total {
+      display: flex;
+      justify-content: space-between;
+      font-weight: 700;
+      font-size: 18px;
+      padding-top: 15px;
+      margin-top: 10px;
+      border-top: 2px solid #1a73e8;
+    }
+    
+    .status {
+      padding: 10px 15px;
+      border-radius: 6px;
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+    
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    
+    .status.info {
+      background: #cce5ff;
+      color: #004085;
+      border: 1px solid #b8daff;
+    }
+    
+    .status.warning {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeeba;
+    }
+    
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #1a73e8;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 10px;
+      vertical-align: middle;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #666;
+    }
+    
+    .empty-state svg {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 15px;
+      opacity: 0.5;
+    }
+    
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    
+    .badge.square {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+    
+    .badge.local {
+      background: #fce4ec;
+      color: #c2185b;
+    }
+    
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    
+    pre {
+      background: #263238;
+      color: #aed581;
+      padding: 15px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    .tab-buttons {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 15px;
+    }
+    
+    .tab-buttons button {
+      flex: 1;
+      background: #f5f5f5;
+      color: #333;
+      border: 1px solid #ddd;
+    }
+    
+    .tab-buttons button.active {
+      background: #1a73e8;
+      color: white;
+      border-color: #1a73e8;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Sales Testing Dashboard</h1>
+      <p>Test the sales webhook processing with real inventory data</p>
+    </header>
+    
+    <div id="status-container"></div>
+    
+    <div class="grid">
+      <!-- Left Column: Product Selection -->
+      <div>
+        <div class="card">
+          <h2>1. Select Location</h2>
+          <div class="form-group">
+            <label for="location-select">Location</label>
+            <select id="location-select" onchange="loadProducts()">
+              <option value="">-- Select a location --</option>
+            </select>
+          </div>
+          <div id="location-info" class="hidden">
+            <small id="location-square-id" style="color: #666;"></small>
+          </div>
+        </div>
+        
+        <div class="card">
+          <h2>2. Select Products</h2>
+          <div class="form-group">
+            <input type="text" id="product-search" placeholder="Search products..." oninput="filterProducts()">
+          </div>
+          <div id="products-loading" class="hidden">
+            <div class="loading"></div> Loading products...
+          </div>
+          <div id="products-container">
+            <div class="empty-state">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+              <p>Select a location to view products</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Right Column: Cart & Actions -->
+      <div>
+        <div class="card">
+          <h2>3. Review Cart</h2>
+          <div id="cart-container">
+            <div class="empty-state">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <p>Add products to cart</p>
+            </div>
+          </div>
+          <div id="cart-actions" class="actions hidden">
+            <button class="secondary" onclick="clearCart()">Clear Cart</button>
+            <button class="success" onclick="createTestSale()" id="create-sale-btn">
+              Create Test Sale
+            </button>
+          </div>
+        </div>
+        
+        <div class="card">
+          <h2>4. Results</h2>
+          <div class="tab-buttons">
+            <button class="active" onclick="showTab('response')">Response</button>
+            <button onclick="showTab('logs')">Logs</button>
+          </div>
+          <div id="tab-response">
+            <pre id="result-output">No results yet. Create a test sale to see results.</pre>
+          </div>
+          <div id="tab-logs" class="hidden">
+            <pre id="logs-output">Worker logs will appear here after processing...</pre>
+            <button class="secondary" onclick="checkQueueStatus()" style="margin-top: 10px;">
+              Check Queue Status
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // State
+    let locations = [];
+    let products = [];
+    let cart = [];
+    let authToken = localStorage.getItem('authToken') || '';
+    
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      checkAuth();
+    });
+    
+    function checkAuth() {
+      if (!authToken) {
+        authToken = prompt('Enter your auth token (JWT):');
+        if (authToken) {
+          localStorage.setItem('authToken', authToken);
+        }
+      }
+      if (authToken) {
+        loadLocations();
+      } else {
+        showStatus('Please provide an auth token to continue', 'warning');
+      }
+    }
+    
+    function showStatus(message, type = 'info') {
+      const container = document.getElementById('status-container');
+      container.innerHTML = `<div class="status ${type}">${message}</div>`;
+      setTimeout(() => {
+        container.innerHTML = '';
+      }, 5000);
+    }
+    
+    async function apiCall(endpoint, options = {}) {
+      const response = await fetch(endpoint, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+          ...options.headers,
+        },
+      });
+      
+      if (response.status === 401) {
+        localStorage.removeItem('authToken');
+        authToken = '';
+        showStatus('Auth token expired. Please refresh and enter a new token.', 'error');
+        throw new Error('Unauthorized');
+      }
+      
+      return response.json();
+    }
+    
+    async function loadLocations() {
+      try {
+        const result = await apiCall('/api/sales-test/locations');
+        if (result.success) {
+          locations = result.data;
+          const select = document.getElementById('location-select');
+          select.innerHTML = '<option value="">-- Select a location --</option>';
+          locations.forEach(loc => {
+            const hasSquare = loc.hasSquareId ? '(Square)' : '(No Square)';
+            select.innerHTML += `<option value="${loc.id}">${loc.name} ${hasSquare}</option>`;
+          });
+        } else {
+          showStatus(result.message || 'Failed to load locations', 'error');
+        }
+      } catch (error) {
+        showStatus('Failed to load locations: ' + error.message, 'error');
+      }
+    }
+    
+    async function loadProducts() {
+      const locationId = document.getElementById('location-select').value;
+      if (!locationId) {
+        document.getElementById('products-container').innerHTML = `
+          <div class="empty-state">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+            <p>Select a location to view products</p>
+          </div>
+        `;
+        return;
+      }
+      
+      // Show location info
+      const location = locations.find(l => l.id === locationId);
+      if (location) {
+        document.getElementById('location-info').classList.remove('hidden');
+        document.getElementById('location-square-id').textContent = 
+          location.squareId ? `Square ID: ${location.squareId}` : 'No Square ID';
+      }
+      
+      // Show loading
+      document.getElementById('products-loading').classList.remove('hidden');
+      document.getElementById('products-container').innerHTML = '';
+      
+      try {
+        const result = await apiCall(`/api/sales-test/products?locationId=${locationId}`);
+        document.getElementById('products-loading').classList.add('hidden');
+        
+        if (result.success) {
+          products = result.data;
+          renderProducts();
+          
+          if (result.summary) {
+            showStatus(
+              `Loaded ${result.summary.totalProducts} products ` +
+              `(${result.summary.withSquareMapping} with Square mapping, ` +
+              `${result.summary.totalInventoryUnits} total units)`,
+              'info'
+            );
+          }
+        } else {
+          showStatus(result.message || 'Failed to load products', 'error');
+        }
+      } catch (error) {
+        document.getElementById('products-loading').classList.add('hidden');
+        showStatus('Failed to load products: ' + error.message, 'error');
+      }
+    }
+    
+    function filterProducts() {
+      const search = document.getElementById('product-search').value.toLowerCase();
+      const filtered = products.filter(p => 
+        p.displayName.toLowerCase().includes(search) ||
+        (p.sku && p.sku.toLowerCase().includes(search))
+      );
+      renderProducts(filtered);
+    }
+    
+    function renderProducts(list = products) {
+      const container = document.getElementById('products-container');
+      
+      if (list.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p>No products found with inventory</p>
+          </div>
+        `;
+        return;
+      }
+      
+      container.innerHTML = `
+        <div class="product-list">
+          ${list.map(p => {
+            const inCart = cart.find(c => c.productId === p.id);
+            const stockClass = p.totalInventory < 10 ? 'low' : '';
+            const mappingBadge = p.hasSquareMapping 
+              ? '<span class="badge square">Square</span>'
+              : '<span class="badge local">Local Only</span>';
+            
+            return `
+              <div class="product-item ${inCart ? 'selected' : ''}" data-id="${p.id}">
+                <div class="product-info">
+                  <div class="product-name">${p.displayName} ${mappingBadge}</div>
+                  <div class="product-details">
+                    SKU: ${p.sku || 'N/A'} | 
+                    Price: $${p.sellingPrice?.toFixed(2) || '0.00'}
+                  </div>
+                </div>
+                <span class="product-stock ${stockClass}">${p.totalInventory} units</span>
+                <div class="quantity-control">
+                  <button onclick="updateCart('${p.id}', -1)" ${!inCart ? 'disabled' : ''}>-</button>
+                  <input type="number" value="${inCart?.quantity || 0}" min="0" max="${p.totalInventory}" 
+                    onchange="setCartQuantity('${p.id}', this.value)" style="width: 50px;">
+                  <button onclick="updateCart('${p.id}', 1)" ${!p.hasSquareMapping ? 'disabled title="Needs Square mapping"' : ''}>+</button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+    
+    function updateCart(productId, delta) {
+      const product = products.find(p => p.id === productId);
+      if (!product) return;
+      
+      if (!product.hasSquareMapping) {
+        showStatus('This product needs a Square catalog mapping before it can be sold', 'warning');
+        return;
+      }
+      
+      const existing = cart.find(c => c.productId === productId);
+      
+      if (existing) {
+        existing.quantity += delta;
+        if (existing.quantity <= 0) {
+          cart = cart.filter(c => c.productId !== productId);
+        } else if (existing.quantity > product.totalInventory) {
+          existing.quantity = product.totalInventory;
+          showStatus(`Maximum available: ${product.totalInventory}`, 'warning');
+        }
+      } else if (delta > 0) {
+        cart.push({
+          productId: product.id,
+          productName: product.displayName,
+          quantity: 1,
+          price: product.sellingPrice || 0,
+        });
+      }
+      
+      renderCart();
+      renderProducts();
+    }
+    
+    function setCartQuantity(productId, value) {
+      const qty = parseInt(value) || 0;
+      const product = products.find(p => p.id === productId);
+      if (!product) return;
+      
+      if (qty <= 0) {
+        cart = cart.filter(c => c.productId !== productId);
+      } else {
+        const existing = cart.find(c => c.productId === productId);
+        if (existing) {
+          existing.quantity = Math.min(qty, product.totalInventory);
+        } else if (product.hasSquareMapping) {
+          cart.push({
+            productId: product.id,
+            productName: product.displayName,
+            quantity: Math.min(qty, product.totalInventory),
+            price: product.sellingPrice || 0,
+          });
+        }
+      }
+      
+      renderCart();
+      renderProducts();
+    }
+    
+    function renderCart() {
+      const container = document.getElementById('cart-container');
+      const actions = document.getElementById('cart-actions');
+      
+      if (cart.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            <p>Add products to cart</p>
+          </div>
+        `;
+        actions.classList.add('hidden');
+        return;
+      }
+      
+      const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      
+      container.innerHTML = `
+        <div class="cart">
+          ${cart.map(item => `
+            <div class="cart-item">
+              <div>
+                <strong>${item.productName}</strong><br>
+                <small>${item.quantity} x $${item.price.toFixed(2)}</small>
+              </div>
+              <div>
+                <strong>$${(item.price * item.quantity).toFixed(2)}</strong>
+                <button class="secondary" onclick="removeFromCart('${item.productId}')" 
+                  style="margin-left: 10px; padding: 4px 8px;">X</button>
+              </div>
+            </div>
+          `).join('')}
+          <div class="cart-total">
+            <span>Total</span>
+            <span>$${total.toFixed(2)}</span>
+          </div>
+        </div>
+      `;
+      
+      actions.classList.remove('hidden');
+    }
+    
+    function removeFromCart(productId) {
+      cart = cart.filter(c => c.productId !== productId);
+      renderCart();
+      renderProducts();
+    }
+    
+    function clearCart() {
+      cart = [];
+      renderCart();
+      renderProducts();
+    }
+    
+    async function createTestSale() {
+      const locationId = document.getElementById('location-select').value;
+      if (!locationId) {
+        showStatus('Please select a location', 'warning');
+        return;
+      }
+      
+      if (cart.length === 0) {
+        showStatus('Please add products to cart', 'warning');
+        return;
+      }
+      
+      const btn = document.getElementById('create-sale-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span> Processing...';
+      
+      try {
+        const result = await apiCall('/api/sales-test/create', {
+          method: 'POST',
+          body: JSON.stringify({
+            locationId,
+            lineItems: cart.map(item => ({
+              productId: item.productId,
+              quantity: item.quantity,
+            })),
+          }),
+        });
+        
+        document.getElementById('result-output').textContent = JSON.stringify(result, null, 2);
+        
+        if (result.success) {
+          showStatus('Test sale created successfully! Check worker logs for processing.', 'success');
+          clearCart();
+          // Reload products to see updated inventory
+          setTimeout(() => loadProducts(), 1000);
+        } else {
+          showStatus(result.message || 'Failed to create test sale', 'error');
+        }
+      } catch (error) {
+        showStatus('Error: ' + error.message, 'error');
+        document.getElementById('result-output').textContent = JSON.stringify({ error: error.message }, null, 2);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Create Test Sale';
+      }
+    }
+    
+    async function checkQueueStatus() {
+      try {
+        const result = await apiCall('/api/sales-test/queue-status');
+        document.getElementById('logs-output').textContent = JSON.stringify(result, null, 2);
+      } catch (error) {
+        document.getElementById('logs-output').textContent = JSON.stringify({ error: error.message }, null, 2);
+      }
+    }
+    
+    function showTab(tab) {
+      document.querySelectorAll('.tab-buttons button').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      document.getElementById('tab-response').classList.toggle('hidden', tab !== 'response');
+      document.getElementById('tab-logs').classList.toggle('hidden', tab !== 'logs');
+    }
+    
+    // Keyboard shortcut to reset token
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+        localStorage.removeItem('authToken');
+        authToken = '';
+        checkAuth();
+      }
+    });
+  </script>
+</body>
+</html>
