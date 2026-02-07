@@ -524,7 +524,7 @@ export class ProductsService {
   ): Promise<void> {
     const client = this.getSquareClient();
 
-    // First, fetch the current object to get its version
+    // First, fetch the current object to get its version and existing data
     const retrieveResponse = await client.catalog.object.get({
       objectId: variationId,
     });
@@ -539,35 +539,53 @@ export class ProductsService {
       throw new Error(`Invalid variation data for ${variationId}`);
     }
 
-    // Build the upsert object
+    // Build the upsert object - PRESERVE all existing fields, only update price
+    // This is critical to avoid resetting trackInventory and other settings
+    const updatedVariationData: any = {
+      ...variationData,  // Preserve ALL existing fields (trackInventory, locationOverrides, etc.)
+      pricingType: 'FIXED_PRICING',
+      priceMoney: {
+        amount: this.toCents(newPrice),
+        currency: CURRENCY,
+      },
+    };
+
     const upsertObject: any = {
       type: 'ITEM_VARIATION',
       id: variationId,
       version: currentObject.version,
-      itemVariationData: {
-        itemId: variationData.itemId,
-        name: variationData.name || 'Regular',
-        sku: variationData.sku,
-        pricingType: 'FIXED_PRICING',
-        priceMoney: {
-          amount: this.toCents(newPrice),
-          currency: CURRENCY,
-        },
-      },
+      itemVariationData: updatedVariationData,
     };
 
-    // Determine location scope
+    // Preserve existing location settings from the current object
+    if (currentObject.presentAtAllLocations !== undefined) {
+      upsertObject.presentAtAllLocations = currentObject.presentAtAllLocations;
+    }
+    if (currentObject.presentAtLocationIds) {
+      upsertObject.presentAtLocationIds = currentObject.presentAtLocationIds;
+    }
+    if (currentObject.absentAtLocationIds) {
+      upsertObject.absentAtLocationIds = currentObject.absentAtLocationIds;
+    }
+
+    // Override location scope only if explicitly specified
     if (applyToAllLocations) {
       // Apply to all current and future locations
       upsertObject.presentAtAllLocations = true;
+      delete upsertObject.presentAtLocationIds;
+      delete upsertObject.absentAtLocationIds;
       this.logger.log(`[PRODUCT] Updating price for variation ${variationId} at ALL locations`);
     } else if (squareLocationId) {
       // Apply to specific location only
       upsertObject.presentAtLocationIds = [squareLocationId];
       upsertObject.presentAtAllLocations = false;
+      delete upsertObject.absentAtLocationIds;
       this.logger.log(`[PRODUCT] Updating price for variation ${variationId} at location ${squareLocationId}`);
+    } else {
+      this.logger.log(`[PRODUCT] Updating price for variation ${variationId} (preserving existing location settings)`);
     }
-    // If neither is set, don't specify location (keeps existing location settings)
+
+    this.logger.log(`[PRODUCT] Preserving trackInventory=${variationData.trackInventory}, locationOverrides=${JSON.stringify(variationData.locationOverrides || [])}`);
 
     try {
       // Update the variation with new price
