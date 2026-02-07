@@ -5,14 +5,15 @@ import { UnmappedVariationError, ProductNotFoundError } from './errors';
  * Map a Square variation ID to a Product ID using CatalogMapping table
  * 
  * Algorithm:
- * 1. Look up location-specific mapping (squareVariationId + locationId)
- * 2. If not found, look up global mapping (squareVariationId + locationId = null)
- * 3. Validate mapping exists (throw UnmappedVariationError if not)
- * 4. Validate product exists (throw ProductNotFoundError if not)
- * 5. Return productId
+ * 1. Convert Square location ID to internal location ID
+ * 2. Look up location-specific mapping (squareVariationId + locationId)
+ * 3. If not found, look up global mapping (squareVariationId + locationId = null)
+ * 4. Validate mapping exists (throw UnmappedVariationError if not)
+ * 5. Validate product exists (throw ProductNotFoundError if not)
+ * 6. Return productId
  * 
  * @param squareVariationId - ITEM_VARIATION.id from Square
- * @param locationId - Location ID (Square location_id string)
+ * @param squareLocationId - Square location_id string (e.g., "LKTAWFNPD1V05")
  * @param prismaClient - Prisma client instance (can be transaction client)
  * @returns Product ID (UUID string)
  * @throws UnmappedVariationError if mapping not found
@@ -20,21 +21,36 @@ import { UnmappedVariationError, ProductNotFoundError } from './errors';
  */
 export async function mapVariationToProduct(
   squareVariationId: string,
-  locationId: string,
+  squareLocationId: string,
   prismaClient: Omit<
     PrismaClient,
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
   >,
 ): Promise<string> {
-  // Step 1: Try location-specific mapping first
-  let mapping = await prismaClient.catalogMapping.findFirst({
-    where: {
-      squareVariationId: squareVariationId,
-      locationId: locationId,
-    },
+  // Step 1: Convert Square location ID to internal location ID
+  const location = await prismaClient.location.findUnique({
+    where: { squareId: squareLocationId },
+    select: { id: true },
+  });
+  
+  const internalLocationId = location?.id || null;
+  
+  console.log('[DEBUG] [CATALOG_MAPPER] Location lookup:', {
+    squareLocationId,
+    internalLocationId,
   });
 
-  // Step 2: If not found, try global mapping (locationId is null)
+  // Step 2: Try location-specific mapping first (using internal location ID)
+  let mapping = internalLocationId
+    ? await prismaClient.catalogMapping.findFirst({
+        where: {
+          squareVariationId: squareVariationId,
+          locationId: internalLocationId,
+        },
+      })
+    : null;
+
+  // Step 3: If not found, try global mapping (locationId is null)
   if (!mapping) {
     mapping = await prismaClient.catalogMapping.findFirst({
       where: {
@@ -44,16 +60,23 @@ export async function mapVariationToProduct(
     });
   }
 
-  // Step 3: Validate mapping exists
+  console.log('[DEBUG] [CATALOG_MAPPER] Mapping lookup result:', {
+    squareVariationId,
+    internalLocationId,
+    mappingFound: !!mapping,
+    mappingId: mapping?.id,
+  });
+
+  // Step 4: Validate mapping exists
   if (!mapping) {
     throw new UnmappedVariationError(
       squareVariationId,
-      locationId,
+      squareLocationId,
       'Square variation is not mapped to a product. Please run catalog sync.',
     );
   }
 
-  // Step 4: Validate product exists
+  // Step 5: Validate product exists
   const product = await prismaClient.product.findUnique({
     where: { id: mapping.productId },
   });
@@ -66,7 +89,7 @@ export async function mapVariationToProduct(
     );
   }
 
-  // Step 5: Return product ID
+  // Step 6: Return product ID
   return product.id;
 }
 
