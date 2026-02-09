@@ -278,6 +278,7 @@ export class InventoryReportsService {
     const now = new Date();
 
     // Get all inventory batches with positive quantity
+    // Include receiving metadata for batch-level detail (lot#, expiry, supplier)
     const inventoryBatches = await this.prisma.inventory.findMany({
       where: {
         quantity: { gt: 0 },
@@ -287,6 +288,17 @@ export class InventoryReportsService {
       include: {
         product: {
           select: { id: true, name: true, sku: true },
+        },
+        createdByReceiving: {
+          select: {
+            batchNumber: true,
+            expiryDate: true,
+            manufacturingDate: true,
+            invoiceNumber: true,
+            supplier: {
+              select: { id: true, name: true },
+            },
+          },
         },
       },
       orderBy: [{ productId: 'asc' }, { receivedAt: 'asc' }],
@@ -353,6 +365,9 @@ export class InventoryReportsService {
           agingSummary.over90Days.value = agingSummary.over90Days.value.add(value);
         }
 
+        // Pull batch-level metadata from the linked receiving record
+        const receiving = b.createdByReceiving;
+
         return {
           batchId: b.id,
           quantity: b.quantity,
@@ -360,6 +375,13 @@ export class InventoryReportsService {
           value: value.toString(),
           receivedAt: b.receivedAt,
           age: ageDays,
+          source: b.source ?? null,           // "PURCHASE", "OPENING_BALANCE", "ADJUSTMENT"
+          batchNumber: receiving?.batchNumber ?? null,
+          expiryDate: receiving?.expiryDate ?? null,
+          manufacturingDate: receiving?.manufacturingDate ?? null,
+          invoiceNumber: receiving?.invoiceNumber ?? null,
+          supplierId: receiving?.supplier?.id ?? null,
+          supplierName: receiving?.supplier?.name ?? null,
         };
       });
 
