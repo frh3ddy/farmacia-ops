@@ -153,6 +153,67 @@ export class ProductsController {
   }
 
   /**
+   * Get all products available from a specific supplier (for purchase orders / shopping list)
+   * GET /products/supplier-catalog/:supplierId
+   * Returns products with current cost, stock levels, and preferred status
+   */
+  @Get('supplier-catalog/:supplierId')
+  @Roles('OWNER', 'MANAGER')
+  async getSupplierCatalog(
+    @Param('supplierId') supplierId: string,
+    @Query('locationId') locationId: string,
+    @Req() req: any,
+  ) {
+    try {
+      const targetLocationId = locationId || req.currentLocation?.locationId;
+
+      // Get all products this supplier provides
+      const supplierProducts = await this.prisma.supplierProduct.findMany({
+        where: { supplierId },
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              squareProductName: true,
+              squareVariationName: true,
+              squareImageUrl: true,
+              inventories: targetLocationId
+                ? { where: { locationId: targetLocationId } }
+                : true,
+            },
+          },
+        },
+        orderBy: {
+          product: { name: 'asc' },
+        },
+      });
+
+      const products = supplierProducts.map((sp) => {
+        const totalStock = sp.product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
+        return {
+          productId: sp.product.id,
+          productName: sp.product.squareProductName || sp.product.name,
+          sku: sp.product.sku,
+          imageUrl: sp.product.squareImageUrl,
+          lastCost: sp.cost.toString(),
+          isPreferred: sp.isPreferred,
+          notes: sp.notes,
+          currentStock: totalStock,
+        };
+      });
+
+      return { success: true, products };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to fetch supplier catalog: ${getErrorMessage(error)}` },
+        getErrorStatus(error),
+      );
+    }
+  }
+
+  /**
    * Get suppliers for a product (from SupplierProduct table)
    * GET /products/:id/suppliers
    * Returns current cost per supplier, preferred status, and notes
