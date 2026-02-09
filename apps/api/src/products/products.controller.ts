@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { ProductsService, CreateProductInput, UpdatePriceInput } from './products.service';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { PrismaService } from '../prisma/prisma.service';
 
 // DTOs
 interface CreateProductDto {
@@ -52,7 +53,10 @@ function getErrorStatus(error: unknown): number {
 @Controller('products')
 @UseGuards(AuthGuard, RoleGuard, LocationGuard)
 export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /**
    * Create a new product
@@ -149,9 +153,125 @@ export class ProductsController {
   }
 
   /**
+   * Get suppliers for a product (from SupplierProduct table)
+   * GET /products/:id/suppliers
+   * Returns current cost per supplier, preferred status, and notes
+   */
+  @Get(':id/suppliers')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async getProductSuppliers(@Param('id') productId: string) {
+    try {
+      const supplierProducts = await this.prisma.supplierProduct.findMany({
+        where: { productId },
+        include: {
+          supplier: {
+            select: {
+              id: true,
+              name: true,
+              contactInfo: true,
+              isActive: true,
+            },
+          },
+        },
+        orderBy: {
+          supplier: { name: 'asc' },
+        },
+      });
+
+      const suppliers = supplierProducts.map((sp) => ({
+        id: sp.supplier.id,
+        name: sp.supplier.name,
+        contactInfo: sp.supplier.contactInfo,
+        isActive: sp.supplier.isActive,
+        cost: sp.cost.toString(),
+        isPreferred: sp.isPreferred,
+        notes: sp.notes,
+      }));
+
+      return { success: true, suppliers };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to fetch product suppliers: ${getErrorMessage(error)}` },
+        getErrorStatus(error),
+      );
+    }
+  }
+
+  /**
+   * Get cost history for a product across all suppliers (from SupplierCostHistory table)
+   * GET /products/:id/cost-history
+   * Returns cost timeline grouped by supplier
+   */
+  @Get(':id/cost-history')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async getProductCostHistory(@Param('id') productId: string) {
+    try {
+      const costHistories = await this.prisma.supplierCostHistory.findMany({
+        where: { productId },
+        include: {
+          supplier: {
+            select: { id: true, name: true },
+          },
+        },
+        orderBy: [
+          { supplier: { name: 'asc' } },
+          { effectiveAt: 'desc' },
+        ],
+      });
+
+      // Group by supplier
+      const groupedBySupplier = new Map<
+        string,
+        Array<{
+          id: string;
+          cost: string;
+          effectiveAt: string;
+          createdAt: string;
+          source: string;
+          isCurrent: boolean;
+        }>
+      >();
+
+      for (const entry of costHistories) {
+        const supplierId = entry.supplierId;
+        if (!groupedBySupplier.has(supplierId)) {
+          groupedBySupplier.set(supplierId, []);
+        }
+        groupedBySupplier.get(supplierId)!.push({
+          id: entry.id,
+          cost: entry.unitCost.toString(),
+          effectiveAt: entry.effectiveAt.toISOString(),
+          createdAt: entry.createdAt.toISOString(),
+          source: entry.source,
+          isCurrent: entry.isCurrent,
+        });
+      }
+
+      // Convert to array format with supplier info
+      const suppliers = Array.from(groupedBySupplier.entries()).map(([supplierId, history]) => {
+        const firstEntry = costHistories.find((e) => e.supplierId === supplierId);
+        return {
+          supplierId,
+          supplierName: firstEntry?.supplier.name || 'Unknown',
+          costHistory: history,
+        };
+      });
+
+      return { success: true, suppliers };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to fetch product cost history: ${getErrorMessage(error)}` },
+        getErrorStatus(error),
+      );
+    }
+  }
+
+  /**
    * Get single product
    * GET /products/:id
    * Roles: All authenticated users
+   * NOTE: Must be AFTER /products/:id/suppliers and /products/:id/cost-history
+   * to prevent :id from catching those sub-routes
    */
   @Get(':id')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
