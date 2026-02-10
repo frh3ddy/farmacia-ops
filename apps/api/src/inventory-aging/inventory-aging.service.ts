@@ -720,5 +720,180 @@ export class InventoryAgingService {
 
     return signals;
   }
+
+  /**
+   * Get products with batches expiring within a given number of days.
+   * Queries InventoryReceiving (which has expiryDate) joined with Inventory (which has remaining quantity).
+   * Groups by product for a product-level view.
+   * 
+   * @param locationId Optional filter by location
+   * @param withinDays Number of days threshold (default 90)
+   * @param includeExpired Whether to include already-expired batches (default true)
+   */
+  async getExpiringProducts(
+    locationId?: string,
+    withinDays = 90,
+    includeExpired = true,
+  ): Promise<ExpiringProductAnalysis[]> {
+    const now = new Date();
+    const thresholdDate = new Date(now.getTime() + withinDays * 24 * 60 * 60 * 1000);
+
+    // Build the date filter: expiry is before threshold date
+    const expiryFilter: any = {
+      lte: thresholdDate,
+    };
+    // Optionally exclude already-expired batches
+    if (!includeExpired) {
+      expiryFilter.gte = now;
+    }
+
+    // Query receivings that have an expiry date within the threshold
+    // and whose linked inventory batch still has quantity > 0
+    const receivings = await this.prisma.inventoryReceiving.findMany({
+      where: {
+        expiryDate: expiryFilter,
+        inventoryBatch: {
+          quantity: { gt: 0 },
+          ...(locationId && { locationId }),
+        },
+      },
+      include: {
+        product: {
+          select: { id: true, name: true, sku: true, categoryId: true },
+        },
+        supplier: {
+          select: { id: true, name: true },
+        },
+        inventoryBatch: {
+          select: { id: true, quantity: true, unitCost: true, receivedAt: true },
+        },
+      },
+      orderBy: {
+        expiryDate: 'asc', // Soonest-expiring first
+      },
+    });
+
+    // Group by product
+    const productMap = new Map<string, {
+      product: { id: string; name: string; sku: string | null; categoryId: string | null };
+      batches: ExpiringBatchInfo[];
+    }>();
+
+    for (const rec of receivings) {
+      const batch = rec.inventoryBatch;
+      const daysUntilExpiry = Math.floor(
+        (rec.expiryDate!.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      const isExpired = rec.expiryDate! < now;
+      const cashValue = new Decimal(batch.quantity).mul(batch.unitCost);
+
+      const batchInfo: ExpiringBatchInfo = {
+        batchId: batch.id,
+        receivingId: rec.id,
+        quantity: batch.quantity,
+        unitCost: batch.unitCost,
+        cashValue,
+        expiryDate: rec.expiryDate!,
+        daysUntilExpiry,
+        isExpired,
+        batchNumber: rec.batchNumber,
+        supplierName: rec.supplier?.name ?? null,
+        receivedAt: batch.receivedAt,
+      };
+
+      const existing = productMap.get(rec.productId);
+      if (existing) {
+        existing.batches.push(batchInfo);
+      } else {
+        productMap.set(rec.productId, {
+          product: rec.product,
+          batches: [batchInfo],
+        });
+      }
+    }
+
+    // Build product-level analyses
+    const analyses: ExpiringProductAnalysis[] = [];
+    for (const [productId, data] of productMap) {
+      const totalUnits = data.batches.reduce((sum, b) => sum + b.quantity, 0);
+      const totalCashAtRisk = data.batches.reduce(
+        (sum, b) => sum.add(b.cashValue),
+        new Decimal(0),
+      );
+      const expiredBatches = data.batches.filter((b) => b.isExpired);
+      const soonestExpiry = data.batches[0]; // Already sorted by expiryDate asc
+
+      // Severity: CRITICAL if any batch is already expired,
+      //           HIGH if soonest batch expires within 30 days,
+      //           MEDIUM if within 60 days,
+      //           LOW otherwise
+      let severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+      if (expiredBatches.length > 0) {
+        severity = 'CRITICAL';
+      } else if (soonestExpiry.daysUntilExpiry <= 30) {
+        severity = 'HIGH';
+      } else if (soonestExpiry.daysUntilExpiry <= 60) {
+        severity = 'MEDIUM';
+      } else {
+        severity = 'LOW';
+      }
+
+      analyses.push({
+        productId,
+        productName: data.product.name,
+        sku: data.product.sku,
+        totalUnits,
+        totalCashAtRisk,
+        batchCount: data.batches.length,
+        expiredCount: expiredBatches.length,
+        soonestExpiryDate: soonestExpiry.expiryDate,
+        soonestDaysUntilExpiry: soonestExpiry.daysUntilExpiry,
+        severity,
+        batches: data.batches,
+      });
+    }
+
+    // Sort: CRITICAL first, then HIGH, then by soonest expiry
+    const severityOrder = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+    analyses.sort((a, b) => {
+      const sevDiff = severityOrder[a.severity] - severityOrder[b.severity];
+      if (sevDiff !== 0) return sevDiff;
+      return a.soonestDaysUntilExpiry - b.soonestDaysUntilExpiry;
+    });
+
+    return analyses;
+  }
+}
+
+// ============================================================================
+// Expiring Products Types
+// ============================================================================
+
+export interface ExpiringBatchInfo {
+  batchId: string;
+  receivingId: string;
+  quantity: number;
+  unitCost: Decimal;
+  cashValue: Decimal;
+  expiryDate: Date;
+  daysUntilExpiry: number;
+  isExpired: boolean;
+  batchNumber: string | null;
+  supplierName: string | null;
+  receivedAt: Date;
+}
+
+export interface ExpiringProductAnalysis {
+  productId: string;
+  productName: string;
+  sku: string | null;
+  totalUnits: number;
+  totalCashAtRisk: Decimal;
+  batchCount: number;
+  expiredCount: number;
+  soonestExpiryDate: Date;
+  soonestDaysUntilExpiry: number;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  batches: ExpiringBatchInfo[];
 }
 

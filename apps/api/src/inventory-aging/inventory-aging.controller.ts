@@ -339,6 +339,74 @@ export class InventoryAgingController {
     }
   }
 
+  @Get('expiring')
+  async getExpiringProducts(
+    @Query('locationId') locationId?: string,
+    @Query('withinDays') withinDays?: string,
+    @Query('includeExpired') includeExpired?: string,
+  ) {
+    try {
+      const normalizedLocationId = locationId?.trim() || undefined;
+      const days = withinDays ? parseInt(withinDays, 10) : 90;
+      const expired = includeExpired !== 'false'; // default true
+
+      const analyses = await this.inventoryAgingService.getExpiringProducts(
+        normalizedLocationId,
+        days,
+        expired,
+      );
+
+      return {
+        products: analyses.map((product) => ({
+          productId: product.productId,
+          productName: product.productName,
+          sku: product.sku,
+          totalUnits: product.totalUnits,
+          totalCashAtRisk: product.totalCashAtRisk.toNumber(),
+          batchCount: product.batchCount,
+          expiredCount: product.expiredCount,
+          soonestExpiryDate: product.soonestExpiryDate,
+          soonestDaysUntilExpiry: product.soonestDaysUntilExpiry,
+          severity: product.severity,
+          batches: product.batches.map((batch) => ({
+            batchId: batch.batchId,
+            receivingId: batch.receivingId,
+            quantity: batch.quantity,
+            unitCost: batch.unitCost.toNumber(),
+            cashValue: batch.cashValue.toNumber(),
+            expiryDate: batch.expiryDate,
+            daysUntilExpiry: batch.daysUntilExpiry,
+            isExpired: batch.isExpired,
+            batchNumber: batch.batchNumber,
+            supplierName: batch.supplierName,
+            receivedAt: batch.receivedAt,
+          })),
+        })),
+        total: analyses.length,
+        summary: {
+          totalProducts: analyses.length,
+          totalExpiredBatches: analyses.reduce((sum, p) => sum + p.expiredCount, 0),
+          totalCashAtRisk: analyses
+            .reduce((sum, p) => sum + p.totalCashAtRisk.toNumber(), 0),
+          criticalCount: analyses.filter((p) => p.severity === 'CRITICAL').length,
+          highCount: analyses.filter((p) => p.severity === 'HIGH').length,
+        },
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      console.error('[INVENTORY_AGING] Error getting expiring products:', errorMessage);
+      throw new HttpException(
+        {
+          success: false,
+          message: `Failed to get expiring products: ${errorMessage}`,
+          error: errorMessage,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   @Post('clear-cache')
   async clearCache(
     @Query('locationId') locationId?: string,

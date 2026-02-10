@@ -1,11 +1,13 @@
 import {
   Controller,
   Get,
+  Param,
   Query,
   Req,
   HttpException,
   HttpStatus,
   UseGuards,
+  NotFoundException,
 } from '@nestjs/common';
 import { InventoryReportsService } from './inventory-reports.service';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
@@ -327,6 +329,37 @@ export class InventoryReportsController {
     } catch (error) {
       throw new HttpException(
         { success: false, message: getErrorMessage(error) || 'Failed to get dashboard' },
+        getErrorStatus(error)
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Batch Detail - Full history for a single FIFO batch
+  // --------------------------------------------------------------------------
+  @Get('batch/:batchId')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async getBatchDetail(@Param('batchId') batchId: string) {
+    try {
+      const detail = await this.reportsService.getBatchDetail(batchId);
+
+      if (!detail) {
+        throw new NotFoundException(`Batch ${batchId} not found`);
+      }
+
+      return {
+        success: true,
+        data: detail,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new HttpException(
+          { success: false, message: error.message },
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      throw new HttpException(
+        { success: false, message: getErrorMessage(error) || 'Failed to get batch detail' },
         getErrorStatus(error)
       );
     }

@@ -933,4 +933,159 @@ export class InventoryReportsService {
       },
     };
   }
+
+  // ============================================================================
+  // Batch Detail - Full history for a single inventory batch
+  // ============================================================================
+
+  async getBatchDetail(batchId: string) {
+    // Get the batch with all related data
+    const batch = await this.prisma.inventory.findUnique({
+      where: { id: batchId },
+      include: {
+        product: {
+          select: { id: true, name: true, sku: true },
+        },
+        location: {
+          select: { id: true, name: true },
+        },
+        // The receiving that created this batch
+        createdByReceiving: {
+          include: {
+            supplier: {
+              select: { id: true, name: true },
+            },
+          },
+        },
+        // The adjustment that created this batch (if any)
+        createdByAdjustment: true,
+        // All consumption records (FIFO audit trail)
+        consumptions: {
+          include: {
+            saleItem: {
+              include: {
+                sale: {
+                  select: { id: true, squareId: true, createdAt: true, totalRevenue: true },
+                },
+              },
+            },
+            adjustment: {
+              select: {
+                id: true,
+                type: true,
+                reason: true,
+                notes: true,
+                adjustedAt: true,
+                adjustedBy: true,
+              },
+            },
+          },
+          orderBy: {
+            consumedAt: 'asc' as const,
+          },
+        },
+      },
+    });
+
+    if (!batch) {
+      return null;
+    }
+
+    // Calculate derived data
+    const now = new Date();
+    const ageMs = now.getTime() - batch.receivedAt.getTime();
+    const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+    const currentValue = batch.unitCost.mul(batch.quantity);
+    const receiving = batch.createdByReceiving;
+    const originalQuantity = receiving
+      ? receiving.quantity
+      : (batch.createdByAdjustment?.quantity ?? batch.quantity);
+    const totalConsumed = batch.consumptions.reduce(
+      (sum, c) => sum + c.quantity,
+      0,
+    );
+
+    return {
+      // Core batch data
+      batchId: batch.id,
+      productId: batch.productId,
+      productName: batch.product.name,
+      productSku: batch.product.sku,
+      locationId: batch.locationId,
+      locationName: batch.location.name,
+      quantity: batch.quantity,
+      unitCost: batch.unitCost.toString(),
+      currentValue: currentValue.toString(),
+      receivedAt: batch.receivedAt,
+      ageDays,
+      source: batch.source,
+
+      // Original quantity tracking
+      originalQuantity,
+      totalConsumed,
+      remainingPercent:
+        originalQuantity > 0
+          ? ((batch.quantity / originalQuantity) * 100).toFixed(1)
+          : '100.0',
+
+      // Receiving metadata (if created by receiving)
+      receiving: receiving
+        ? {
+            id: receiving.id,
+            batchNumber: receiving.batchNumber,
+            expiryDate: receiving.expiryDate,
+            manufacturingDate: receiving.manufacturingDate,
+            invoiceNumber: receiving.invoiceNumber,
+            supplierId: receiving.supplier?.id ?? null,
+            supplierName: receiving.supplier?.name ?? null,
+            receivedBy: receiving.receivedBy,
+            notes: receiving.notes,
+            receivedAt: receiving.receivedAt,
+          }
+        : null,
+
+      // Adjustment metadata (if created by adjustment)
+      adjustment: batch.createdByAdjustment
+        ? {
+            id: batch.createdByAdjustment.id,
+            type: batch.createdByAdjustment.type,
+            reason: batch.createdByAdjustment.reason,
+            notes: batch.createdByAdjustment.notes,
+            adjustedAt: batch.createdByAdjustment.adjustedAt,
+            adjustedBy: batch.createdByAdjustment.adjustedBy,
+          }
+        : null,
+
+      // Consumption history (FIFO audit trail)
+      consumptions: batch.consumptions.map((c) => ({
+        id: c.id,
+        quantity: c.quantity,
+        unitCost: c.unitCost.toString(),
+        totalCost: c.totalCost.toString(),
+        consumedAt: c.consumedAt,
+        // What consumed it
+        type: c.saleItemId ? 'SALE' : c.adjustmentId ? 'ADJUSTMENT' : 'UNKNOWN',
+        sale: c.saleItem
+          ? {
+              saleId: c.saleItem.sale.id,
+              squareId: c.saleItem.sale.squareId,
+              saleDate: c.saleItem.sale.createdAt,
+              itemQuantity: c.saleItem.quantity,
+              itemPrice: c.saleItem.price.toString(),
+            }
+          : null,
+        adjustment: c.adjustment
+          ? {
+              adjustmentId: c.adjustment.id,
+              type: c.adjustment.type,
+              reason: c.adjustment.reason,
+              adjustedAt: c.adjustment.adjustedAt,
+            }
+          : null,
+      })),
+
+      // Timeline: ordered events from creation to current state
+      consumptionCount: batch.consumptions.length,
+    };
+  }
 }
