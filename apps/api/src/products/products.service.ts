@@ -755,7 +755,7 @@ export class ProductsService {
     // Ensure MIME type is one Square accepts
     const allowedMimes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/gif'];
     const safeMime = allowedMimes.includes(mimeType) ? mimeType : 'image/jpeg';
-    const imageFile = new Blob([new Uint8Array(imageBuffer.buffer, imageBuffer.byteOffset, imageBuffer.byteLength)], { type: safeMime });
+    const imageFile = new Blob([new Uint8Array(imageBuffer)], { type: safeMime });
 
     const response = await client.catalog.images.create({
       request: {
