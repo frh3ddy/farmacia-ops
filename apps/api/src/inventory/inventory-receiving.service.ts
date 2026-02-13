@@ -227,6 +227,29 @@ export class InventoryReceivingService {
 
       // 3. Update supplier product cost if supplier provided
       if (input.supplierId) {
+        // Check if this supplier is already the preferred one for this product
+        const existingPreferred = await tx.supplierProduct.findFirst({
+          where: {
+            productId: input.productId,
+            isPreferred: true,
+          },
+          select: { supplierId: true },
+        });
+
+        const isNewPreferred = !existingPreferred || existingPreferred.supplierId !== input.supplierId;
+
+        // If the receiving supplier is different from current preferred,
+        // clear the old preferred flag so the new supplier becomes preferred
+        if (isNewPreferred) {
+          await tx.supplierProduct.updateMany({
+            where: {
+              productId: input.productId,
+              isPreferred: true,
+            },
+            data: { isPreferred: false },
+          });
+        }
+
         await tx.supplierProduct.upsert({
           where: {
             supplierId_productId: {
@@ -243,11 +266,12 @@ export class InventoryReceivingService {
           },
           update: {
             cost: new Prisma.Decimal(input.unitCost),
+            isPreferred: true,
           },
         });
 
         // 4. Add to supplier cost history
-        await tx.supplierCostHistory.create({
+        const costHistoryEntry = await tx.supplierCostHistory.create({
           data: {
             productId: input.productId,
             supplierId: input.supplierId,
@@ -264,7 +288,7 @@ export class InventoryReceivingService {
             productId: input.productId,
             supplierId: input.supplierId,
             isCurrent: true,
-            id: { not: receiving.id }, // Exclude the one we just created
+            id: { not: costHistoryEntry.id }, // Exclude the one we just created
           },
           data: { isCurrent: false },
         });

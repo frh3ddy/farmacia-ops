@@ -11,7 +11,11 @@ import {
   HttpStatus,
   HttpException,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ProductsService, CreateProductInput, UpdatePriceInput } from './products.service';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
@@ -49,6 +53,18 @@ function getErrorStatus(error: unknown): number {
   }
   return HttpStatus.INTERNAL_SERVER_ERROR;
 }
+
+// Multer memory storage — files are never written to disk.
+// The buffer is sent directly to Square and the Square-hosted URL is stored.
+const productImageMemoryStorage = memoryStorage();
+
+const imageFileFilter = (_req: any, file: any, cb: any) => {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new HttpException('Only image files are allowed', HttpStatus.BAD_REQUEST), false);
+  }
+};
 
 @Controller('products')
 @UseGuards(AuthGuard, RoleGuard, LocationGuard)
@@ -147,6 +163,56 @@ export class ProductsController {
           success: false,
           message: getErrorMessage(error),
         },
+        getErrorStatus(error),
+      );
+    }
+  }
+
+  /**
+   * Upload or replace product image
+   * POST /products/:id/image
+   * Roles: OWNER, MANAGER
+   * Accepts multipart/form-data with an "image" field
+   */
+  @Post(':id/image')
+  @Roles('OWNER', 'MANAGER')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: productImageMemoryStorage,
+      fileFilter: imageFileFilter,
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+    }),
+  )
+  async uploadProductImage(
+    @Param('id') productId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    try {
+      if (!file || !file.buffer) {
+        throw new HttpException(
+          { success: false, message: 'No image file provided' },
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      // Send the in-memory buffer directly to Square — no disk writes
+      const result = await this.productsService.uploadProductImage(
+        productId,
+        file.buffer,
+        file.mimetype,
+      );
+
+      return {
+        success: true,
+        imageUrl: result.imageUrl,
+        squareSynced: result.squareSynced,
+        squareImageId: result.squareImageId,
+        message: result.message,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        { success: false, message: `Failed to upload image: ${getErrorMessage(error)}` },
         getErrorStatus(error),
       );
     }

@@ -44,6 +44,13 @@ export interface PriceUpdateResult {
   message: string;
 }
 
+export interface ImageUploadResult {
+  imageUrl: string;
+  squareSynced: boolean;
+  squareImageId?: string;
+  message: string;
+}
+
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
@@ -627,6 +634,152 @@ export class ProductsService {
       this.logger.error(`[PRODUCT] Square price update failed: ${errorString}`);
       throw error;
     }
+  }
+
+  /**
+   * Upload product image — stream directly to Square, no disk storage.
+   * The image buffer is sent to Square's Catalog API and the returned
+   * Square-hosted URL is persisted in the database.
+   */
+  async uploadProductImage(
+    productId: string,
+    imageBuffer: Buffer,
+    mimeType: string,
+  ): Promise<ImageUploadResult> {
+    // Verify product exists
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        catalogMappings: true,
+      },
+    });
+    if (!product) {
+      throw new NotFoundException(`Product ${productId} not found`);
+    }
+
+    let squareSynced = false;
+    let squareImageId: string | undefined;
+    let finalImageUrl: string | null = null;
+
+    // Find the Square variation ID (skip local-only mappings)
+    const squareMapping = product.catalogMappings.find(
+      (m) => !m.squareVariationId.startsWith('local_'),
+    );
+
+    if (squareMapping) {
+      try {
+        const result = await this.uploadImageToSquare(
+          squareMapping.squareVariationId,
+          imageBuffer,
+          mimeType,
+          product.name,
+        );
+        squareSynced = true;
+        squareImageId = result.imageId;
+        if (result.imageUrl) {
+          finalImageUrl = result.imageUrl;
+        }
+        this.logger.log(
+          `[PRODUCT] Image uploaded to Square: imageId=${squareImageId}, url=${finalImageUrl}`,
+        );
+      } catch (error) {
+        this.logger.error(`[PRODUCT] Failed to upload image to Square: ${error}`);
+        // No fallback — we don't store files locally anymore.
+        // The product keeps its existing image (if any).
+        return {
+          imageUrl: product.squareImageUrl || '',
+          squareSynced: false,
+          message: `Failed to upload image to Square: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    } else {
+      // Product has no Square catalog mapping — cannot upload
+      return {
+        imageUrl: product.squareImageUrl || '',
+        squareSynced: false,
+        message: 'Product is not synced to Square. Image upload requires a Square catalog mapping.',
+      };
+    }
+
+    // Update product with the Square-hosted image URL
+    if (finalImageUrl) {
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { squareImageUrl: finalImageUrl },
+      });
+    }
+
+    return {
+      imageUrl: finalImageUrl || product.squareImageUrl || '',
+      squareSynced,
+      squareImageId,
+      message: 'Product image uploaded to Square',
+    };
+  }
+
+  /**
+   * Upload image to Square and attach to the parent catalog item.
+   * Accepts a raw Buffer — no file system access needed.
+   */
+  private async uploadImageToSquare(
+    squareVariationId: string,
+    imageBuffer: Buffer,
+    mimeType: string,
+    productName: string,
+  ): Promise<{ imageId: string; imageUrl: string | null }> {
+    const client = this.getSquareClient();
+
+    // Step 1: Retrieve the variation to get the parent item ID
+    const variationResponse = await client.catalog.object.get({
+      objectId: squareVariationId,
+    });
+
+    const variationObject = variationResponse.object;
+    if (!variationObject) {
+      throw new Error(
+        `Variation ${squareVariationId} not found in Square`,
+      );
+    }
+
+    const variationData = (variationObject as any).itemVariationData;
+    const parentItemId = variationData?.itemId;
+    if (!parentItemId) {
+      throw new Error(
+        `Cannot determine parent item for variation ${squareVariationId}`,
+      );
+    }
+
+    // Step 2: Upload image directly from the in-memory buffer
+    const idempotencyKey = randomUUID();
+
+    // Ensure MIME type is one Square accepts
+    const allowedMimes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/x-png', 'image/gif'];
+    const safeMime = allowedMimes.includes(mimeType) ? mimeType : 'image/jpeg';
+    const imageFile = new Blob([new Uint8Array(imageBuffer.buffer, imageBuffer.byteOffset, imageBuffer.byteLength)], { type: safeMime });
+
+    const response = await client.catalog.images.create({
+      request: {
+        idempotencyKey,
+        objectId: parentItemId,
+        image: {
+          type: 'IMAGE',
+          id: `#image_${idempotencyKey}`,
+          imageData: {
+            name: productName,
+            caption: productName,
+          },
+        },
+        isPrimary: true,
+      },
+      imageFile,
+    });
+
+    const catalogImage = response.image;
+    const imageId = catalogImage?.id || '';
+    const imageUrl =
+      (catalogImage as any)?.imageData?.url || null;
+
+    return { imageId, imageUrl };
   }
 
   /**
