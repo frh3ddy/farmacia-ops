@@ -144,18 +144,41 @@ export class ProductsController {
   }
 
   /**
-   * Get all products
+   * Get products (supports pagination)
    * GET /products
    * Roles: All authenticated users
+   *
+   * Query params:
+   *   locationId  - target location (falls back to current)
+   *   page        - 1-based page number (default 1)
+   *   limit       - items per page (default 50, max 200)
+   *   search      - optional name/SKU search term
+   *
+   * Response shape:
+   *   { success, data, count, page, limit, totalCount, totalPages, hasMore }
    */
   @Get()
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
-  async getProducts(@Query('locationId') locationId: string, @Req() req: any) {
+  async getProducts(
+    @Query('locationId') locationId: string,
+    @Query('page') pageStr: string,
+    @Query('limit') limitStr: string,
+    @Query('search') search: string,
+    @Req() req: any,
+  ) {
     try {
       // Use query param or current location
       const targetLocationId = locationId || req.currentLocation?.locationId;
-      
-      const result = await this.productsService.getProducts(targetLocationId);
+
+      // Parse pagination params with sensible defaults
+      const page = Math.max(1, parseInt(pageStr, 10) || 1);
+      const limit = Math.min(200, Math.max(1, parseInt(limitStr, 10) || 50));
+
+      const result = await this.productsService.getProducts(targetLocationId, {
+        page,
+        limit,
+        search: search?.trim() || undefined,
+      });
       return result;
     } catch (error) {
       throw new HttpException(
