@@ -783,36 +783,94 @@ export class ProductsService {
   }
 
   /**
-   * Get all products with prices
+   * Get products with optional pagination and search
+   *
+   * When page/limit are provided the response includes pagination metadata:
+   *   { success, data, count, page, limit, totalCount, totalPages, hasMore }
+   *
+   * This keeps backward-compatibility: the old un-paginated call returns the
+   * same { success, data, count } shape (plus the new fields, which older
+   * clients simply ignore).
    */
-  async getProducts(locationId?: string) {
-    const products = await this.prisma.product.findMany({
-      include: {
-        category: true,
-        catalogMappings: {
-          where: locationId ? {
-            OR: [
-              { locationId },        // Location-specific mapping
-              { locationId: null },  // Global mapping (from Square sync)
-            ],
-          } : undefined,
-          orderBy: {
-            locationId: 'desc',  // Prefer location-specific (non-null) over global
-          },
-          include: {
-            location: true,
-          },
+  async getProducts(
+    locationId?: string,
+    options?: { page?: number; limit?: number; search?: string; exact?: boolean },
+  ) {
+    const page = options?.page ?? 1;
+    const limit = options?.limit ?? 50;
+    const search = options?.search;
+    const exact = options?.exact ?? false;
+    const skip = (page - 1) * limit;
+
+    // Common include block (shared between count and findMany)
+    const includeBlock = {
+      category: true,
+      catalogMappings: {
+        where: locationId ? {
+          OR: [
+            { locationId },        // Location-specific mapping
+            { locationId: null },  // Global mapping (from Square sync)
+          ],
+        } : undefined,
+        orderBy: {
+          locationId: 'desc' as const,  // Prefer location-specific (non-null) over global
         },
-        inventories: locationId
-          ? {
-              where: { locationId },
-            }
-          : true,
+        include: {
+          location: true,
+        },
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+      inventories: locationId
+        ? {
+            where: { locationId },
+          }
+        : true,
+    };
+
+    // Build a `where` clause for optional search
+    let where: any = {};
+    let exactMatch = false;
+
+    if (search && exact) {
+      // EXACT mode: first try exact SKU match (case-insensitive)
+      const exactWhere: any = {
+        sku: { equals: search, mode: 'insensitive' },
+      };
+
+      const exactCount = await this.prisma.product.count({ where: exactWhere });
+
+      if (exactCount > 0) {
+        // Found exact SKU match(es)
+        where = exactWhere;
+        exactMatch = true;
+      } else {
+        // Fallback to contains search across all fields
+        where.OR = [
+          { name: { contains: search, mode: 'insensitive' } },
+          { squareProductName: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
+        ];
+        exactMatch = false;
+      }
+    } else if (search) {
+      // Normal contains search (existing behavior)
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { squareProductName: { contains: search, mode: 'insensitive' } },
+        { sku: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // Fetch total count and page of products in parallel
+    const [totalCount, products] = await Promise.all([
+      this.prisma.product.count({ where }),
+      this.prisma.product.findMany({
+        where,
+        include: includeBlock,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+    ]);
 
     // Transform products to include computed fields
     const transformedProducts = products.map((product) => {
@@ -837,10 +895,20 @@ export class ProductsService {
       };
     });
 
+    const totalPages = Math.ceil(totalCount / limit);
+
     return {
       success: true,
       data: transformedProducts,
       count: transformedProducts.length,
+      // Pagination metadata
+      page,
+      limit,
+      totalCount,
+      totalPages,
+      hasMore: page < totalPages,
+      // Barcode scanner hint: true if exact SKU matched, false if fell back to contains
+      exactMatch,
     };
   }
 

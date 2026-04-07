@@ -192,12 +192,26 @@ export class InventoryReceivingController {
         }
       }
 
+      // Fetch the updated product so the client has fresh data in one round-trip
+      let updatedProduct = null;
+      try {
+        const productResult = await this.productsService.getProduct(
+          body.productId,
+          locationId,
+        );
+        updatedProduct = productResult.data;
+      } catch (productError) {
+        this.logger.error(`[RECEIVING] Failed to fetch updated product: ${productError}`);
+        // Non-fatal — the receiving itself succeeded
+      }
+
       return {
         success: true,
         message,
         data: {
           ...result,
           priceUpdate,
+          product: updatedProduct,
         },
       };
     } catch (error) {
