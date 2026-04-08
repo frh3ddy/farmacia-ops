@@ -266,6 +266,93 @@ export class ProductsService {
   }
 
   /**
+   * Sync all local-only products to Square
+   * Finds products with local_ prefix in their catalog mapping and creates them in Square
+   */
+  async syncUnsyncedProducts(locationId: string): Promise<{
+    total: number;
+    synced: number;
+    failed: number;
+    results: Array<{ productId: string; name: string; success: boolean; error?: string }>;
+  }> {
+    this.logger.log(`[SYNC] Starting bulk sync of unsynced products for location ${locationId}`);
+
+    // Find all catalog mappings with local_ prefix for this location
+    const localMappings = await this.prisma.catalogMapping.findMany({
+      where: {
+        squareVariationId: { startsWith: 'local_' },
+        locationId,
+      },
+      include: {
+        product: true,
+        location: true,
+      },
+    });
+
+    if (localMappings.length === 0) {
+      return { total: 0, synced: 0, failed: 0, results: [] };
+    }
+
+    this.logger.log(`[SYNC] Found ${localMappings.length} unsynced products`);
+
+    const location = await this.prisma.location.findUnique({
+      where: { id: locationId },
+    });
+
+    const results: Array<{ productId: string; name: string; success: boolean; error?: string }> = [];
+    let synced = 0;
+    let failed = 0;
+
+    for (const mapping of localMappings) {
+      const product = mapping.product;
+      const price = this.fromCents(Number(mapping.priceCents)) || 0;
+
+      try {
+        const squareResult = await this.createProductInSquare({
+          name: product.name,
+          sku: product.sku || undefined,
+          description: product.squareDescription || undefined,
+          sellingPrice: price,
+          locationId: location?.squareId || undefined,
+        });
+
+        // Update catalog mapping with real Square ID
+        await this.prisma.catalogMapping.update({
+          where: { id: mapping.id },
+          data: {
+            squareVariationId: squareResult.variationId,
+            priceSyncedAt: new Date(),
+          },
+        });
+
+        // Update product sync timestamp
+        await this.prisma.product.update({
+          where: { id: product.id },
+          data: { squareDataSyncedAt: new Date() },
+        });
+
+        synced++;
+        results.push({ productId: product.id, name: product.name, success: true });
+        this.logger.log(`[SYNC] ✅ ${product.name} → Square variation ${squareResult.variationId}`);
+      } catch (error) {
+        failed++;
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        results.push({ productId: product.id, name: product.name, success: false, error: errorMsg });
+        this.logger.error(`[SYNC] ❌ ${product.name} failed: ${errorMsg}`);
+      }
+    }
+
+    this.logger.log(`[SYNC] Bulk sync complete: ${synced} synced, ${failed} failed out of ${localMappings.length}`);
+
+    return {
+      total: localMappings.length,
+      synced,
+      failed,
+      results,
+    };
+  }
+
+  /**
    * Create product in Square
    */
   private async createProductInSquare(input: {

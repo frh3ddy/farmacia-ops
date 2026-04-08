@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   HttpException,
+  BadRequestException,
   UseGuards,
   UseInterceptors,
   UploadedFile,
@@ -131,6 +132,37 @@ export class ProductsController {
           squareVariationId: result.squareVariationId,
           inventoryCreated: result.inventoryCreated,
         },
+      };
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: getErrorMessage(error),
+        },
+        getErrorStatus(error),
+      );
+    }
+  }
+
+  /**
+   * Sync all local-only products to Square
+   * POST /products/sync-to-square
+   * Roles: OWNER, MANAGER
+   */
+  @Post('sync-to-square')
+  @Roles('OWNER', 'MANAGER')
+  async syncToSquare(@Body() body: any, @Req() req: any) {
+    try {
+      const locationId = body.locationId || req.currentLocation?.locationId;
+      if (!locationId) {
+        throw new BadRequestException('Location ID is required');
+      }
+
+      const result = await this.productsService.syncUnsyncedProducts(locationId);
+      return {
+        success: true,
+        message: `Synced ${result.synced}/${result.total} products to Square${result.failed > 0 ? ` (${result.failed} failed)` : ''}`,
+        data: result,
       };
     } catch (error) {
       throw new HttpException(
