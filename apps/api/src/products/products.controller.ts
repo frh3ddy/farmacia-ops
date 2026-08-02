@@ -451,6 +451,33 @@ export class ProductsController {
   }
 
   /**
+   * Lightweight stock/margin alert counts for a location
+   * GET /products/counts?locationId=...
+   * Roles: All authenticated users
+   * NOTE: Must be BEFORE @Get(':id') so "counts" is not captured as an id param.
+   */
+  @Get('counts')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async getProductCounts(
+    @Query('locationId') locationId: string,
+    @Req() req: any,
+  ) {
+    try {
+      const targetLocationId = locationId || req.currentLocation?.locationId;
+      const result = await this.productsService.getProductCounts(targetLocationId);
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        {
+          success: false,
+          message: getErrorMessage(error),
+        },
+        getErrorStatus(error),
+      );
+    }
+  }
+
+  /**
    * Get single product
    * GET /products/:id
    * Roles: All authenticated users

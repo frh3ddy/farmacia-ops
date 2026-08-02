@@ -967,6 +967,12 @@ export class ProductsService {
            || product.catalogMappings.find(m => m.locationId === null))
         : product.catalogMappings[0];
       const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
+      // Average cost across the location's FIFO batches (same formula as getProduct)
+      const totalCost = product.inventories.reduce(
+        (sum, inv) => sum + inv.quantity * Number(inv.unitCost),
+        0,
+      );
+      const averageCost = totalInventory > 0 ? totalCost / totalInventory : null;
       
       // Debug logging
       if (product.inventories.length > 0 || totalInventory > 0) {
@@ -978,6 +984,7 @@ export class ProductsService {
         sellingPrice: mapping ? this.fromCents(Number(mapping.priceCents)) : null,
         currency: mapping?.currency || CURRENCY,
         totalInventory,
+        averageCost,
         hasSquareSync: mapping ? !mapping.squareVariationId.startsWith('local_') : false,
       };
     });
@@ -996,6 +1003,76 @@ export class ProductsService {
       hasMore: page < totalPages,
       // Barcode scanner hint: true if exact SKU matched, false if fell back to contains
       exactMatch,
+    };
+  }
+
+  /**
+   * Lightweight stock/margin alert counts for a location (Dashboard alerts).
+   * Uses SQL aggregates + window functions instead of transferring full product
+   * rows. Thresholds mirror the iOS app: outOfStock qty<=0, lowStock 1-9,
+   * lowMargin < 10% (margin computed from selling price vs weighted average cost
+   * of the location's FIFO batches).
+   */
+  async getProductCounts(locationId?: string) {
+    if (!locationId) {
+      throw new BadRequestException('Location ID is required');
+    }
+
+    const stats = await this.prisma.$queryRaw<
+      Array<{
+        total: bigint;
+        out_of_stock: bigint;
+        low_stock: bigint;
+        low_margin: bigint;
+        synced: bigint;
+        local: bigint;
+      }>
+    >(Prisma.sql`
+      WITH inv AS (
+        SELECT "productId",
+               SUM(quantity) AS qty,
+               SUM(quantity * "unitCost") AS total_cost
+        FROM "Inventory"
+        WHERE "locationId" = ${locationId}
+        GROUP BY "productId"
+      ),
+      -- Same mapping preference as getProducts: location-specific over global,
+      -- deterministic tie-breaker for duplicate mappings of the same class
+      mapping AS (
+        SELECT DISTINCT ON ("productId") "productId", "priceCents", "squareVariationId"
+        FROM "CatalogMapping"
+        WHERE "locationId" = ${locationId} OR "locationId" IS NULL
+        ORDER BY "productId", "locationId" DESC NULLS LAST, "createdAt" DESC
+      )
+      SELECT
+        COUNT(*)::bigint AS total,
+        COUNT(*) FILTER (WHERE COALESCE(inv.qty, 0) <= 0)::bigint AS out_of_stock,
+        COUNT(*) FILTER (WHERE COALESCE(inv.qty, 0) > 0 AND COALESCE(inv.qty, 0) < 10)::bigint AS low_stock,
+        COUNT(*) FILTER (
+          WHERE m."priceCents" IS NOT NULL
+            AND inv.qty IS NOT NULL
+            AND inv.qty > 0
+            AND (m."priceCents" / 100.0 - (inv.total_cost / inv.qty))
+                / NULLIF(m."priceCents" / 100.0, 0) * 100 < 10
+        )::bigint AS low_margin,
+        COUNT(*) FILTER (WHERE m."squareVariationId" IS NOT NULL AND NOT m."squareVariationId" LIKE 'local_%')::bigint AS synced,
+        COUNT(*) FILTER (WHERE m."squareVariationId" IS NULL OR m."squareVariationId" LIKE 'local_%')::bigint AS local
+      FROM "Product" p
+      LEFT JOIN inv ON inv."productId" = p.id
+      LEFT JOIN mapping m ON m."productId" = p.id
+    `);
+
+    const row = stats[0];
+    return {
+      success: true,
+      data: {
+        total: Number(row?.total ?? 0),
+        outOfStock: Number(row?.out_of_stock ?? 0),
+        lowStock: Number(row?.low_stock ?? 0),
+        lowMargin: Number(row?.low_margin ?? 0),
+        synced: Number(row?.synced ?? 0),
+        local: Number(row?.local ?? 0),
+      },
     };
   }
 
