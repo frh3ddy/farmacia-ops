@@ -591,8 +591,12 @@ export class InventoryAdjustmentService {
   async getAdjustmentSummary(locationId: string, startDate?: Date, endDate?: Date) {
     const where: Prisma.InventoryAdjustmentWhereInput = {
       locationId,
-      ...(startDate && { adjustedAt: { gte: startDate } }),
-      ...(endDate && { adjustedAt: { lte: endDate } }),
+      ...((startDate || endDate) && {
+        adjustedAt: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
     };
 
     // Get counts by type
