@@ -417,8 +417,12 @@ export class InventoryReceivingService {
   async getReceivingSummary(locationId: string, startDate?: Date, endDate?: Date) {
     const where: Prisma.InventoryReceivingWhereInput = {
       locationId,
-      ...(startDate && { receivedAt: { gte: startDate } }),
-      ...(endDate && { receivedAt: { lte: endDate } }),
+      ...((startDate || endDate) && {
+        receivedAt: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
     };
 
     // Get totals

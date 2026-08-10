@@ -148,8 +148,12 @@ export class ExpenseService {
       where: {
         ...(locationId && { locationId }),
         ...(type && { type }),
-        ...(startDate && { date: { gte: startDate } }),
-        ...(endDate && { date: { lte: endDate } }),
+        ...((startDate || endDate) && {
+          date: {
+            ...(startDate && { gte: startDate }),
+            ...(endDate && { lte: endDate }),
+          },
+        }),
         ...(isPaid !== undefined && { isPaid }),
       },
       include: {
@@ -173,8 +177,12 @@ export class ExpenseService {
 
     const where: Prisma.ExpenseWhereInput = {
       ...(locationId && { locationId }),
-      ...(startDate && { date: { gte: startDate } }),
-      ...(endDate && { date: { lte: endDate } }),
+      ...((startDate || endDate) && {
+        date: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
     };
 
     // Get all expenses for the period

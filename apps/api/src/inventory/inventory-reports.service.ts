@@ -120,8 +120,12 @@ export class InventoryReportsService {
     // Build where clause for sales
     const salesWhere: Prisma.SaleWhereInput = {
       ...(locationId && { locationId }),
-      ...(startDate && { createdAt: { gte: startDate } }),
-      ...(endDate && { createdAt: { lte: endDate } }),
+      ...((startDate || endDate) && {
+        createdAt: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
     };
 
     // Get sales with items
@@ -447,8 +451,12 @@ export class InventoryReportsService {
 
     const salesWhere: Prisma.SaleWhereInput = {
       ...(locationId && { locationId }),
-      ...(startDate && { createdAt: { gte: startDate } }),
-      ...(endDate && { createdAt: { lte: endDate } }),
+      ...((startDate || endDate) && {
+        createdAt: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
     };
 
     // Get sales aggregated
@@ -583,8 +591,12 @@ export class InventoryReportsService {
     const adjustments = await this.prisma.inventoryAdjustment.findMany({
       where: {
         ...(locationId && { locationId }),
-        ...(startDate && { adjustedAt: { gte: startDate } }),
-        ...(endDate && { adjustedAt: { lte: endDate } }),
+        ...((startDate || endDate) && {
+          adjustedAt: {
+            ...(startDate && { gte: startDate }),
+            ...(endDate && { lte: endDate }),
+          },
+        }),
       },
       include: {
         product: { select: { id: true, name: true } },
@@ -702,8 +714,12 @@ export class InventoryReportsService {
     const receivings = await this.prisma.inventoryReceiving.findMany({
       where: {
         ...(locationId && { locationId }),
-        ...(startDate && { receivedAt: { gte: startDate } }),
-        ...(endDate && { receivedAt: { lte: endDate } }),
+        ...((startDate || endDate) && {
+          receivedAt: {
+            ...(startDate && { gte: startDate }),
+            ...(endDate && { lte: endDate }),
+          },
+        }),
       },
       include: {
         supplier: { select: { id: true, name: true } },
@@ -817,8 +833,12 @@ export class InventoryReportsService {
     // 1. Get Sales Revenue and COGS
     const salesWhere: Prisma.SaleWhereInput = {
       ...(locationId && { locationId }),
-      ...(startDate && { createdAt: { gte: startDate } }),
-      ...(endDate && { createdAt: { lte: endDate } }),
+      ...((startDate || endDate) && {
+        createdAt: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
     };
 
     const salesAgg = await this.prisma.sale.aggregate({
@@ -838,8 +858,12 @@ export class InventoryReportsService {
     // 2. Get Operating Expenses
     const expenseWhere: Prisma.ExpenseWhereInput = {
       ...(locationId && { locationId }),
-      ...(startDate && { date: { gte: startDate } }),
-      ...(endDate && { date: { lte: endDate } }),
+      ...((startDate || endDate) && {
+        date: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
     };
 
     const expenses = await this.prisma.expense.findMany({ where: expenseWhere });
@@ -857,8 +881,12 @@ export class InventoryReportsService {
     // 3. Get Inventory Adjustment Losses (shrinkage)
     const adjustmentWhere: Prisma.InventoryAdjustmentWhereInput = {
       ...(locationId && { locationId }),
-      ...(startDate && { adjustedAt: { gte: startDate } }),
-      ...(endDate && { adjustedAt: { lte: endDate } }),
+      ...((startDate || endDate) && {
+        adjustedAt: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
       quantity: { lt: 0 }, // Only losses
     };
 
