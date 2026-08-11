@@ -324,14 +324,11 @@ export class LaborService {
     }
 
     const client = this.getSquareClient();
-
-    // Resolve the business timezone from the DB location that maps to Square,
-    // falling back to the default. This keeps day boundaries stable.
-    const location = await this.prisma.location.findFirst({
-      where: { isActive: true, squareId: { not: null } },
-      select: { squareId: true },
-    });
     const timeZone = DEFAULT_TIMEZONE;
+
+    this.logger.log(
+      `[LABOR] Searching shifts: teamMemberId=${teamMemberId} period=${period.startDate}..${period.endDate}`,
+    );
 
     try {
       const shifts: Shift[] = [];
@@ -342,7 +339,6 @@ export class LaborService {
           query: {
             filter: {
               teamMemberIds: [teamMemberId],
-              ...(location?.squareId && { locationIds: [location.squareId] }),
               workday: {
                 dateRange: {
                   startDate: period.startDate,
@@ -361,6 +357,31 @@ export class LaborService {
         shifts.push(...(response.shifts || []));
         cursor = response.cursor || undefined;
       } while (cursor);
+
+      this.logger.log(
+        `[LABOR] Found ${shifts.length} shift(s) for ${teamMemberId} in ${period.startDate}..${period.endDate}`,
+      );
+
+      if (shifts.length === 0) {
+        // Diagnostic: fetch without workday filter to see if the team member
+        // has ANY shifts at all (helps distinguish "no shifts ever" from
+        // "workday filter excluded them").
+        const probe = await client.labor.shifts.search({
+          query: {
+            filter: { teamMemberIds: [teamMemberId] },
+            sort: { field: 'START_AT', order: 'DESC' },
+          },
+          limit: 10,
+        });
+        const probeShifts = probe.shifts || [];
+        this.logger.warn(
+          `[LABOR] No shifts in period ${period.startDate}..${period.endDate}. ` +
+            `Team member has ${probeShifts.length} total shift(s) (latest 10). ` +
+            `Dates: ${probeShifts.map(s => (s.startAt || '').slice(0, 10)).join(', ') || 'none'}; ` +
+            `Locations: ${[...new Set(probeShifts.map(s => s.locationId))].join(', ') || 'none'}; ` +
+            `Statuses: ${[...new Set(probeShifts.map(s => s.status))].join(', ') || 'none'}`,
+        );
+      }
 
       // Most recent hourly rate found in the period (used as the payroll rate
       // and as fallback for shifts without wage info).
