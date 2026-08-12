@@ -431,8 +431,14 @@ export class InventoryMigrationService {
     let allItems: ItemToProcess[] = cachedItems || [];
     
     if (allItems.length === 0) {
+      // Single batched lookup instead of one findUnique per location (N+1).
+      const locations = await this.prisma.location.findMany({
+        where: { id: { in: locationIds } },
+      });
+      const locationById = new Map(locations.map((loc) => [loc.id, loc]));
+
       for (const locationId of locationIds) {
-        const location = await this.prisma.location.findUnique({ where: { id: locationId } });
+        const location = locationById.get(locationId);
         if (!location?.squareId) continue;
 
         const items = await this.squareInventory.fetchSquareInventory(location.squareId);
@@ -668,20 +674,29 @@ export class InventoryMigrationService {
             }
         }
         
-        // Batch update CatalogMapping prices (blocking to ensure cache is populated)
+        // Batch update CatalogMapping prices (blocking to ensure cache is populated).
+        // One statement via a VALUES join instead of N concurrent updateMany
+        // calls firing simultaneously against the connection pool.
         if (priceUpdates.length > 0) {
           try {
-            await Promise.all(
-              priceUpdates.map(({ vid, priceCents, currency }) =>
-                this.prisma.catalogMapping.updateMany({
-                  where: { squareVariationId: vid },
-                  data: {
-                    priceCents: new Prisma.Decimal(priceCents),
-                    currency: currency,
-                    priceSyncedAt: new Date(),
-                  } as any,
-                })
-              )
+            const syncedAt = new Date();
+            const rows = Prisma.join(
+              priceUpdates.map(
+                ({ vid, priceCents, currency }) =>
+                  Prisma.sql`(${vid}::text, ${new Prisma.Decimal(priceCents)}::numeric, ${currency}::text, ${syncedAt}::timestamptz)`,
+              ),
+              ', ',
+            );
+
+            await this.prisma.$executeRaw(
+              Prisma.sql`
+                UPDATE "CatalogMapping" AS cm
+                SET "priceCents" = v.price_cents,
+                    "currency" = v.currency,
+                    "priceSyncedAt" = v.synced_at
+                FROM (VALUES ${rows}) AS v(vid, price_cents, currency, synced_at)
+                WHERE cm."squareVariationId" = v.vid
+              `,
             );
             this.logger.log(`[EXTRACTION] Updated ${priceUpdates.length} prices in cache`);
           } catch (e) {
@@ -1095,10 +1110,16 @@ export class InventoryMigrationService {
     // For large datasets, persisting `itemsToProcess` to a temp table is better, 
     // but assuming reasonable inventory (<10k), memory is fine.
     
+    // Single batched lookup instead of one findUnique per location (N+1).
+    const batchLocations = await this.prisma.location.findMany({
+      where: { id: { in: input.locationIds } },
+    });
+    const batchLocationById = new Map(batchLocations.map((loc) => [loc.id, loc]));
+
     for (const locationId of input.locationIds) {
-      const location = await this.prisma.location.findUnique({ where: { id: locationId } });
+      const location = batchLocationById.get(locationId);
       if (!location?.squareId) continue;
-      
+
       const inventory = await this.squareInventory.fetchSquareInventory(location.squareId);
       inventory.forEach(item => itemsToProcess.push({ locationId, squareInventoryItem: item }));
     }
@@ -2376,10 +2397,14 @@ export class InventoryMigrationService {
       }
     }
 
+    // Single batched lookup instead of one findUnique per location (N+1).
+    const previewLocations = await this.prisma.location.findMany({
+      where: { id: { in: input.locationIds } },
+    });
+    const previewLocationById = new Map(previewLocations.map((loc) => [loc.id, loc]));
+
     for (const locationId of input.locationIds) {
-      const location = await this.prisma.location.findUnique({
-        where: { id: locationId },
-      });
+      const location = previewLocationById.get(locationId) ?? null;
 
       if (!location || !location.squareId) {
         warnings.push({
