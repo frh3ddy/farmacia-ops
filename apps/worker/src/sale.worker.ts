@@ -11,6 +11,18 @@ import {
 } from './errors';
 import { mapVariationToProduct } from './catalog.mapper';
 
+// Step-by-step tracing below runs on every checkout processed by this worker.
+// Unconditional console.log calls add synchronous I/O directly inside the
+// DB-locked sale transaction, so verbose tracing is opt-in via env var.
+// Errors (console.error) are left unconditional — they're rare (exceptional
+// paths only) and error visibility in production matters more than the cost.
+const SALE_WORKER_DEBUG = process.env.SALE_WORKER_DEBUG === 'true';
+function debugLog(...args: unknown[]): void {
+  if (SALE_WORKER_DEBUG) {
+    console.log(...args);
+  }
+}
+
 // Lazy initialization of database connection (env vars loaded by worker.ts first)
 let pool: Pool | null = null;
 let prisma: PrismaClient | null = null;
@@ -21,10 +33,19 @@ function getPrisma(): PrismaClient {
     if (!connectionString) {
       throw new Error('DATABASE_URL environment variable is not set');
     }
-    pool = new Pool({ connectionString });
+    // Explicit pool sizing — see prisma.service.ts for rationale. Default
+    // headroom here is sized above the sales-queue concurrency (5, see
+    // worker.config.ts) so a full batch of concurrent jobs never queues
+    // waiting on a connection.
+    pool = new Pool({
+      connectionString,
+      max: Number(process.env.WORKER_DATABASE_POOL_MAX) || 10,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    });
     const adapter = new PrismaPg(pool);
     prisma = new PrismaClient({ adapter });
-    console.log('[DEBUG] [SALE_WORKER] Prisma client initialized');
+    debugLog('[DEBUG] [SALE_WORKER] Prisma client initialized');
   }
   return prisma;
 }
@@ -55,18 +76,18 @@ let squareClient: SquareClient | null = null;
 
 function getSquareClient(): SquareClient {
   if (!squareClient) {
-    console.log('[DEBUG] [SQUARE_CLIENT] Initializing Square client...');
-    console.log('[DEBUG] [SQUARE_CLIENT] Checking for SQUARE_ACCESS_TOKEN...');
-    console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN exists:', !!process.env.SQUARE_ACCESS_TOKEN);
-    console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN length:', process.env.SQUARE_ACCESS_TOKEN?.length || 0);
-    console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set (will use Production)');
+    debugLog('[DEBUG] [SQUARE_CLIENT] Initializing Square client...');
+    debugLog('[DEBUG] [SQUARE_CLIENT] Checking for SQUARE_ACCESS_TOKEN...');
+    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN exists:', !!process.env.SQUARE_ACCESS_TOKEN);
+    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN length:', process.env.SQUARE_ACCESS_TOKEN?.length || 0);
+    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set (will use Production)');
     
     let squareAccessToken = process.env.SQUARE_ACCESS_TOKEN;
     
     // Trim whitespace in case there are spaces in the token value
     if (squareAccessToken) {
       squareAccessToken = squareAccessToken.trim();
-      console.log('[DEBUG] [SQUARE_CLIENT] Token after trim length:', squareAccessToken.length);
+      debugLog('[DEBUG] [SQUARE_CLIENT] Token after trim length:', squareAccessToken.length);
       
       // Check for spaces in the token (common issue)
       if (squareAccessToken.includes(' ')) {
@@ -111,15 +132,15 @@ function getSquareClient(): SquareClient {
       squareEnvironment = SquareEnvironment.Production;
     }
 
-    console.log('[DEBUG] [SQUARE_CLIENT] Creating Square client with environment:', squareEnvironment);
-    console.log('[DEBUG] [SQUARE_CLIENT] NODE_ENV:', nodeEnv || 'not set');
-    console.log('[DEBUG] [SQUARE_CLIENT] RAILWAY_ENVIRONMENT:', railwayEnv || 'not set');
-    console.log('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', squareEnv || 'not set');
+    debugLog('[DEBUG] [SQUARE_CLIENT] Creating Square client with environment:', squareEnvironment);
+    debugLog('[DEBUG] [SQUARE_CLIENT] NODE_ENV:', nodeEnv || 'not set');
+    debugLog('[DEBUG] [SQUARE_CLIENT] RAILWAY_ENVIRONMENT:', railwayEnv || 'not set');
+    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', squareEnv || 'not set');
     squareClient = new SquareClient({
       token: squareAccessToken,
       environment: squareEnvironment,
     });
-    console.log('[DEBUG] [SQUARE_CLIENT] ✅ Square client initialized');
+    debugLog('[DEBUG] [SQUARE_CLIENT] ✅ Square client initialized');
   }
   return squareClient;
 }
@@ -245,25 +266,40 @@ async function deductInventory(
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
   >,
 ): Promise<void> {
+  if (consumedBatches.length === 0) {
+    return;
+  }
+
   const client = tx || getPrisma();
 
-  for (const consumedBatch of consumedBatches) {
-    const updated = await client.inventory.update({
-      where: { id: consumedBatch.batchId },
-      data: {
-        quantity: {
-          decrement: consumedBatch.quantityConsumed,
-        },
-      },
-    });
+  // Single batched UPDATE via a VALUES join instead of one sequential
+  // round-trip per consumed batch. A sale item touching several FIFO
+  // batches previously serialized N awaits inside the held DB transaction;
+  // this does it in one statement regardless of how many batches are hit.
+  const rows = Prisma.join(
+    consumedBatches.map(
+      (b) => Prisma.sql`(${b.batchId}::text, ${b.quantityConsumed}::int)`,
+    ),
+    ', ',
+  );
 
-    // Validate quantity doesn't go negative (database constraint should enforce)
-    if (updated.quantity < 0) {
-      throw new DatabaseTransactionError(
-        `Inventory quantity went negative for batch ${consumedBatch.batchId}. ` +
-          `Quantity after update: ${updated.quantity}`,
-      );
-    }
+  const updated = await client.$queryRaw<Array<{ id: string; quantity: number }>>(
+    Prisma.sql`
+      UPDATE "Inventory" AS inv
+      SET quantity = inv.quantity - v.qty
+      FROM (VALUES ${rows}) AS v(id, qty)
+      WHERE inv.id = v.id
+      RETURNING inv.id, inv.quantity
+    `,
+  );
+
+  // Validate quantity doesn't go negative (database constraint should enforce)
+  const negative = updated.filter((row) => row.quantity < 0);
+  if (negative.length > 0) {
+    throw new DatabaseTransactionError(
+      `Inventory quantity went negative for batch(es): ` +
+        negative.map((row) => `${row.id} (${row.quantity})`).join(', '),
+    );
   }
 }
 
@@ -365,7 +401,7 @@ async function recordInventoryConsumption(
       data: consumptionRecords,
     });
     
-    console.log(
+    debugLog(
       `[FIFO_AUDIT] Recorded ${consumptionRecords.length} consumption records for saleItem ${saleItemId}`,
     );
   }
@@ -401,10 +437,10 @@ function calculateSaleTotals(saleItems: SaleItemOutput[]): SaleTotals {
  * Main worker entry point: process Square payment webhook and create sale with FIFO COGS
  */
 export async function processSaleJob(job: Job): Promise<void> {
-  console.log('[DEBUG] ========================================');
-  console.log('[DEBUG] Starting processSaleJob');
-  console.log('[DEBUG] Job ID:', job.id);
-  console.log('[DEBUG] Job data:', JSON.stringify(job.data, null, 2));
+  debugLog('[DEBUG] ========================================');
+  debugLog('[DEBUG] Starting processSaleJob');
+  debugLog('[DEBUG] Job ID:', job.id);
+  debugLog('[DEBUG] Job data:', JSON.stringify(job.data, null, 2));
   
   // Extract payload from job data
   if (!job.data) {
@@ -413,7 +449,7 @@ export async function processSaleJob(job: Job): Promise<void> {
   }
   
   const { payload } = job.data;
-  console.log('[DEBUG] Extracted payload:', JSON.stringify(payload, null, 2));
+  debugLog('[DEBUG] Extracted payload:', JSON.stringify(payload, null, 2));
 
   if (!payload) {
     console.error('[DEBUG] ERROR: payload is missing from job.data');
@@ -428,9 +464,9 @@ export async function processSaleJob(job: Job): Promise<void> {
   // Extract payment from job.data.payload.object
   // Note: Square webhook structure is: event.data.object.payment
   // But queue sends: payload = event.data, so payload.object.payment
-  console.log('[DEBUG] Attempting to extract payment from payload.object');
-  console.log('[DEBUG] payload?.object:', JSON.stringify(payload?.object, null, 2));
-  console.log('[DEBUG] payload?.object?.payment:', JSON.stringify(payload?.object?.payment, null, 2));
+  debugLog('[DEBUG] Attempting to extract payment from payload.object');
+  debugLog('[DEBUG] payload?.object:', JSON.stringify(payload?.object, null, 2));
+  debugLog('[DEBUG] payload?.object?.payment:', JSON.stringify(payload?.object?.payment, null, 2));
   
   // Try payload.object.payment first (Square webhook structure)
   // This handles: event.data.object.payment (Square webhook) -> payload.object.payment (after queue)
@@ -439,18 +475,18 @@ export async function processSaleJob(job: Job): Promise<void> {
   
   if (payload?.object?.payment) {
     payment = payload.object.payment;
-    console.log('[DEBUG] Found payment at payload.object.payment');
+    debugLog('[DEBUG] Found payment at payload.object.payment');
   } else if (payload?.object && typeof payload.object === 'object' && 'id' in payload.object) {
     // payload.object might be the payment directly
     payment = payload.object;
-    console.log('[DEBUG] Found payment at payload.object');
+    debugLog('[DEBUG] Found payment at payload.object');
   } else if (payload && typeof payload === 'object' && 'id' in payload && 'location_id' in payload) {
     // payload itself might be the payment
     payment = payload;
-    console.log('[DEBUG] Found payment at payload (direct)');
+    debugLog('[DEBUG] Found payment at payload (direct)');
   }
   
-  console.log('[DEBUG] Final extracted payment:', JSON.stringify(payment, null, 2));
+  debugLog('[DEBUG] Final extracted payment:', JSON.stringify(payment, null, 2));
 
   if (!payment) {
     console.error('[DEBUG] ERROR: Payment object is missing');
@@ -462,7 +498,7 @@ export async function processSaleJob(job: Job): Promise<void> {
     );
   }
 
-  console.log('[DEBUG] Validating payment object fields...');
+  debugLog('[DEBUG] Validating payment object fields...');
   
   if (!payment || typeof payment !== 'object') {
     console.error('[DEBUG] ERROR: Payment is not a valid object');
@@ -480,7 +516,7 @@ export async function processSaleJob(job: Job): Promise<void> {
       { payment: JSON.stringify(payment) },
     );
   }
-  console.log('[DEBUG] ✓ Payment ID found:', payment.id);
+  debugLog('[DEBUG] ✓ Payment ID found:', payment.id);
 
   if (!payment.location_id) {
     console.error('[DEBUG] ERROR: Payment object missing location_id');
@@ -489,7 +525,7 @@ export async function processSaleJob(job: Job): Promise<void> {
       { payment: JSON.stringify(payment) },
     );
   }
-  console.log('[DEBUG] ✓ Location ID found:', payment.location_id);
+  debugLog('[DEBUG] ✓ Location ID found:', payment.location_id);
 
   const squareId = payment.id;
   const locationId = payment.location_id;
@@ -498,7 +534,7 @@ export async function processSaleJob(job: Job): Promise<void> {
     ? new Date(payment.created_at)
     : new Date();
 
-  console.log('[DEBUG] Payment details extracted:', {
+  debugLog('[DEBUG] Payment details extracted:', {
     squareId,
     locationId,
     orderId,
@@ -506,18 +542,18 @@ export async function processSaleJob(job: Job): Promise<void> {
   });
 
   // Check if sale with squareId already exists (idempotency)
-  console.log('[DEBUG] Checking for existing sale with squareId:', squareId);
+  debugLog('[DEBUG] Checking for existing sale with squareId:', squareId);
   const existing = await getPrisma().sale.findUnique({
     where: { squareId },
   });
   if (existing) {
-    console.log(`[DEBUG] Sale ${squareId} already exists, skipping (idempotent)`);
+    debugLog(`[DEBUG] Sale ${squareId} already exists, skipping (idempotent)`);
     return;
   }
-  console.log('[DEBUG] ✓ No existing sale found, proceeding...');
+  debugLog('[DEBUG] ✓ No existing sale found, proceeding...');
 
   // Phase 2: Fetch Order Data from Square (or use test data)
-  console.log('[DEBUG] Validating order_id...');
+  debugLog('[DEBUG] Validating order_id...');
   if (!orderId) {
     console.error('[DEBUG] ERROR: Payment object missing order_id');
     throw new SaleValidationError(
@@ -525,24 +561,24 @@ export async function processSaleJob(job: Job): Promise<void> {
       { payment: JSON.stringify(payment) },
     );
   }
-  console.log('[DEBUG] ✓ Order ID found:', orderId);
+  debugLog('[DEBUG] ✓ Order ID found:', orderId);
 
   let order;
   
   // Check if this is a test event with embedded order data
   const testOrderData = job.data?.payload?._testOrderData;
   if (testOrderData) {
-    console.log('[DEBUG] Using test order data (bypassing Square API)');
+    debugLog('[DEBUG] Using test order data (bypassing Square API)');
     order = testOrderData;
   } else {
     try {
-      console.log('[DEBUG] Fetching order from Square API...');
+      debugLog('[DEBUG] Fetching order from Square API...');
       const client = getSquareClient();
-      console.log('[DEBUG] Square client initialized, calling orders.get()');
+      debugLog('[DEBUG] Square client initialized, calling orders.get()');
       const response = await client.orders.get({
         orderId: orderId,
       });
-      console.log('[DEBUG] Square API response received');
+      debugLog('[DEBUG] Square API response received');
       order = response.order;
 
       if (!order) {
@@ -552,7 +588,7 @@ export async function processSaleJob(job: Job): Promise<void> {
           { orderId, squareId },
         );
       }
-      console.log('[DEBUG] ✓ Order fetched successfully, order ID:', order.id);
+      debugLog('[DEBUG] ✓ Order fetched successfully, order ID:', order.id);
     } catch (error) {
       console.error('[DEBUG] ERROR: Failed to fetch order from Square:', {
         error: error instanceof Error ? error.message : String(error),
@@ -568,9 +604,9 @@ export async function processSaleJob(job: Job): Promise<void> {
   }
 
   // Extract line items from order
-  console.log('[DEBUG] Extracting line items from order...');
+  debugLog('[DEBUG] Extracting line items from order...');
   const orderLineItems = order.lineItems || [];
-  console.log('[DEBUG] Found', orderLineItems.length, 'line items in order');
+  debugLog('[DEBUG] Found', orderLineItems.length, 'line items in order');
 
   if (!orderLineItems || orderLineItems.length === 0) {
     console.error('[DEBUG] ERROR: Order has no line items');
@@ -583,12 +619,12 @@ export async function processSaleJob(job: Job): Promise<void> {
   // Map Square line items to SaleItemInput
   // Note: This assumes products are mapped by SKU or variation ID
   // You may need to adjust the mapping logic based on your product setup
-  console.log('[DEBUG] Mapping line items to SaleItemInput...');
+  debugLog('[DEBUG] Mapping line items to SaleItemInput...');
   const lineItems: SaleItemInput[] = [];
 
   for (let i = 0; i < orderLineItems.length; i++) {
     const orderLineItem = orderLineItems[i];
-    console.log(`[DEBUG] Processing line item ${i + 1}/${orderLineItems.length}:`, {
+    debugLog(`[DEBUG] Processing line item ${i + 1}/${orderLineItems.length}:`, {
       uid: orderLineItem.uid,
       name: orderLineItem.name,
       catalogObjectId: orderLineItem.catalogObjectId,
@@ -604,7 +640,7 @@ export async function processSaleJob(job: Job): Promise<void> {
     // Map variation ID to product using CatalogMapping
     const catalogObjectId = orderLineItem.catalogObjectId;
     const itemName = orderLineItem.name;
-    console.log(`[DEBUG] Looking up product for line item ${i + 1}:`, {
+    debugLog(`[DEBUG] Looking up product for line item ${i + 1}:`, {
       catalogObjectId,
       itemName,
     });
@@ -623,7 +659,7 @@ export async function processSaleJob(job: Job): Promise<void> {
         locationId,
         getPrisma(),
       );
-      console.log(`[DEBUG] ✓ Product mapped for line item ${i + 1}:`, {
+      debugLog(`[DEBUG] ✓ Product mapped for line item ${i + 1}:`, {
         variationId: catalogObjectId,
         productId,
         locationId,
@@ -654,7 +690,7 @@ export async function processSaleJob(job: Job): Promise<void> {
     const quantity = orderLineItem.quantity
       ? parseInt(orderLineItem.quantity, 10)
       : 1;
-    console.log(`[DEBUG] Line item ${i + 1} quantity:`, quantity);
+    debugLog(`[DEBUG] Line item ${i + 1} quantity:`, quantity);
 
     if (quantity <= 0) {
       console.error(`[DEBUG] ERROR: Line item ${i + 1} has invalid quantity`);
@@ -668,7 +704,7 @@ export async function processSaleJob(job: Job): Promise<void> {
     // totalMoney is the total price for the quantity (in cents)
     // basePriceMoney would be the unit price, but we'll calculate from totalMoney
     const totalMoney = orderLineItem.totalMoney;
-    console.log(`[DEBUG] Line item ${i + 1} totalMoney:`, totalMoney);
+    debugLog(`[DEBUG] Line item ${i + 1} totalMoney:`, totalMoney);
     
     if (!totalMoney || totalMoney.amount === undefined || totalMoney.amount === null) {
       console.error(`[DEBUG] ERROR: Line item ${i + 1} missing price information`);
@@ -682,7 +718,7 @@ export async function processSaleJob(job: Job): Promise<void> {
     // totalMoney.amount is a bigint, convert to string first
     const totalPriceInDollars = new Prisma.Decimal(totalMoney.amount.toString()).div(100);
     const unitPrice = totalPriceInDollars.div(quantity);
-    console.log(`[DEBUG] Line item ${i + 1} pricing:`, {
+    debugLog(`[DEBUG] Line item ${i + 1} pricing:`, {
       totalPriceInDollars: totalPriceInDollars.toString(),
       unitPrice: unitPrice.toString(),
     });
@@ -692,10 +728,10 @@ export async function processSaleJob(job: Job): Promise<void> {
       quantitySold: quantity,
       salePrice: new Prisma.Decimal(unitPrice),
     });
-    console.log(`[DEBUG] ✓ Line item ${i + 1} mapped successfully`);
+    debugLog(`[DEBUG] ✓ Line item ${i + 1} mapped successfully`);
   }
 
-  console.log('[DEBUG] Total line items mapped:', lineItems.length);
+  debugLog('[DEBUG] Total line items mapped:', lineItems.length);
   if (lineItems.length === 0) {
     console.error('[DEBUG] ERROR: No valid line items found after mapping');
     throw new SaleValidationError(
@@ -724,7 +760,7 @@ export async function processSaleJob(job: Job): Promise<void> {
   }
 
   // Phase 3 & 4: Create Sale Record and Process Items (all in transaction)
-  console.log('[DEBUG] Starting transaction to create sale and process items...');
+  debugLog('[DEBUG] Starting transaction to create sale and process items...');
   let saleId: string;
   let itemCount: number;
 
@@ -737,7 +773,7 @@ export async function processSaleJob(job: Job): Promise<void> {
         });
 
         if (!location) {
-          console.log('[DEBUG] [TX] Location not found, creating new location with squareId:', locationId);
+          debugLog('[DEBUG] [TX] Location not found, creating new location with squareId:', locationId);
           // Fetch location details from Square API if needed, or create with minimal data
           // For now, create with squareId only - name/address can be updated later
           location = await tx.location.create({
@@ -747,12 +783,12 @@ export async function processSaleJob(job: Job): Promise<void> {
               isActive: true,
             },
           });
-          console.log('[DEBUG] [TX] Created location:', location.id);
+          debugLog('[DEBUG] [TX] Created location:', location.id);
         } else {
-          console.log('[DEBUG] [TX] Found existing location:', location.id);
+          debugLog('[DEBUG] [TX] Found existing location:', location.id);
         }
 
-        console.log('[DEBUG] [TX] Creating Sale record...');
+        debugLog('[DEBUG] [TX] Creating Sale record...');
         // Create Sale record (initial with temporary totals)
         const sale = await tx.sale.create({
           data: {
@@ -764,21 +800,21 @@ export async function processSaleJob(job: Job): Promise<void> {
             grossProfit: new Prisma.Decimal(0), // Temporary
           },
         });
-        console.log('[DEBUG] [TX] ✓ Sale record created:', sale.id);
+        debugLog('[DEBUG] [TX] ✓ Sale record created:', sale.id);
 
         const saleItems: SaleItemOutput[] = [];
 
         // Process each line item
-        console.log('[DEBUG] [TX] Processing', lineItems.length, 'line items...');
+        debugLog('[DEBUG] [TX] Processing', lineItems.length, 'line items...');
         for (let i = 0; i < lineItems.length; i++) {
           const lineItem = lineItems[i];
-          console.log(`[DEBUG] [TX] Processing line item ${i + 1}/${lineItems.length}:`, {
+          debugLog(`[DEBUG] [TX] Processing line item ${i + 1}/${lineItems.length}:`, {
             productId: lineItem.productId,
             quantitySold: lineItem.quantitySold,
             salePrice: lineItem.salePrice.toString(),
           });
           try {
-            console.log(`[DEBUG] [TX] Calling processSaleItem for line item ${i + 1}...`);
+            debugLog(`[DEBUG] [TX] Calling processSaleItem for line item ${i + 1}...`);
             const saleItem = await processSaleItem(
               sale.id,
               lineItem.productId,
@@ -787,7 +823,7 @@ export async function processSaleJob(job: Job): Promise<void> {
               new Prisma.Decimal(lineItem.salePrice),
               tx,
             );
-            console.log(`[DEBUG] [TX] ✓ Line item ${i + 1} processed:`, {
+            debugLog(`[DEBUG] [TX] ✓ Line item ${i + 1} processed:`, {
               productId: saleItem.productId,
               quantity: saleItem.quantity,
               cost: saleItem.cost.toString(),
@@ -811,16 +847,16 @@ export async function processSaleJob(job: Job): Promise<void> {
         }
 
         // Calculate sale totals
-        console.log('[DEBUG] [TX] Calculating sale totals...');
+        debugLog('[DEBUG] [TX] Calculating sale totals...');
         const totals = calculateSaleTotals(saleItems);
-        console.log('[DEBUG] [TX] Sale totals:', {
+        debugLog('[DEBUG] [TX] Sale totals:', {
           totalRevenue: totals.totalRevenue.toString(),
           totalCost: totals.totalCost.toString(),
           grossProfit: totals.grossProfit.toString(),
         });
 
         // Update Sale record with totals
-        console.log('[DEBUG] [TX] Updating Sale record with totals...');
+        debugLog('[DEBUG] [TX] Updating Sale record with totals...');
         await tx.sale.update({
           where: { id: sale.id },
           data: {
@@ -829,7 +865,7 @@ export async function processSaleJob(job: Job): Promise<void> {
             grossProfit: totals.grossProfit,
           },
         });
-        console.log('[DEBUG] [TX] ✓ Sale record updated');
+        debugLog('[DEBUG] [TX] ✓ Sale record updated');
 
         return { saleId: sale.id, itemCount: saleItems.length };
       },
@@ -842,13 +878,13 @@ export async function processSaleJob(job: Job): Promise<void> {
     itemCount = result.itemCount;
 
     // Phase 5: Success
-    console.log('[DEBUG] ========================================');
-    console.log('[DEBUG] ✓ Sale processed successfully!');
-    console.log('[DEBUG] Sale ID:', saleId);
-    console.log('[DEBUG] Square ID:', squareId);
-    console.log('[DEBUG] Location ID:', locationId);
-    console.log('[DEBUG] Item Count:', itemCount);
-    console.log('[DEBUG] ========================================');
+    debugLog('[DEBUG] ========================================');
+    debugLog('[DEBUG] ✓ Sale processed successfully!');
+    debugLog('[DEBUG] Sale ID:', saleId);
+    debugLog('[DEBUG] Square ID:', squareId);
+    debugLog('[DEBUG] Location ID:', locationId);
+    debugLog('[DEBUG] Item Count:', itemCount);
+    debugLog('[DEBUG] ========================================');
   } catch (error) {
     // Error handling
     if (error instanceof UnmappedVariationError) {
