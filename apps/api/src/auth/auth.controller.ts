@@ -34,19 +34,6 @@ interface SwitchLocationDto {
   locationId: string;
 }
 
-// Helper functions
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function getErrorStatus(error: unknown): number {
-  if (error && typeof error === 'object' && 'status' in error) {
-    return (error as { status: number }).status;
-  }
-  return HttpStatus.INTERNAL_SERVER_ERROR;
-}
-
 // ============================================================================
 // Controller
 // ============================================================================
@@ -75,18 +62,11 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Get('setup/status')
   async getSetupStatus() {
-    try {
-      const status = await this.employeeService.getSetupStatus();
-      return {
-        success: true,
-        data: status,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    const status = await this.employeeService.getSetupStatus();
+    return {
+      success: true,
+      data: status,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -94,29 +74,21 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Get('setup/square-locations')
   async getSquareLocations() {
-    try {
-      // Only allow this if setup is needed (no employees exist)
-      const status = await this.employeeService.getSetupStatus();
-      if (!status.needsSetup) {
-        throw new HttpException(
-          { success: false, message: 'Setup already completed. Use authenticated endpoints.' },
-          HttpStatus.FORBIDDEN
-        );
-      }
-
-      const result = await this.locationsService.fetchSquareLocations();
-      return {
-        success: true,
-        data: result.locations,
-        count: result.locations.length,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    // Only allow this if setup is needed (no employees exist)
+    const status = await this.employeeService.getSetupStatus();
+    if (!status.needsSetup) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Setup already completed. Use authenticated endpoints.' },
+        HttpStatus.FORBIDDEN
       );
     }
+
+    const result = await this.locationsService.fetchSquareLocations();
+    return {
+      success: true,
+      data: result.locations,
+      count: result.locations.length,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -124,36 +96,28 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Post('setup/sync-locations')
   async syncSquareLocationsForSetup() {
-    try {
-      // Only allow this if setup is needed (no employees exist)
-      const status = await this.employeeService.getSetupStatus();
-      if (!status.needsSetup) {
-        throw new HttpException(
-          { success: false, message: 'Setup already completed. Use authenticated endpoints.' },
-          HttpStatus.FORBIDDEN
-        );
-      }
-
-      const result = await this.locationsService.syncLocationsFromSquare();
-      
-      // Fetch the newly synced locations
-      const updatedStatus = await this.employeeService.getSetupStatus();
-      
-      return {
-        success: true,
-        message: `Synced ${result.total} locations: ${result.created} created, ${result.updated} updated`,
-        data: {
-          ...result,
-          locations: updatedStatus.locations,
-        },
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    // Only allow this if setup is needed (no employees exist)
+    const status = await this.employeeService.getSetupStatus();
+    if (!status.needsSetup) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Setup already completed. Use authenticated endpoints.' },
+        HttpStatus.FORBIDDEN
       );
     }
+
+    const result = await this.locationsService.syncLocationsFromSquare();
+    
+    // Fetch the newly synced locations
+    const updatedStatus = await this.employeeService.getSetupStatus();
+    
+    return {
+      success: true,
+      message: `Synced ${result.total} locations: ${result.created} created, ${result.updated} updated`,
+      data: {
+        ...result,
+        locations: updatedStatus.locations,
+      },
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -161,24 +125,16 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Post('setup/initial')
   async initialSetup(@Body() body: InitialSetupDto) {
-    try {
-      const result = await this.employeeService.initialSetup({
-        ownerName: body.ownerName,
-        ownerEmail: body.ownerEmail,
-        ownerPassword: body.ownerPassword,
-        ownerPin: body.ownerPin,
-        locationId: body.locationId,
-        locationName: body.locationName,
-        squareLocationId: body.squareLocationId,
-      });
-      return result;
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    const result = await this.employeeService.initialSetup({
+      ownerName: body.ownerName,
+      ownerEmail: body.ownerEmail,
+      ownerPassword: body.ownerPassword,
+      ownerPin: body.ownerPin,
+      locationId: body.locationId,
+      locationName: body.locationName,
+      squareLocationId: body.squareLocationId,
+    });
+    return result;
   }
 
   // --------------------------------------------------------------------------
@@ -186,35 +142,27 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Post('device/activate')
   async activateDevice(@Body() body: ActivateDeviceDto) {
-    try {
-      // Validate required fields
-      if (!body.email || !body.password || !body.deviceName) {
-        throw new HttpException(
-          { success: false, message: 'Missing required fields: email, password, deviceName' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      const result = await this.authService.activateDevice({
-        email: body.email,
-        password: body.password,
-        deviceName: body.deviceName,
-        locationId: body.locationId,  // Optional - service will auto-select
-        deviceType: body.deviceType,
-      });
-
-      return {
-        success: true,
-        message: `Device "${body.deviceName}" activated successfully`,
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    // Validate required fields
+    if (!body.email || !body.password || !body.deviceName) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Missing required fields: email, password, deviceName' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    const result = await this.authService.activateDevice({
+      email: body.email,
+      password: body.password,
+      deviceName: body.deviceName,
+      locationId: body.locationId,  // Optional - service will auto-select
+      deviceType: body.deviceType,
+    });
+
+    return {
+      success: true,
+      message: `Device "${body.deviceName}" activated successfully`,
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -225,28 +173,20 @@ export class AuthController {
     @Param('deviceId') deviceId: string,
     @Headers('x-session-token') sessionToken: string
   ) {
-    try {
-      if (!sessionToken) {
-        throw new HttpException(
-          { success: false, message: 'Session token required' },
-          HttpStatus.UNAUTHORIZED
-        );
-      }
-
-      const { employee } = await this.authService.validateSession(sessionToken);
-      await this.authService.deactivateDevice(deviceId, employee.id);
-
-      return {
-        success: true,
-        message: 'Device deactivated successfully',
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!sessionToken) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Session token required' },
+        HttpStatus.UNAUTHORIZED
       );
     }
+
+    const { employee } = await this.authService.validateSession(sessionToken);
+    await this.authService.deactivateDevice(deviceId, employee.id);
+
+    return {
+      success: true,
+      message: 'Device deactivated successfully',
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -257,40 +197,32 @@ export class AuthController {
     @Headers('authorization') authorization: string,
     @Query('locationId') locationId?: string
   ) {
-    try {
-      // Extract device token from Authorization header
-      const deviceToken = authorization?.replace('Bearer ', '');
-      if (!deviceToken) {
-        throw new HttpException(
-          { success: false, message: 'Device token required' },
-          HttpStatus.UNAUTHORIZED
-        );
-      }
-
-      const device = await this.authService.validateDeviceToken(deviceToken);
-      const targetLocationId = locationId || device.locationId;
-
-      const devices = await this.authService.getActiveDevices(targetLocationId);
-
-      return {
-        success: true,
-        count: devices.length,
-        data: devices.map(d => ({
-          id: d.id,
-          name: d.name,
-          type: d.type,
-          isActive: d.isActive,
-          lastActiveAt: d.lastActiveAt,
-          activatedAt: d.activatedAt,
-        })),
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    // Extract device token from Authorization header
+    const deviceToken = authorization?.replace('Bearer ', '');
+    if (!deviceToken) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Device token required' },
+        HttpStatus.UNAUTHORIZED
       );
     }
+
+    const device = await this.authService.validateDeviceToken(deviceToken);
+    const targetLocationId = locationId || device.locationId;
+
+    const devices = await this.authService.getActiveDevices(targetLocationId);
+
+    return {
+      success: true,
+      count: devices.length,
+      data: devices.map(d => ({
+        id: d.id,
+        name: d.name,
+        type: d.type,
+        isActive: d.isActive,
+        lastActiveAt: d.lastActiveAt,
+        activatedAt: d.activatedAt,
+      })),
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -301,41 +233,33 @@ export class AuthController {
     @Body() body: PINLoginDto,
     @Headers('authorization') authorization: string
   ) {
-    try {
-      // Validate PIN format
-      if (!body.pin || !/^\d{4,6}$/.test(body.pin)) {
-        throw new HttpException(
-          { success: false, message: 'Invalid PIN format. Must be 4-6 digits.' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Extract device token from Authorization header
-      const deviceToken = authorization?.replace('Bearer ', '');
-      if (!deviceToken) {
-        throw new HttpException(
-          { success: false, message: 'Device token required in Authorization header' },
-          HttpStatus.UNAUTHORIZED
-        );
-      }
-
-      const result = await this.authService.loginWithPIN({
-        pin: body.pin,
-        deviceToken,
-      });
-
-      return {
-        success: true,
-        message: `Welcome, ${result.employee.name}`,
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    // Validate PIN format
+    if (!body.pin || !/^\d{4,6}$/.test(body.pin)) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Invalid PIN format. Must be 4-6 digits.' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    // Extract device token from Authorization header
+    const deviceToken = authorization?.replace('Bearer ', '');
+    if (!deviceToken) {
+      throw new HttpException(
+        { success: false, message: 'Device token required in Authorization header' },
+        HttpStatus.UNAUTHORIZED
+      );
+    }
+
+    const result = await this.authService.loginWithPIN({
+      pin: body.pin,
+      deviceToken,
+    });
+
+    return {
+      success: true,
+      message: `Welcome, ${result.employee.name}`,
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -343,28 +267,20 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Post('pin/refresh')
   async refreshSession(@Headers('x-session-token') sessionToken: string) {
-    try {
-      if (!sessionToken) {
-        throw new HttpException(
-          { success: false, message: 'Session token required' },
-          HttpStatus.UNAUTHORIZED
-        );
-      }
-
-      const result = await this.authService.refreshSession(sessionToken);
-
-      return {
-        success: true,
-        message: 'Session refreshed',
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!sessionToken) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Session token required' },
+        HttpStatus.UNAUTHORIZED
       );
     }
+
+    const result = await this.authService.refreshSession(sessionToken);
+
+    return {
+      success: true,
+      message: 'Session refreshed',
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -375,38 +291,30 @@ export class AuthController {
     @Body() body: SwitchLocationDto,
     @Headers('x-session-token') sessionToken: string
   ) {
-    try {
-      if (!body.locationId) {
-        throw new HttpException(
-          { success: false, message: 'locationId is required' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      if (!sessionToken) {
-        throw new HttpException(
-          { success: false, message: 'Session token required' },
-          HttpStatus.UNAUTHORIZED
-        );
-      }
-
-      const result = await this.authService.switchLocation({
-        locationId: body.locationId,
-        sessionToken,
-      });
-
-      return {
-        success: true,
-        message: `Switched to ${result.currentLocation.locationName}`,
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!body.locationId) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'locationId is required' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    if (!sessionToken) {
+      throw new HttpException(
+        { success: false, message: 'Session token required' },
+        HttpStatus.UNAUTHORIZED
+      );
+    }
+
+    const result = await this.authService.switchLocation({
+      locationId: body.locationId,
+      sessionToken,
+    });
+
+    return {
+      success: true,
+      message: `Switched to ${result.currentLocation.locationName}`,
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -414,50 +322,42 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Get('me')
   async getCurrentSession(@Headers('x-session-token') sessionToken: string) {
-    try {
-      if (!sessionToken) {
-        throw new HttpException(
-          { success: false, message: 'Session token required' },
-          HttpStatus.UNAUTHORIZED
-        );
-      }
-
-      const { session, employee, currentLocation, accessibleLocations } =
-        await this.authService.validateSession(sessionToken);
-
-      return {
-        success: true,
-        data: {
-          employee: {
-            id: employee.id,
-            name: employee.name,
-            email: employee.email,
-          },
-          session: {
-            expiresAt: session.expiresAt,
-            lastActivityAt: session.lastActivityAt,
-          },
-          currentLocation: currentLocation
-            ? {
-                locationId: currentLocation.locationId,
-                locationName: currentLocation.location.name,
-                role: currentLocation.role,
-              }
-            : null,
-          accessibleLocations: accessibleLocations.map(a => ({
-            locationId: a.locationId,
-            locationName: a.location.name,
-            role: a.role,
-          })),
-        },
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!sessionToken) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Session token required' },
+        HttpStatus.UNAUTHORIZED
       );
     }
+
+    const { session, employee, currentLocation, accessibleLocations } =
+      await this.authService.validateSession(sessionToken);
+
+    return {
+      success: true,
+      data: {
+        employee: {
+          id: employee.id,
+          name: employee.name,
+          email: employee.email,
+        },
+        session: {
+          expiresAt: session.expiresAt,
+          lastActivityAt: session.lastActivityAt,
+        },
+        currentLocation: currentLocation
+          ? {
+              locationId: currentLocation.locationId,
+              locationName: currentLocation.location.name,
+              role: currentLocation.role,
+            }
+          : null,
+        accessibleLocations: accessibleLocations.map(a => ({
+          locationId: a.locationId,
+          locationName: a.location.name,
+          role: a.role,
+        })),
+      },
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -502,38 +402,30 @@ export class AuthController {
     @Query('endDate') endDate?: string,
     @Query('limit') limit?: string
   ) {
-    try {
-      if (!sessionToken) {
-        throw new HttpException(
-          { success: false, message: 'Session token required' },
-          HttpStatus.UNAUTHORIZED
-        );
-      }
-
-      // Validate session
-      await this.authService.validateSession(sessionToken);
-
-      const logs = await this.authService.getAuditLogs({
-        locationId,
-        employeeId,
-        action,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-        limit: limit ? parseInt(limit, 10) : undefined,
-      });
-
-      return {
-        success: true,
-        count: logs.length,
-        data: logs,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!sessionToken) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Session token required' },
+        HttpStatus.UNAUTHORIZED
       );
     }
+
+    // Validate session
+    await this.authService.validateSession(sessionToken);
+
+    const logs = await this.authService.getAuditLogs({
+      locationId,
+      employeeId,
+      action,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+
+    return {
+      success: true,
+      count: logs.length,
+      data: logs,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -541,37 +433,29 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Post('sessions/cleanup')
   async cleanupExpiredSessions(@Headers('x-session-token') sessionToken: string) {
-    try {
-      if (!sessionToken) {
-        throw new HttpException(
-          { success: false, message: 'Session token required' },
-          HttpStatus.UNAUTHORIZED
-        );
-      }
-
-      // Validate session (should be OWNER)
-      const { currentLocation } = await this.authService.validateSession(sessionToken);
-      
-      if (currentLocation?.role !== 'OWNER') {
-        throw new HttpException(
-          { success: false, message: 'Only owners can perform this action' },
-          HttpStatus.FORBIDDEN
-        );
-      }
-
-      const result = await this.authService.cleanupExpiredSessions();
-
-      return {
-        success: true,
-        message: `Cleaned up ${result.deletedCount} expired sessions`,
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!sessionToken) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Session token required' },
+        HttpStatus.UNAUTHORIZED
       );
     }
+
+    // Validate session (should be OWNER)
+    const { currentLocation } = await this.authService.validateSession(sessionToken);
+    
+    if (currentLocation?.role !== 'OWNER') {
+      throw new HttpException(
+        { success: false, message: 'Only owners can perform this action' },
+        HttpStatus.FORBIDDEN
+      );
+    }
+
+    const result = await this.authService.cleanupExpiredSessions();
+
+    return {
+      success: true,
+      message: `Cleaned up ${result.deletedCount} expired sessions`,
+      data: result,
+    };
   }
 }

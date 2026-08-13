@@ -4,26 +4,11 @@ import {
   Param,
   Query,
   Req,
-  HttpException,
-  HttpStatus,
   UseGuards,
   NotFoundException,
 } from '@nestjs/common';
 import { InventoryReportsService } from './inventory-reports.service';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
-
-// Helper to extract error message
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function getErrorStatus(error: unknown): number {
-  if (error && typeof error === 'object' && 'status' in error) {
-    return (error as { status: number }).status;
-  }
-  return HttpStatus.INTERNAL_SERVER_ERROR;
-}
 
 // Helper to set date to end of day (23:59:59.999) to include all records from that day
 function endOfDay(date: Date): Date {
@@ -49,27 +34,20 @@ export class InventoryReportsController {
     @Query('endDate') endDate?: string,
     @Query('groupByCategory') groupByCategory?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const report = await this.reportsService.getCOGSReport({
-        locationId: targetLocationId,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
-        groupByCategory: groupByCategory === 'true',
-      });
+    const report = await this.reportsService.getCOGSReport({
+      locationId: targetLocationId,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
+      groupByCategory: groupByCategory === 'true',
+    });
 
-      return {
-        success: true,
-        data: report,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get COGS report' },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      data: report,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -82,25 +60,18 @@ export class InventoryReportsController {
     @Query('locationId') locationId?: string,
     @Query('productId') productId?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const report = await this.reportsService.getInventoryValuationReport({
-        locationId: targetLocationId,
-        productId,
-      });
+    const report = await this.reportsService.getInventoryValuationReport({
+      locationId: targetLocationId,
+      productId,
+    });
 
-      return {
-        success: true,
-        data: report,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get valuation report' },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      data: report,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -114,26 +85,19 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const report = await this.reportsService.getProfitMarginReport({
-        locationId: targetLocationId,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
-      });
+    const report = await this.reportsService.getProfitMarginReport({
+      locationId: targetLocationId,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
+    });
 
-      return {
-        success: true,
-        data: report,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get profit margin report' },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      data: report,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -147,26 +111,19 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const report = await this.reportsService.getAdjustmentImpactReport({
-        locationId: targetLocationId,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
-      });
+    const report = await this.reportsService.getAdjustmentImpactReport({
+      locationId: targetLocationId,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
+    });
 
-      return {
-        success: true,
-        data: report,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get adjustment report' },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      data: report,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -180,26 +137,19 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const report = await this.reportsService.getReceivingSummaryReport({
-        locationId: targetLocationId,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
-      });
+    const report = await this.reportsService.getReceivingSummaryReport({
+      locationId: targetLocationId,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
+    });
 
-      return {
-        success: true,
-        data: report,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get receiving report' },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      data: report,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -214,26 +164,19 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const report = await this.reportsService.getProfitAndLossReport({
-        locationId: targetLocationId,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
-      });
+    const report = await this.reportsService.getProfitAndLossReport({
+      locationId: targetLocationId,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? endOfDay(new Date(endDate)) : undefined,
+    });
 
-      return {
-        success: true,
-        data: report,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get P&L report' },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      data: report,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -247,91 +190,84 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const parsedStartDate = startDate ? new Date(startDate) : undefined;
-      // Use end of day for endDate to include all records from that day
-      // This fixes timezone issues where records created late in the day (local time)
-      // have UTC timestamps that fall on the next day
-      const parsedEndDate = endDate ? endOfDay(new Date(endDate)) : undefined;
+    const parsedStartDate = startDate ? new Date(startDate) : undefined;
+    // Use end of day for endDate to include all records from that day
+    // This fixes timezone issues where records created late in the day (local time)
+    // have UTC timestamps that fall on the next day
+    const parsedEndDate = endDate ? endOfDay(new Date(endDate)) : undefined;
 
-      // Fetch all reports in parallel (including P&L for net profit)
-      const [cogs, valuation, adjustments, receivings, profitLoss] = await Promise.all([
-        this.reportsService.getCOGSReport({
-          locationId: targetLocationId,
-          startDate: parsedStartDate,
-          endDate: parsedEndDate,
-        }),
-        this.reportsService.getInventoryValuationReport({ locationId: targetLocationId }),
-        this.reportsService.getAdjustmentImpactReport({
-          locationId: targetLocationId,
-          startDate: parsedStartDate,
-          endDate: parsedEndDate,
-        }),
-        this.reportsService.getReceivingSummaryReport({
-          locationId: targetLocationId,
-          startDate: parsedStartDate,
-          endDate: parsedEndDate,
-        }),
-        this.reportsService.getProfitAndLossReport({
-          locationId: targetLocationId,
-          startDate: parsedStartDate,
-          endDate: parsedEndDate,
-        }),
-      ]);
+    // Fetch all reports in parallel (including P&L for net profit)
+    const [cogs, valuation, adjustments, receivings, profitLoss] = await Promise.all([
+      this.reportsService.getCOGSReport({
+        locationId: targetLocationId,
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
+      }),
+      this.reportsService.getInventoryValuationReport({ locationId: targetLocationId }),
+      this.reportsService.getAdjustmentImpactReport({
+        locationId: targetLocationId,
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
+      }),
+      this.reportsService.getReceivingSummaryReport({
+        locationId: targetLocationId,
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
+      }),
+      this.reportsService.getProfitAndLossReport({
+        locationId: targetLocationId,
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
+      }),
+    ]);
 
-      return {
-        success: true,
-        data: {
-          period: { startDate: parsedStartDate, endDate: parsedEndDate },
-          locationId: targetLocationId,
-          sales: {
-            totalRevenue: cogs.summary.totalRevenue,
-            totalCOGS: cogs.summary.totalCOGS,
-            grossProfit: cogs.summary.grossProfit,
-            grossMarginPercent: cogs.summary.grossMarginPercent,
-            totalUnitsSold: cogs.summary.totalUnitsSold,
-            totalSales: cogs.summary.totalSales,
-          },
-          inventory: {
-            totalUnits: valuation.summary.totalUnits,
-            totalValue: valuation.summary.totalValue,
-            totalProducts: valuation.summary.totalProducts,
-            averageCostPerUnit: valuation.summary.averageCostPerUnit,
-            aging: valuation.agingSummary,
-          },
-          adjustments: {
-            totalAdjustments: adjustments.summary.totalAdjustments,
-            totalLoss: adjustments.summary.totalLoss,
-            totalGain: adjustments.summary.totalGain,
-            netImpact: adjustments.summary.netImpact,
-          },
-          receivings: {
-            totalReceivings: receivings.summary.totalReceivings,
-            totalQuantity: receivings.summary.totalQuantity,
-            totalCost: receivings.summary.totalCost,
-          },
-          // Operating Expenses (rent, payroll, utilities, etc.)
-          operatingExpenses: {
-            total: profitLoss.operatingExpenses.total,
-            byType: profitLoss.operatingExpenses.byType,
-            shrinkage: profitLoss.operatingExpenses.shrinkage,
-          },
-          // Net Profit (after all expenses)
-          netProfit: {
-            amount: profitLoss.netProfit.amount,
-            marginPercent: profitLoss.netProfit.marginPercent,
-          },
+    return {
+      success: true,
+      data: {
+        period: { startDate: parsedStartDate, endDate: parsedEndDate },
+        locationId: targetLocationId,
+        sales: {
+          totalRevenue: cogs.summary.totalRevenue,
+          totalCOGS: cogs.summary.totalCOGS,
+          grossProfit: cogs.summary.grossProfit,
+          grossMarginPercent: cogs.summary.grossMarginPercent,
+          totalUnitsSold: cogs.summary.totalUnitsSold,
+          totalSales: cogs.summary.totalSales,
         },
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get dashboard' },
-        getErrorStatus(error)
-      );
-    }
+        inventory: {
+          totalUnits: valuation.summary.totalUnits,
+          totalValue: valuation.summary.totalValue,
+          totalProducts: valuation.summary.totalProducts,
+          averageCostPerUnit: valuation.summary.averageCostPerUnit,
+          aging: valuation.agingSummary,
+        },
+        adjustments: {
+          totalAdjustments: adjustments.summary.totalAdjustments,
+          totalLoss: adjustments.summary.totalLoss,
+          totalGain: adjustments.summary.totalGain,
+          netImpact: adjustments.summary.netImpact,
+        },
+        receivings: {
+          totalReceivings: receivings.summary.totalReceivings,
+          totalQuantity: receivings.summary.totalQuantity,
+          totalCost: receivings.summary.totalCost,
+        },
+        // Operating Expenses (rent, payroll, utilities, etc.)
+        operatingExpenses: {
+          total: profitLoss.operatingExpenses.total,
+          byType: profitLoss.operatingExpenses.byType,
+          shrinkage: profitLoss.operatingExpenses.shrinkage,
+        },
+        // Net Profit (after all expenses)
+        netProfit: {
+          amount: profitLoss.netProfit.amount,
+          marginPercent: profitLoss.netProfit.marginPercent,
+        },
+      },
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -340,28 +276,15 @@ export class InventoryReportsController {
   @Get('batch/:batchId')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getBatchDetail(@Param('batchId') batchId: string) {
-    try {
-      const detail = await this.reportsService.getBatchDetail(batchId);
+    const detail = await this.reportsService.getBatchDetail(batchId);
 
-      if (!detail) {
-        throw new NotFoundException(`Batch ${batchId} not found`);
-      }
-
-      return {
-        success: true,
-        data: detail,
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw new HttpException(
-          { success: false, message: error.message },
-          HttpStatus.NOT_FOUND,
-        );
-      }
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get batch detail' },
-        getErrorStatus(error)
-      );
+    if (!detail) {
+      throw new NotFoundException(`Batch ${batchId} not found`);
     }
+
+    return {
+      success: true,
+      data: detail,
+    };
   }
 }

@@ -31,19 +31,6 @@ interface CreateAdjustmentDto {
   syncToSquare?: boolean; // If true, also update Square inventory
 }
 
-// Helper to extract error message
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function getErrorStatus(error: unknown): number {
-  if (error && typeof error === 'object' && 'status' in error) {
-    return (error as { status: number }).status;
-  }
-  return HttpStatus.INTERNAL_SERVER_ERROR;
-}
-
 /**
  * Parse a date string that could be either:
  * - Date-only: "2026-02-03" -> treated as local date (noon to avoid timezone edge cases)
@@ -75,88 +62,75 @@ export class InventoryAdjustmentController {
   @Post()
   @Roles('OWNER', 'MANAGER')
   async createAdjustment(@Body() body: CreateAdjustmentDto, @Req() req: any) {
-    try {
-      const currentEmployee = req.employee;
-      const currentLocation = req.currentLocation;
+    const currentEmployee = req.employee;
+    const currentLocation = req.currentLocation;
 
-      // Use current location if not specified
-      const locationId = body.locationId || currentLocation.locationId;
+    // Use current location if not specified
+    const locationId = body.locationId || currentLocation.locationId;
 
-      // Validate required fields
-      if (!body.productId || !body.type || body.quantity === undefined) {
-        throw new HttpException(
-          { success: false, message: 'Missing required fields: productId, type, quantity' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Validate adjustment type
-      const validTypes = Object.values(AdjustmentType);
-      if (!validTypes.includes(body.type)) {
-        throw new HttpException(
-          { success: false, message: `Invalid adjustment type. Must be one of: ${validTypes.join(', ')}` },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Validate quantity is non-zero
-      if (body.quantity === 0) {
-        throw new HttpException(
-          { success: false, message: 'Quantity cannot be zero' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Parse effective date if provided
-      let effectiveDate: Date | undefined;
-      if (body.effectiveDate) {
-        effectiveDate = parseDateString(body.effectiveDate);
-        if (isNaN(effectiveDate.getTime())) {
-          throw new HttpException(
-            { success: false, message: 'Invalid effectiveDate format' },
-            HttpStatus.BAD_REQUEST
-          );
-        }
-      }
-
-      const result = await this.adjustmentService.createAdjustment({
-        locationId,
-        productId: body.productId,
-        type: body.type,
-        quantity: body.quantity,
-        reason: body.reason,
-        notes: body.notes,
-        unitCost: body.unitCost,
-        effectiveDate,
-        adjustedBy: currentEmployee.id,
-        syncToSquare: body.syncToSquare,
-      });
-
-      // Build response message
-      let message = `Adjustment created successfully: ${body.type} ${Math.abs(body.quantity)} units`;
-      if (result.squareSync) {
-        message += result.squareSync.synced 
-          ? ' (synced to Square)' 
-          : ` (Square sync failed: ${result.squareSync.error})`;
-      }
-
-      return {
-        success: true,
-        message,
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
+    // Validate required fields
+    if (!body.productId || !body.type || body.quantity === undefined) {
       throw new HttpException(
-        {
-          success: false,
-          message: getErrorMessage(error) || 'Failed to create adjustment',
-        },
-        getErrorStatus(error)
+        { success: false, message: 'Missing required fields: productId, type, quantity' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    // Validate adjustment type
+    const validTypes = Object.values(AdjustmentType);
+    if (!validTypes.includes(body.type)) {
+      throw new HttpException(
+        { success: false, message: `Invalid adjustment type. Must be one of: ${validTypes.join(', ')}` },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // Validate quantity is non-zero
+    if (body.quantity === 0) {
+      throw new HttpException(
+        { success: false, message: 'Quantity cannot be zero' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // Parse effective date if provided
+    let effectiveDate: Date | undefined;
+    if (body.effectiveDate) {
+      effectiveDate = parseDateString(body.effectiveDate);
+      if (isNaN(effectiveDate.getTime())) {
+        throw new HttpException(
+          { success: false, message: 'Invalid effectiveDate format' },
+          HttpStatus.BAD_REQUEST
+        );
+      }
+    }
+
+    const result = await this.adjustmentService.createAdjustment({
+      locationId,
+      productId: body.productId,
+      type: body.type,
+      quantity: body.quantity,
+      reason: body.reason,
+      notes: body.notes,
+      unitCost: body.unitCost,
+      effectiveDate,
+      adjustedBy: currentEmployee.id,
+      syncToSquare: body.syncToSquare,
+    });
+
+    // Build response message
+    let message = `Adjustment created successfully: ${body.type} ${Math.abs(body.quantity)} units`;
+    if (result.squareSync) {
+      message += result.squareSync.synced 
+        ? ' (synced to Square)' 
+        : ` (Square sync failed: ${result.squareSync.error})`;
+    }
+
+    return {
+      success: true,
+      message,
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -238,33 +212,26 @@ export class InventoryAdjustmentController {
   @Get(':id')
   @Roles('OWNER', 'MANAGER')
   async getAdjustment(@Param('id') id: string) {
-    try {
-      const adjustment = await this.adjustmentService.getAdjustment(id);
-      return {
-        success: true,
-        data: {
-          ...adjustment,
-          unitCost: adjustment.unitCost.toString(),
-          totalCost: adjustment.totalCost.toString(),
-          consumptions: adjustment.consumptions.map(c => ({
-            ...c,
-            unitCost: c.unitCost.toString(),
-            totalCost: c.totalCost.toString(),
-          })),
-          createdBatch: adjustment.createdBatch
-            ? {
-                ...adjustment.createdBatch,
-                unitCost: adjustment.createdBatch.unitCost.toString(),
-              }
-            : null,
-        },
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get adjustment' },
-        getErrorStatus(error)
-      );
-    }
+    const adjustment = await this.adjustmentService.getAdjustment(id);
+    return {
+      success: true,
+      data: {
+        ...adjustment,
+        unitCost: adjustment.unitCost.toString(),
+        totalCost: adjustment.totalCost.toString(),
+        consumptions: adjustment.consumptions.map(c => ({
+          ...c,
+          unitCost: c.unitCost.toString(),
+          totalCost: c.totalCost.toString(),
+        })),
+        createdBatch: adjustment.createdBatch
+          ? {
+              ...adjustment.createdBatch,
+              unitCost: adjustment.createdBatch.unitCost.toString(),
+            }
+          : null,
+      },
+    };
   }
 
   @Get('product/:productId')
@@ -273,27 +240,20 @@ export class InventoryAdjustmentController {
     @Param('productId') productId: string,
     @Query('locationId') locationId?: string
   ) {
-    try {
-      const adjustments = await this.adjustmentService.getAdjustmentsByProduct(productId, locationId);
-      return {
-        success: true,
-        count: adjustments.length,
-        data: adjustments.map(a => ({
-          ...a,
-          unitCost: a.unitCost.toString(),
-          totalCost: a.totalCost.toString(),
-          consumptions: a.consumptions.map(c => ({
-            ...c,
-            unitCost: c.unitCost.toString(),
-          })),
+    const adjustments = await this.adjustmentService.getAdjustmentsByProduct(productId, locationId);
+    return {
+      success: true,
+      count: adjustments.length,
+      data: adjustments.map(a => ({
+        ...a,
+        unitCost: a.unitCost.toString(),
+        totalCost: a.totalCost.toString(),
+        consumptions: a.consumptions.map(c => ({
+          ...c,
+          unitCost: c.unitCost.toString(),
         })),
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get adjustments' },
-        getErrorStatus(error)
-      );
-    }
+      })),
+    };
   }
 
   @Get('location/:locationId')
@@ -305,32 +265,25 @@ export class InventoryAdjustmentController {
     @Query('type') type?: AdjustmentType,
     @Query('limit') limit?: string
   ) {
-    try {
-      const adjustments = await this.adjustmentService.getAdjustmentsByLocation(locationId, {
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-        type,
-        limit: limit ? parseInt(limit, 10) : undefined,
-      });
-      return {
-        success: true,
-        count: adjustments.length,
-        data: adjustments.map(a => ({
-          ...a,
-          unitCost: a.unitCost.toString(),
-          totalCost: a.totalCost.toString(),
-          consumptions: a.consumptions.map(c => ({
-            ...c,
-            unitCost: c.unitCost.toString(),
-          })),
+    const adjustments = await this.adjustmentService.getAdjustmentsByLocation(locationId, {
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+      type,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+    return {
+      success: true,
+      count: adjustments.length,
+      data: adjustments.map(a => ({
+        ...a,
+        unitCost: a.unitCost.toString(),
+        totalCost: a.totalCost.toString(),
+        consumptions: a.consumptions.map(c => ({
+          ...c,
+          unitCost: c.unitCost.toString(),
         })),
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get adjustments' },
-        getErrorStatus(error)
-      );
-    }
+      })),
+    };
   }
 
   @Get('location/:locationId/summary')
@@ -340,22 +293,15 @@ export class InventoryAdjustmentController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    try {
-      const summary = await this.adjustmentService.getAdjustmentSummary(
-        locationId,
-        startDate ? new Date(startDate) : undefined,
-        endDate ? new Date(endDate) : undefined
-      );
-      return {
-        success: true,
-        data: summary,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get summary' },
-        getErrorStatus(error)
-      );
-    }
+    const summary = await this.adjustmentService.getAdjustmentSummary(
+      locationId,
+      startDate ? new Date(startDate) : undefined,
+      endDate ? new Date(endDate) : undefined
+    );
+    return {
+      success: true,
+      data: summary,
+    };
   }
 
   // --------------------------------------------------------------------------

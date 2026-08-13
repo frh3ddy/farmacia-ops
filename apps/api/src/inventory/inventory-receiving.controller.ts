@@ -44,13 +44,6 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function getErrorStatus(error: unknown): number {
-  if (error && typeof error === 'object' && 'status' in error) {
-    return (error as { status: number }).status;
-  }
-  return HttpStatus.INTERNAL_SERVER_ERROR;
-}
-
 /**
  * Parse a date string that could be either:
  * - Date-only: "2026-02-03" -> treated as local date (noon to avoid timezone edge cases)
@@ -87,145 +80,132 @@ export class InventoryReceivingController {
   @Post()
   @Roles('OWNER', 'MANAGER')
   async receiveInventory(@Body() body: ReceiveInventoryDto, @Req() req: any) {
-    try {
-      const currentEmployee = req.employee;
-      const currentLocation = req.currentLocation;
+    const currentEmployee = req.employee;
+    const currentLocation = req.currentLocation;
 
-      // Use current location if not specified
-      const locationId = body.locationId || currentLocation.locationId;
+    // Use current location if not specified
+    const locationId = body.locationId || currentLocation.locationId;
 
-      // Validate required fields
-      if (!body.productId || !body.quantity || body.unitCost === undefined) {
-        throw new HttpException(
-          { success: false, message: 'Missing required fields: productId, quantity, unitCost' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Validate quantity
-      if (body.quantity <= 0) {
-        throw new HttpException(
-          { success: false, message: 'Quantity must be a positive number' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Validate unit cost
-      if (body.unitCost < 0) {
-        throw new HttpException(
-          { success: false, message: 'Unit cost cannot be negative' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Parse dates
-      let expiryDate: Date | undefined;
-      let manufacturingDate: Date | undefined;
-
-      if (body.expiryDate) {
-        expiryDate = parseDateString(body.expiryDate);
-        if (isNaN(expiryDate.getTime())) {
-          throw new HttpException(
-            { success: false, message: 'Invalid expiryDate format' },
-            HttpStatus.BAD_REQUEST
-          );
-        }
-      }
-
-      if (body.manufacturingDate) {
-        manufacturingDate = parseDateString(body.manufacturingDate);
-        if (isNaN(manufacturingDate.getTime())) {
-          throw new HttpException(
-            { success: false, message: 'Invalid manufacturingDate format' },
-            HttpStatus.BAD_REQUEST
-          );
-        }
-      }
-
-      const result = await this.receivingService.receiveInventory({
-        locationId,
-        productId: body.productId,
-        quantity: body.quantity,
-        unitCost: body.unitCost,
-        supplierId: body.supplierId,
-        invoiceNumber: body.invoiceNumber,
-        purchaseOrderId: body.purchaseOrderId,
-        batchNumber: body.batchNumber,
-        expiryDate,
-        manufacturingDate,
-        receivedBy: currentEmployee.id,
-        notes: body.notes,
-        syncToSquare: body.syncToSquare,
-      });
-
-      // Build response message
-      let message = `Received ${body.quantity} units successfully`;
-      if (result.squareSync) {
-        message += result.squareSync.synced
-          ? ' (synced to Square)'
-          : ` (Square sync failed: ${result.squareSync.error})`;
-      }
-
-      // Update selling price if provided
-      let priceUpdate = null;
-      if (body.sellingPrice !== undefined && body.sellingPrice > 0) {
-        try {
-          const priceResult = await this.productsService.updatePrice({
-            productId: body.productId,
-            sellingPrice: body.sellingPrice,
-            locationId,
-            syncToSquare: body.syncPriceToSquare !== false, // Default true
-          });
-          priceUpdate = {
-            previousPrice: priceResult.previousPrice,
-            newPrice: priceResult.newPrice,
-            squareSynced: priceResult.squareSynced,
-          };
-          message += priceResult.squareSynced 
-            ? ` | Price updated to $${body.sellingPrice} (synced to Square)`
-            : ` | Price updated to $${body.sellingPrice} locally`;
-          this.logger.log(`[RECEIVING] Price updated for product ${body.productId}: $${body.sellingPrice} (squareSynced: ${priceResult.squareSynced})`);
-        } catch (priceError) {
-          this.logger.error(`[RECEIVING] Failed to update price: ${priceError}`);
-          message += ` | Price update failed: ${getErrorMessage(priceError)}`;
-          priceUpdate = { error: getErrorMessage(priceError) };
-        }
-      }
-
-      // Fetch the updated product so the client has fresh data in one round-trip
-      let updatedProduct = null;
-      try {
-        const productResult = await this.productsService.getProduct(
-          body.productId,
-          locationId,
-        );
-        updatedProduct = productResult.data;
-      } catch (productError) {
-        this.logger.error(`[RECEIVING] Failed to fetch updated product: ${productError}`);
-        // Non-fatal — the receiving itself succeeded
-      }
-
-      return {
-        success: true,
-        message,
-        data: {
-          ...result,
-          priceUpdate,
-          product: updatedProduct,
-        },
-      };
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
+    // Validate required fields
+    if (!body.productId || !body.quantity || body.unitCost === undefined) {
       throw new HttpException(
-        {
-          success: false,
-          message: getErrorMessage(error) || 'Failed to receive inventory',
-        },
-        getErrorStatus(error)
+        { success: false, message: 'Missing required fields: productId, quantity, unitCost' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    // Validate quantity
+    if (body.quantity <= 0) {
+      throw new HttpException(
+        { success: false, message: 'Quantity must be a positive number' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // Validate unit cost
+    if (body.unitCost < 0) {
+      throw new HttpException(
+        { success: false, message: 'Unit cost cannot be negative' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // Parse dates
+    let expiryDate: Date | undefined;
+    let manufacturingDate: Date | undefined;
+
+    if (body.expiryDate) {
+      expiryDate = parseDateString(body.expiryDate);
+      if (isNaN(expiryDate.getTime())) {
+        throw new HttpException(
+          { success: false, message: 'Invalid expiryDate format' },
+          HttpStatus.BAD_REQUEST
+        );
+      }
+    }
+
+    if (body.manufacturingDate) {
+      manufacturingDate = parseDateString(body.manufacturingDate);
+      if (isNaN(manufacturingDate.getTime())) {
+        throw new HttpException(
+          { success: false, message: 'Invalid manufacturingDate format' },
+          HttpStatus.BAD_REQUEST
+        );
+      }
+    }
+
+    const result = await this.receivingService.receiveInventory({
+      locationId,
+      productId: body.productId,
+      quantity: body.quantity,
+      unitCost: body.unitCost,
+      supplierId: body.supplierId,
+      invoiceNumber: body.invoiceNumber,
+      purchaseOrderId: body.purchaseOrderId,
+      batchNumber: body.batchNumber,
+      expiryDate,
+      manufacturingDate,
+      receivedBy: currentEmployee.id,
+      notes: body.notes,
+      syncToSquare: body.syncToSquare,
+    });
+
+    // Build response message
+    let message = `Received ${body.quantity} units successfully`;
+    if (result.squareSync) {
+      message += result.squareSync.synced
+        ? ' (synced to Square)'
+        : ` (Square sync failed: ${result.squareSync.error})`;
+    }
+
+    // Update selling price if provided
+    let priceUpdate = null;
+    if (body.sellingPrice !== undefined && body.sellingPrice > 0) {
+      try {
+        const priceResult = await this.productsService.updatePrice({
+          productId: body.productId,
+          sellingPrice: body.sellingPrice,
+          locationId,
+          syncToSquare: body.syncPriceToSquare !== false, // Default true
+        });
+        priceUpdate = {
+          previousPrice: priceResult.previousPrice,
+          newPrice: priceResult.newPrice,
+          squareSynced: priceResult.squareSynced,
+        };
+        message += priceResult.squareSynced 
+          ? ` | Price updated to $${body.sellingPrice} (synced to Square)`
+          : ` | Price updated to $${body.sellingPrice} locally`;
+        this.logger.log(`[RECEIVING] Price updated for product ${body.productId}: $${body.sellingPrice} (squareSynced: ${priceResult.squareSynced})`);
+      } catch (priceError) {
+        this.logger.error(`[RECEIVING] Failed to update price: ${priceError}`);
+        message += ` | Price update failed: ${getErrorMessage(priceError)}`;
+        priceUpdate = { error: getErrorMessage(priceError) };
+      }
+    }
+
+    // Fetch the updated product so the client has fresh data in one round-trip
+    let updatedProduct = null;
+    try {
+      const productResult = await this.productsService.getProduct(
+        body.productId,
+        locationId,
+      );
+      updatedProduct = productResult.data;
+    } catch (productError) {
+      this.logger.error(`[RECEIVING] Failed to fetch updated product: ${productError}`);
+      // Non-fatal — the receiving itself succeeded
+    }
+
+    return {
+      success: true,
+      message,
+      data: {
+        ...result,
+        priceUpdate,
+        product: updatedProduct,
+      },
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -234,28 +214,21 @@ export class InventoryReceivingController {
   @Get(':id')
   @Roles('OWNER', 'MANAGER')
   async getReceiving(@Param('id') id: string) {
-    try {
-      const receiving = await this.receivingService.getReceiving(id);
-      return {
-        success: true,
-        data: {
-          ...receiving,
-          unitCost: receiving.unitCost.toString(),
-          totalCost: receiving.totalCost.toString(),
-          inventoryBatch: receiving.inventoryBatch
-            ? {
-                ...receiving.inventoryBatch,
-                unitCost: receiving.inventoryBatch.unitCost.toString(),
-              }
-            : null,
-        },
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get receiving' },
-        getErrorStatus(error)
-      );
-    }
+    const receiving = await this.receivingService.getReceiving(id);
+    return {
+      success: true,
+      data: {
+        ...receiving,
+        unitCost: receiving.unitCost.toString(),
+        totalCost: receiving.totalCost.toString(),
+        inventoryBatch: receiving.inventoryBatch
+          ? {
+              ...receiving.inventoryBatch,
+              unitCost: receiving.inventoryBatch.unitCost.toString(),
+            }
+          : null,
+      },
+    };
   }
 
   @Get('location/:locationId')
@@ -268,29 +241,22 @@ export class InventoryReceivingController {
     @Query('productId') productId?: string,
     @Query('limit') limit?: string
   ) {
-    try {
-      const receivings = await this.receivingService.getReceivingsByLocation(locationId, {
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-        supplierId,
-        productId,
-        limit: limit ? parseInt(limit, 10) : undefined,
-      });
-      return {
-        success: true,
-        count: receivings.length,
-        data: receivings.map(r => ({
-          ...r,
-          unitCost: r.unitCost.toString(),
-          totalCost: r.totalCost.toString(),
-        })),
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get receivings' },
-        getErrorStatus(error)
-      );
-    }
+    const receivings = await this.receivingService.getReceivingsByLocation(locationId, {
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+      supplierId,
+      productId,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+    return {
+      success: true,
+      count: receivings.length,
+      data: receivings.map(r => ({
+        ...r,
+        unitCost: r.unitCost.toString(),
+        totalCost: r.totalCost.toString(),
+      })),
+    };
   }
 
   @Get('product/:productId')
@@ -299,23 +265,16 @@ export class InventoryReceivingController {
     @Param('productId') productId: string,
     @Query('locationId') locationId?: string
   ) {
-    try {
-      const receivings = await this.receivingService.getReceivingsByProduct(productId, locationId);
-      return {
-        success: true,
-        count: receivings.length,
-        data: receivings.map(r => ({
-          ...r,
-          unitCost: r.unitCost.toString(),
-          totalCost: r.totalCost.toString(),
-        })),
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get receivings' },
-        getErrorStatus(error)
-      );
-    }
+    const receivings = await this.receivingService.getReceivingsByProduct(productId, locationId);
+    return {
+      success: true,
+      count: receivings.length,
+      data: receivings.map(r => ({
+        ...r,
+        unitCost: r.unitCost.toString(),
+        totalCost: r.totalCost.toString(),
+      })),
+    };
   }
 
   @Get('location/:locationId/summary')
@@ -325,22 +284,15 @@ export class InventoryReceivingController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    try {
-      const summary = await this.receivingService.getReceivingSummary(
-        locationId,
-        startDate ? new Date(startDate) : undefined,
-        endDate ? new Date(endDate) : undefined
-      );
-      return {
-        success: true,
-        data: summary,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to get summary' },
-        getErrorStatus(error)
-      );
-    }
+    const summary = await this.receivingService.getReceivingSummary(
+      locationId,
+      startDate ? new Date(startDate) : undefined,
+      endDate ? new Date(endDate) : undefined
+    );
+    return {
+      success: true,
+      data: summary,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -349,20 +301,13 @@ export class InventoryReceivingController {
   @Post(':id/retry-square-sync')
   @Roles('OWNER')
   async retrySquareSync(@Param('id') id: string) {
-    try {
-      const result = await this.receivingService.retrySquareSync(id);
-      return {
-        success: result.synced,
-        message: result.synced
-          ? 'Successfully synced to Square'
-          : `Square sync failed: ${result.error}`,
-        data: result,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) || 'Failed to retry sync' },
-        getErrorStatus(error)
-      );
-    }
+    const result = await this.receivingService.retrySquareSync(id);
+    return {
+      success: result.synced,
+      message: result.synced
+        ? 'Successfully synced to Square'
+        : `Square sync failed: ${result.error}`,
+      data: result,
+    };
   }
 }

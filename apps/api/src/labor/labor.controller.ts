@@ -12,19 +12,6 @@ import {
 import { LaborService } from './labor.service';
 import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
 
-// Helper functions (same pattern as expense.controller.ts)
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function getErrorStatus(error: unknown): number {
-  if (error && typeof error === 'object' && 'status' in error) {
-    return (error as { status: number }).status;
-  }
-  return HttpStatus.INTERNAL_SERVER_ERROR;
-}
-
 interface UpdateShiftTimesDto {
   startAt?: string;
   endAt?: string | null;
@@ -48,15 +35,8 @@ export class LaborController {
   @Get('team-members')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async listTeamMembers() {
-    try {
-      const members = await this.laborService.listTeamMembers();
-      return { success: true, count: members.length, data: members };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error),
-      );
-    }
+    const members = await this.laborService.listTeamMembers();
+    return { success: true, count: members.length, data: members };
   }
 
   // --------------------------------------------------------------------------
@@ -73,50 +53,42 @@ export class LaborController {
     @Query('endDate') endDate?: string,
     @Query('weekOffset') weekOffset?: string,
   ) {
-    try {
-      if (!teamMemberId) {
-        throw new HttpException(
-          { success: false, message: 'teamMemberId is required' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (
-        (startDate && !dateRegex.test(startDate)) ||
-        (endDate && !dateRegex.test(endDate))
-      ) {
-        throw new HttpException(
-          { success: false, message: 'startDate/endDate must be YYYY-MM-DD' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      if ((startDate && !endDate) || (!startDate && endDate)) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'Provide both startDate and endDate for a custom range',
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const summary = await this.laborService.getPayrollSummary(teamMemberId, {
-        startDate,
-        endDate,
-        weekOffset:
-          weekOffset !== undefined ? parseInt(weekOffset, 10) : undefined,
-      });
-
-      return { success: true, data: summary };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!teamMemberId) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error),
+        { success: false, message: 'teamMemberId is required' },
+        HttpStatus.BAD_REQUEST,
       );
     }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (
+      (startDate && !dateRegex.test(startDate)) ||
+      (endDate && !dateRegex.test(endDate))
+    ) {
+      throw new HttpException(
+        { success: false, message: 'startDate/endDate must be YYYY-MM-DD' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if ((startDate && !endDate) || (!startDate && endDate)) {
+      throw new HttpException(
+        {
+          success: false,
+          message: 'Provide both startDate and endDate for a custom range',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const summary = await this.laborService.getPayrollSummary(teamMemberId, {
+      startDate,
+      endDate,
+      weekOffset:
+        weekOffset !== undefined ? parseInt(weekOffset, 10) : undefined,
+    });
+
+    return { success: true, data: summary };
   }
 
   // --------------------------------------------------------------------------
@@ -129,23 +101,15 @@ export class LaborController {
     @Param('id') id: string,
     @Body() body: UpdateShiftTimesDto,
   ) {
-    try {
-      const updated = await this.laborService.updateShiftTimes(id, {
-        startAt: body.startAt,
-        endAt: body.endAt,
-      });
+    const updated = await this.laborService.updateShiftTimes(id, {
+      startAt: body.startAt,
+      endAt: body.endAt,
+    });
 
-      return {
-        success: true,
-        message: 'Shift updated',
-        data: updated,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error),
-      );
-    }
+    return {
+      success: true,
+      message: 'Shift updated',
+      data: updated,
+    };
   }
 }

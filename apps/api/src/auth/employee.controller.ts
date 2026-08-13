@@ -53,19 +53,6 @@ interface UpdateAssignmentDto {
   isActive?: boolean;
 }
 
-// Helper functions
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function getErrorStatus(error: unknown): number {
-  if (error && typeof error === 'object' && 'status' in error) {
-    return (error as { status: number }).status;
-  }
-  return HttpStatus.INTERNAL_SERVER_ERROR;
-}
-
 // Role hierarchy for permission checks
 const ROLE_HIERARCHY: Record<EmployeeRole, number> = {
   OWNER: 4,
@@ -94,57 +81,49 @@ export class EmployeeController {
     @Body() body: CreateEmployeeDto,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
-      const currentLocation = req.currentLocation;
+    const currentEmployee = req.employee;
+    const currentLocation = req.currentLocation;
 
-      // Validate required fields
-      if (!body.name || !body.locationId || !body.role) {
-        throw new HttpException(
-          { success: false, message: 'Missing required fields: name, locationId, role' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Validate role
-      const validRoles = Object.values(EmployeeRole);
-      if (!validRoles.includes(body.role)) {
-        throw new HttpException(
-          { success: false, message: `Invalid role. Must be one of: ${validRoles.join(', ')}` },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Only OWNER can create other OWNERs
-      if (body.role === 'OWNER' && currentLocation.role !== 'OWNER') {
-        throw new HttpException(
-          { success: false, message: 'Only owners can create other owners' },
-          HttpStatus.FORBIDDEN
-        );
-      }
-
-      const result = await this.employeeService.createEmployee({
-        name: body.name,
-        email: body.email,
-        password: body.password,
-        pin: body.pin,
-        locationId: body.locationId,
-        role: body.role,
-        createdBy: currentEmployee.id,
-      });
-
-      return {
-        success: true,
-        message: `Employee "${body.name}" created successfully`,
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    // Validate required fields
+    if (!body.name || !body.locationId || !body.role) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Missing required fields: name, locationId, role' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    // Validate role
+    const validRoles = Object.values(EmployeeRole);
+    if (!validRoles.includes(body.role)) {
+      throw new HttpException(
+        { success: false, message: `Invalid role. Must be one of: ${validRoles.join(', ')}` },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    // Only OWNER can create other OWNERs
+    if (body.role === 'OWNER' && currentLocation.role !== 'OWNER') {
+      throw new HttpException(
+        { success: false, message: 'Only owners can create other owners' },
+        HttpStatus.FORBIDDEN
+      );
+    }
+
+    const result = await this.employeeService.createEmployee({
+      name: body.name,
+      email: body.email,
+      password: body.password,
+      pin: body.pin,
+      locationId: body.locationId,
+      role: body.role,
+      createdBy: currentEmployee.id,
+    });
+
+    return {
+      success: true,
+      message: `Employee "${body.name}" created successfully`,
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -155,20 +134,12 @@ export class EmployeeController {
   async getEmployee(
     @Param('id') employeeId: string
   ) {
-    try {
-      const employee = await this.employeeService.getEmployee(employeeId);
+    const employee = await this.employeeService.getEmployee(employeeId);
 
-      return {
-        success: true,
-        data: employee,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      data: employee,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -183,32 +154,24 @@ export class EmployeeController {
     @Query('isActive') isActive?: string,
     @Query('limit') limit?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
+    const currentLocation = req.currentLocation;
 
-      // If not OWNER, restrict to current location
-      const targetLocationId = 
-        currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    // If not OWNER, restrict to current location
+    const targetLocationId = 
+      currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const employees = await this.employeeService.listEmployees({
-        locationId: targetLocationId,
-        role,
-        isActive: isActive !== undefined ? isActive === 'true' : undefined,
-        limit: limit ? parseInt(limit, 10) : undefined,
-      });
+    const employees = await this.employeeService.listEmployees({
+      locationId: targetLocationId,
+      role,
+      isActive: isActive !== undefined ? isActive === 'true' : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
 
-      return {
-        success: true,
-        count: employees.length,
-        data: employees,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      count: employees.length,
+      data: employees,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -221,27 +184,19 @@ export class EmployeeController {
     @Body() body: UpdateEmployeeDto,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
+    const currentEmployee = req.employee;
 
-      const result = await this.employeeService.updateEmployee(
-        employeeId,
-        body,
-        currentEmployee.id
-      );
+    const result = await this.employeeService.updateEmployee(
+      employeeId,
+      body,
+      currentEmployee.id
+    );
 
-      return {
-        success: true,
-        message: 'Employee updated',
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      message: 'Employee updated',
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -253,30 +208,22 @@ export class EmployeeController {
     @Param('id') employeeId: string,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
+    const currentEmployee = req.employee;
 
-      // Prevent self-deactivation
-      if (employeeId === currentEmployee.id) {
-        throw new HttpException(
-          { success: false, message: 'Cannot deactivate yourself' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      await this.employeeService.deactivateEmployee(employeeId, currentEmployee.id);
-
-      return {
-        success: true,
-        message: 'Employee deactivated',
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    // Prevent self-deactivation
+    if (employeeId === currentEmployee.id) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Cannot deactivate yourself' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    await this.employeeService.deactivateEmployee(employeeId, currentEmployee.id);
+
+    return {
+      success: true,
+      message: 'Employee deactivated',
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -289,61 +236,53 @@ export class EmployeeController {
     @Body() body: SetPINDto,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
-      const currentLocation = req.currentLocation;
+    const currentEmployee = req.employee;
+    const currentLocation = req.currentLocation;
 
-      // Validate PIN format
-      if (!body.pin || !/^\d{4,6}$/.test(body.pin)) {
-        throw new HttpException(
-          { success: false, message: 'PIN must be 4-6 digits' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      // Employees can set their own PIN, or OWNER/MANAGER can set for others
-      if (employeeId !== currentEmployee.id) {
-        // Check if current user has permission to manage target employee
-        const targetEmployee = await this.employeeService.getEmployee(employeeId);
-        const targetAssignment = targetEmployee.assignments.find(
-          a => a.locationId === currentLocation.locationId && a.isActive
-        );
-
-        if (!targetAssignment) {
-          throw new HttpException(
-            { success: false, message: 'Employee not found at this location' },
-            HttpStatus.NOT_FOUND
-          );
-        }
-
-        // Can't set PIN for equal or higher role (unless OWNER)
-        if (
-          currentLocation.role !== 'OWNER' &&
-          ROLE_HIERARCHY[targetAssignment.role as EmployeeRole] >= ROLE_HIERARCHY[currentLocation.role as EmployeeRole]
-        ) {
-          throw new HttpException(
-            { success: false, message: 'Cannot manage employees of equal or higher role' },
-            HttpStatus.FORBIDDEN
-          );
-        }
-      }
-
-      await this.employeeService.setPIN(
-        { employeeId, pin: body.pin },
-        currentEmployee.id
-      );
-
-      return {
-        success: true,
-        message: 'PIN set successfully',
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    // Validate PIN format
+    if (!body.pin || !/^\d{4,6}$/.test(body.pin)) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'PIN must be 4-6 digits' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    // Employees can set their own PIN, or OWNER/MANAGER can set for others
+    if (employeeId !== currentEmployee.id) {
+      // Check if current user has permission to manage target employee
+      const targetEmployee = await this.employeeService.getEmployee(employeeId);
+      const targetAssignment = targetEmployee.assignments.find(
+        a => a.locationId === currentLocation.locationId && a.isActive
+      );
+
+      if (!targetAssignment) {
+        throw new HttpException(
+          { success: false, message: 'Employee not found at this location' },
+          HttpStatus.NOT_FOUND
+        );
+      }
+
+      // Can't set PIN for equal or higher role (unless OWNER)
+      if (
+        currentLocation.role !== 'OWNER' &&
+        ROLE_HIERARCHY[targetAssignment.role as EmployeeRole] >= ROLE_HIERARCHY[currentLocation.role as EmployeeRole]
+      ) {
+        throw new HttpException(
+          { success: false, message: 'Cannot manage employees of equal or higher role' },
+          HttpStatus.FORBIDDEN
+        );
+      }
+    }
+
+    await this.employeeService.setPIN(
+      { employeeId, pin: body.pin },
+      currentEmployee.id
+    );
+
+    return {
+      success: true,
+      message: 'PIN set successfully',
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -355,22 +294,14 @@ export class EmployeeController {
     @Param('id') employeeId: string,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
+    const currentEmployee = req.employee;
 
-      await this.employeeService.resetPINLockout(employeeId, currentEmployee.id);
+    await this.employeeService.resetPINLockout(employeeId, currentEmployee.id);
 
-      return {
-        success: true,
-        message: 'PIN lockout reset',
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      message: 'PIN lockout reset',
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -383,33 +314,25 @@ export class EmployeeController {
     @Body() body: SetPasswordDto,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
+    const currentEmployee = req.employee;
 
-      if (!body.password || body.password.length < 8) {
-        throw new HttpException(
-          { success: false, message: 'Password must be at least 8 characters' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      await this.employeeService.setPassword(
-        employeeId,
-        body.password,
-        currentEmployee.id
-      );
-
-      return {
-        success: true,
-        message: 'Password set successfully',
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!body.password || body.password.length < 8) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Password must be at least 8 characters' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    await this.employeeService.setPassword(
+      employeeId,
+      body.password,
+      currentEmployee.id
+    );
+
+    return {
+      success: true,
+      message: 'Password set successfully',
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -422,35 +345,27 @@ export class EmployeeController {
     @Body() body: AssignLocationDto,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
+    const currentEmployee = req.employee;
 
-      if (!body.locationId || !body.role) {
-        throw new HttpException(
-          { success: false, message: 'Missing required fields: locationId, role' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      const result = await this.employeeService.assignLocation({
-        employeeId,
-        locationId: body.locationId,
-        role: body.role,
-        assignedBy: currentEmployee.id,
-      });
-
-      return {
-        success: true,
-        message: `Assigned to ${result.locationName} as ${result.role}`,
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!body.locationId || !body.role) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Missing required fields: locationId, role' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    const result = await this.employeeService.assignLocation({
+      employeeId,
+      locationId: body.locationId,
+      role: body.role,
+      assignedBy: currentEmployee.id,
+    });
+
+    return {
+      success: true,
+      message: `Assigned to ${result.locationName} as ${result.role}`,
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -464,28 +379,20 @@ export class EmployeeController {
     @Body() body: UpdateAssignmentDto,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
+    const currentEmployee = req.employee;
 
-      const result = await this.employeeService.updateLocationAssignment(
-        employeeId,
-        locationId,
-        body,
-        currentEmployee.id
-      );
+    const result = await this.employeeService.updateLocationAssignment(
+      employeeId,
+      locationId,
+      body,
+      currentEmployee.id
+    );
 
-      return {
-        success: true,
-        message: 'Assignment updated',
-        data: result,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      message: 'Assignment updated',
+      data: result,
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -498,26 +405,18 @@ export class EmployeeController {
     @Param('locationId') locationId: string,
     @Req() req: any
   ) {
-    try {
-      const currentEmployee = req.employee;
+    const currentEmployee = req.employee;
 
-      await this.employeeService.removeLocationAssignment(
-        employeeId,
-        locationId,
-        currentEmployee.id
-      );
+    await this.employeeService.removeLocationAssignment(
+      employeeId,
+      locationId,
+      currentEmployee.id
+    );
 
-      return {
-        success: true,
-        message: 'Location assignment removed',
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      message: 'Location assignment removed',
+    };
   }
 
   // --------------------------------------------------------------------------

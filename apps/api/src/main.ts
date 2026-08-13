@@ -5,6 +5,7 @@ import { NestFactory } from "@nestjs/core";
 import { INestApplication } from "@nestjs/common";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
+import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import * as express from "express";
 
 // Load .env file from project root
@@ -72,6 +73,8 @@ async function bootstrap() {
 
   // Apply JSON parser for all other routes
   // app.use(express.json());
+
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // Configure CORS
   app.enableCors({

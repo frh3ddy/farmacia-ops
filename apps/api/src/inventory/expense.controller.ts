@@ -16,19 +16,6 @@ import { ExpenseService } from './expense.service';
 import { ExpenseType } from '@prisma/client';
 import { AuthGuard, RoleGuard, LocationGuard, Roles, Public } from '../auth/guards/auth.guard';
 
-// Helper functions
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function getErrorStatus(error: unknown): number {
-  if (error && typeof error === 'object' && 'status' in error) {
-    return (error as { status: number }).status;
-  }
-  return HttpStatus.INTERNAL_SERVER_ERROR;
-}
-
 /**
  * Parse a date string that could be either:
  * - Date-only: "2026-02-03" -> treated as local date (noon to avoid timezone edge cases)
@@ -94,24 +81,17 @@ export class ExpenseController {
     @Query('endDate') endDate?: string,
     @Query('includeMonthly') includeMonthly?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const summary = await this.expenseService.getExpenseSummary({
-        locationId: targetLocationId,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-        includeMonthly: includeMonthly === 'true',
-      });
+    const summary = await this.expenseService.getExpenseSummary({
+      locationId: targetLocationId,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+      includeMonthly: includeMonthly === 'true',
+    });
 
-      return { success: true, data: summary };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return { success: true, data: summary };
   }
 
   // --------------------------------------------------------------------------
@@ -128,34 +108,27 @@ export class ExpenseController {
     @Query('isPaid') isPaid?: string,
     @Query('limit') limit?: string
   ) {
-    try {
-      const currentLocation = req.currentLocation;
-      // Non-OWNER can only see their current location's expenses
-      const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const currentLocation = req.currentLocation;
+    // Non-OWNER can only see their current location's expenses
+    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 
-      const expenses = await this.expenseService.listExpenses({
-        locationId: targetLocationId,
-        type,
-        startDate: startDate ? new Date(startDate) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-        isPaid: isPaid !== undefined ? isPaid === 'true' : undefined,
-        limit: limit ? parseInt(limit, 10) : undefined,
-      });
+    const expenses = await this.expenseService.listExpenses({
+      locationId: targetLocationId,
+      type,
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+      isPaid: isPaid !== undefined ? isPaid === 'true' : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
 
-      return {
-        success: true,
-        count: expenses.length,
-        data: expenses.map(e => ({
-          ...e,
-          amount: e.amount.toString(),
-        })),
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      count: expenses.length,
+      data: expenses.map(e => ({
+        ...e,
+        amount: e.amount.toString(),
+      })),
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -164,57 +137,49 @@ export class ExpenseController {
   @Post()
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async createExpense(@Body() body: CreateExpenseDto, @Req() req: any) {
-    try {
-      const currentEmployee = req.employee;
-      const currentLocation = req.currentLocation;
+    const currentEmployee = req.employee;
+    const currentLocation = req.currentLocation;
 
-      // Use current location if not specified
-      const locationId = body.locationId || currentLocation.locationId;
+    // Use current location if not specified
+    const locationId = body.locationId || currentLocation.locationId;
 
-      if (!body.type || body.amount === undefined || !body.date) {
-        throw new HttpException(
-          { success: false, message: 'Missing required fields: type, amount, date' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      const validTypes = Object.values(ExpenseType);
-      if (!validTypes.includes(body.type)) {
-        throw new HttpException(
-          { success: false, message: `Invalid expense type. Must be one of: ${validTypes.join(', ')}` },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-
-      const expense = await this.expenseService.createExpense({
-        locationId,
-        type: body.type,
-        amount: body.amount,
-        date: parseDateString(body.date),
-        description: body.description,
-        vendor: body.vendor,
-        reference: body.reference,
-        isPaid: body.isPaid,
-        paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
-        notes: body.notes,
-        createdBy: currentEmployee.id,
-      });
-
-      return {
-        success: true,
-        message: `Expense created: ${body.type} $${body.amount}`,
-        data: {
-          ...expense,
-          amount: expense.amount.toString(),
-        },
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!body.type || body.amount === undefined || !body.date) {
       throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
+        { success: false, message: 'Missing required fields: type, amount, date' },
+        HttpStatus.BAD_REQUEST
       );
     }
+
+    const validTypes = Object.values(ExpenseType);
+    if (!validTypes.includes(body.type)) {
+      throw new HttpException(
+        { success: false, message: `Invalid expense type. Must be one of: ${validTypes.join(', ')}` },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+
+    const expense = await this.expenseService.createExpense({
+      locationId,
+      type: body.type,
+      amount: body.amount,
+      date: parseDateString(body.date),
+      description: body.description,
+      vendor: body.vendor,
+      reference: body.reference,
+      isPaid: body.isPaid,
+      paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
+      notes: body.notes,
+      createdBy: currentEmployee.id,
+    });
+
+    return {
+      success: true,
+      message: `Expense created: ${body.type} $${body.amount}`,
+      data: {
+        ...expense,
+        amount: expense.amount.toString(),
+      },
+    };
   }
 
   // ==========================================================================
@@ -227,21 +192,14 @@ export class ExpenseController {
   @Get(':id')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getExpense(@Param('id') id: string) {
-    try {
-      const expense = await this.expenseService.getExpense(id);
-      return {
-        success: true,
-        data: {
-          ...expense,
-          amount: expense.amount.toString(),
-        },
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    const expense = await this.expenseService.getExpense(id);
+    return {
+      success: true,
+      data: {
+        ...expense,
+        amount: expense.amount.toString(),
+      },
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -250,33 +208,26 @@ export class ExpenseController {
   @Put(':id')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async updateExpense(@Param('id') id: string, @Body() body: Partial<CreateExpenseDto>) {
-    try {
-      const expense = await this.expenseService.updateExpense(id, {
-        type: body.type,
-        amount: body.amount,
-        date: body.date ? parseDateString(body.date) : undefined,
-        description: body.description,
-        vendor: body.vendor,
-        reference: body.reference,
-        isPaid: body.isPaid,
-        paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
-        notes: body.notes,
-      });
+    const expense = await this.expenseService.updateExpense(id, {
+      type: body.type,
+      amount: body.amount,
+      date: body.date ? parseDateString(body.date) : undefined,
+      description: body.description,
+      vendor: body.vendor,
+      reference: body.reference,
+      isPaid: body.isPaid,
+      paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
+      notes: body.notes,
+    });
 
-      return {
-        success: true,
-        message: 'Expense updated',
-        data: {
-          ...expense,
-          amount: expense.amount.toString(),
-        },
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    return {
+      success: true,
+      message: 'Expense updated',
+      data: {
+        ...expense,
+        amount: expense.amount.toString(),
+      },
+    };
   }
 
   // --------------------------------------------------------------------------
@@ -285,14 +236,7 @@ export class ExpenseController {
   @Delete(':id')
   @Roles('OWNER', 'ACCOUNTANT')
   async deleteExpense(@Param('id') id: string) {
-    try {
-      await this.expenseService.deleteExpense(id);
-      return { success: true, message: 'Expense deleted' };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: getErrorMessage(error) },
-        getErrorStatus(error)
-      );
-    }
+    await this.expenseService.deleteExpense(id);
+    return { success: true, message: 'Expense deleted' };
   }
 }

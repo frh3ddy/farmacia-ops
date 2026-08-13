@@ -40,21 +40,6 @@ interface UpdatePriceDto {
   applyToAllLocations?: boolean;  // If true, update price at all Square locations
 }
 
-// Helper functions
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
-
-function getErrorStatus(error: unknown): number {
-  if (error && typeof error === 'object' && 'status' in error) {
-    return (error as any).status;
-  }
-  return HttpStatus.INTERNAL_SERVER_ERROR;
-}
-
 // Multer memory storage — files are never written to disk.
 // The buffer is sent directly to Square and the Square-hosted URL is stored.
 const productImageMemoryStorage = memoryStorage();
@@ -84,64 +69,54 @@ export class ProductsController {
   @Roles('OWNER', 'MANAGER')
   @HttpCode(HttpStatus.CREATED)
   async createProduct(@Body() body: CreateProductDto, @Req() req: any) {
-    try {
-      // Validate required fields
-      if (!body.name || body.name.trim().length === 0) {
-        throw new HttpException(
-          { success: false, message: 'Product name is required' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      if (body.sellingPrice === undefined || body.sellingPrice === null) {
-        throw new HttpException(
-          { success: false, message: 'Selling price is required' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      // Use provided locationId or current location
-      const locationId = body.locationId || req.currentLocation?.locationId;
-      if (!locationId) {
-        throw new HttpException(
-          { success: false, message: 'Location ID is required' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const input: CreateProductInput = {
-        name: body.name,
-        sku: body.sku,
-        description: body.description,
-        sellingPrice: body.sellingPrice,
-        costPrice: body.costPrice,
-        initialStock: body.initialStock,
-        locationId,
-        syncToSquare: body.syncToSquare !== false, // Default true
-      };
-
-      const result = await this.productsService.createProduct(input);
-
-      return {
-        success: true,
-        message: result.message,
-        data: {
-          product: result.product,
-          squareSynced: result.squareSynced,
-          squareItemId: result.squareItemId,
-          squareVariationId: result.squareVariationId,
-          inventoryCreated: result.inventoryCreated,
-        },
-      };
-    } catch (error) {
+    // Validate required fields
+    if (!body.name || body.name.trim().length === 0) {
       throw new HttpException(
-        {
-          success: false,
-          message: getErrorMessage(error),
-        },
-        getErrorStatus(error),
+        { success: false, message: 'Product name is required' },
+        HttpStatus.BAD_REQUEST,
       );
     }
+
+    if (body.sellingPrice === undefined || body.sellingPrice === null) {
+      throw new HttpException(
+        { success: false, message: 'Selling price is required' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Use provided locationId or current location
+    const locationId = body.locationId || req.currentLocation?.locationId;
+    if (!locationId) {
+      throw new HttpException(
+        { success: false, message: 'Location ID is required' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const input: CreateProductInput = {
+      name: body.name,
+      sku: body.sku,
+      description: body.description,
+      sellingPrice: body.sellingPrice,
+      costPrice: body.costPrice,
+      initialStock: body.initialStock,
+      locationId,
+      syncToSquare: body.syncToSquare !== false, // Default true
+    };
+
+    const result = await this.productsService.createProduct(input);
+
+    return {
+      success: true,
+      message: result.message,
+      data: {
+        product: result.product,
+        squareSynced: result.squareSynced,
+        squareItemId: result.squareItemId,
+        squareVariationId: result.squareVariationId,
+        inventoryCreated: result.inventoryCreated,
+      },
+    };
   }
 
   /**
@@ -152,27 +127,17 @@ export class ProductsController {
   @Post('sync-to-square')
   @Roles('OWNER', 'MANAGER')
   async syncToSquare(@Body() body: any, @Req() req: any) {
-    try {
-      const locationId = body.locationId || req.currentLocation?.locationId;
-      if (!locationId) {
-        throw new BadRequestException('Location ID is required');
-      }
-
-      const result = await this.productsService.syncUnsyncedProducts(locationId);
-      return {
-        success: true,
-        message: `Synced ${result.synced}/${result.total} products to Square${result.failed > 0 ? ` (${result.failed} failed)` : ''}`,
-        data: result,
-      };
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: getErrorMessage(error),
-        },
-        getErrorStatus(error),
-      );
+    const locationId = body.locationId || req.currentLocation?.locationId;
+    if (!locationId) {
+      throw new BadRequestException('Location ID is required');
     }
+
+    const result = await this.productsService.syncUnsyncedProducts(locationId);
+    return {
+      success: true,
+      message: `Synced ${result.synced}/${result.total} products to Square${result.failed > 0 ? ` (${result.failed} failed)` : ''}`,
+      data: result,
+    };
   }
 
   /**
@@ -199,30 +164,20 @@ export class ProductsController {
     @Query('exact') exact: string,
     @Req() req: any,
   ) {
-    try {
-      // Use query param or current location
-      const targetLocationId = locationId || req.currentLocation?.locationId;
+    // Use query param or current location
+    const targetLocationId = locationId || req.currentLocation?.locationId;
 
-      // Parse pagination params with sensible defaults
-      const page = Math.max(1, parseInt(pageStr, 10) || 1);
-      const limit = Math.min(200, Math.max(1, parseInt(limitStr, 10) || 50));
+    // Parse pagination params with sensible defaults
+    const page = Math.max(1, parseInt(pageStr, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(limitStr, 10) || 50));
 
-      const result = await this.productsService.getProducts(targetLocationId, {
-        page,
-        limit,
-        search: search?.trim() || undefined,
-        exact: exact === 'true',
-      });
-      return result;
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: getErrorMessage(error),
-        },
-        getErrorStatus(error),
-      );
-    }
+    const result = await this.productsService.getProducts(targetLocationId, {
+      page,
+      limit,
+      search: search?.trim() || undefined,
+      exact: exact === 'true',
+    });
+    return result;
   }
 
   /**
@@ -244,35 +199,27 @@ export class ProductsController {
     @Param('id') productId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    try {
-      if (!file || !file.buffer) {
-        throw new HttpException(
-          { success: false, message: 'No image file provided' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      // Send the in-memory buffer directly to Square — no disk writes
-      const result = await this.productsService.uploadProductImage(
-        productId,
-        file.buffer,
-        file.mimetype,
-      );
-
-      return {
-        success: true,
-        imageUrl: result.imageUrl,
-        squareSynced: result.squareSynced,
-        squareImageId: result.squareImageId,
-        message: result.message,
-      };
-    } catch (error) {
-      if (error instanceof HttpException) throw error;
+    if (!file || !file.buffer) {
       throw new HttpException(
-        { success: false, message: `Failed to upload image: ${getErrorMessage(error)}` },
-        getErrorStatus(error),
+        { success: false, message: 'No image file provided' },
+        HttpStatus.BAD_REQUEST,
       );
     }
+
+    // Send the in-memory buffer directly to Square — no disk writes
+    const result = await this.productsService.uploadProductImage(
+      productId,
+      file.buffer,
+      file.mimetype,
+    );
+
+    return {
+      success: true,
+      imageUrl: result.imageUrl,
+      squareSynced: result.squareSynced,
+      squareImageId: result.squareImageId,
+      message: result.message,
+    };
   }
 
   /**
@@ -287,53 +234,46 @@ export class ProductsController {
     @Query('locationId') locationId: string,
     @Req() req: any,
   ) {
-    try {
-      const targetLocationId = locationId || req.currentLocation?.locationId;
+    const targetLocationId = locationId || req.currentLocation?.locationId;
 
-      // Get all products this supplier provides
-      const supplierProducts = await this.prisma.supplierProduct.findMany({
-        where: { supplierId },
-        include: {
-          product: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              squareProductName: true,
-              squareVariationName: true,
-              squareImageUrl: true,
-              inventories: targetLocationId
-                ? { where: { locationId: targetLocationId } }
-                : true,
-            },
+    // Get all products this supplier provides
+    const supplierProducts = await this.prisma.supplierProduct.findMany({
+      where: { supplierId },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            squareProductName: true,
+            squareVariationName: true,
+            squareImageUrl: true,
+            inventories: targetLocationId
+              ? { where: { locationId: targetLocationId } }
+              : true,
           },
         },
-        orderBy: {
-          product: { name: 'asc' },
-        },
-      });
+      },
+      orderBy: {
+        product: { name: 'asc' },
+      },
+    });
 
-      const products = supplierProducts.map((sp) => {
-        const totalStock = sp.product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
-        return {
-          productId: sp.product.id,
-          productName: sp.product.squareProductName || sp.product.name,
-          sku: sp.product.sku,
-          imageUrl: sp.product.squareImageUrl,
-          lastCost: sp.cost.toString(),
-          isPreferred: sp.isPreferred,
-          notes: sp.notes,
-          currentStock: totalStock,
-        };
-      });
+    const products = supplierProducts.map((sp) => {
+      const totalStock = sp.product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
+      return {
+        productId: sp.product.id,
+        productName: sp.product.squareProductName || sp.product.name,
+        sku: sp.product.sku,
+        imageUrl: sp.product.squareImageUrl,
+        lastCost: sp.cost.toString(),
+        isPreferred: sp.isPreferred,
+        notes: sp.notes,
+        currentStock: totalStock,
+      };
+    });
 
-      return { success: true, products };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: `Failed to fetch supplier catalog: ${getErrorMessage(error)}` },
-        getErrorStatus(error),
-      );
-    }
+    return { success: true, products };
   }
 
   /**
@@ -344,41 +284,34 @@ export class ProductsController {
   @Get(':id/suppliers')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async getProductSuppliers(@Param('id') productId: string) {
-    try {
-      const supplierProducts = await this.prisma.supplierProduct.findMany({
-        where: { productId },
-        include: {
-          supplier: {
-            select: {
-              id: true,
-              name: true,
-              contactInfo: true,
-              isActive: true,
-            },
+    const supplierProducts = await this.prisma.supplierProduct.findMany({
+      where: { productId },
+      include: {
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            contactInfo: true,
+            isActive: true,
           },
         },
-        orderBy: {
-          supplier: { name: 'asc' },
-        },
-      });
+      },
+      orderBy: {
+        supplier: { name: 'asc' },
+      },
+    });
 
-      const suppliers = supplierProducts.map((sp) => ({
-        id: sp.supplier.id,
-        name: sp.supplier.name,
-        contactInfo: sp.supplier.contactInfo,
-        isActive: sp.supplier.isActive,
-        cost: sp.cost.toString(),
-        isPreferred: sp.isPreferred,
-        notes: sp.notes,
-      }));
+    const suppliers = supplierProducts.map((sp) => ({
+      id: sp.supplier.id,
+      name: sp.supplier.name,
+      contactInfo: sp.supplier.contactInfo,
+      isActive: sp.supplier.isActive,
+      cost: sp.cost.toString(),
+      isPreferred: sp.isPreferred,
+      notes: sp.notes,
+    }));
 
-      return { success: true, suppliers };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: `Failed to fetch product suppliers: ${getErrorMessage(error)}` },
-        getErrorStatus(error),
-      );
-    }
+    return { success: true, suppliers };
   }
 
   /**
@@ -389,65 +322,58 @@ export class ProductsController {
   @Get(':id/cost-history')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async getProductCostHistory(@Param('id') productId: string) {
-    try {
-      const costHistories = await this.prisma.supplierCostHistory.findMany({
-        where: { productId },
-        include: {
-          supplier: {
-            select: { id: true, name: true },
-          },
+    const costHistories = await this.prisma.supplierCostHistory.findMany({
+      where: { productId },
+      include: {
+        supplier: {
+          select: { id: true, name: true },
         },
-        orderBy: [
-          { supplier: { name: 'asc' } },
-          { effectiveAt: 'desc' },
-        ],
-      });
+      },
+      orderBy: [
+        { supplier: { name: 'asc' } },
+        { effectiveAt: 'desc' },
+      ],
+    });
 
-      // Group by supplier
-      const groupedBySupplier = new Map<
-        string,
-        Array<{
-          id: string;
-          cost: string;
-          effectiveAt: string;
-          createdAt: string;
-          source: string;
-          isCurrent: boolean;
-        }>
-      >();
+    // Group by supplier
+    const groupedBySupplier = new Map<
+      string,
+      Array<{
+        id: string;
+        cost: string;
+        effectiveAt: string;
+        createdAt: string;
+        source: string;
+        isCurrent: boolean;
+      }>
+    >();
 
-      for (const entry of costHistories) {
-        const supplierId = entry.supplierId;
-        if (!groupedBySupplier.has(supplierId)) {
-          groupedBySupplier.set(supplierId, []);
-        }
-        groupedBySupplier.get(supplierId)!.push({
-          id: entry.id,
-          cost: entry.unitCost.toString(),
-          effectiveAt: entry.effectiveAt.toISOString(),
-          createdAt: entry.createdAt.toISOString(),
-          source: entry.source,
-          isCurrent: entry.isCurrent,
-        });
+    for (const entry of costHistories) {
+      const supplierId = entry.supplierId;
+      if (!groupedBySupplier.has(supplierId)) {
+        groupedBySupplier.set(supplierId, []);
       }
-
-      // Convert to array format with supplier info
-      const suppliers = Array.from(groupedBySupplier.entries()).map(([supplierId, history]) => {
-        const firstEntry = costHistories.find((e) => e.supplierId === supplierId);
-        return {
-          supplierId,
-          supplierName: firstEntry?.supplier.name || 'Unknown',
-          costHistory: history,
-        };
+      groupedBySupplier.get(supplierId)!.push({
+        id: entry.id,
+        cost: entry.unitCost.toString(),
+        effectiveAt: entry.effectiveAt.toISOString(),
+        createdAt: entry.createdAt.toISOString(),
+        source: entry.source,
+        isCurrent: entry.isCurrent,
       });
-
-      return { success: true, suppliers };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: `Failed to fetch product cost history: ${getErrorMessage(error)}` },
-        getErrorStatus(error),
-      );
     }
+
+    // Convert to array format with supplier info
+    const suppliers = Array.from(groupedBySupplier.entries()).map(([supplierId, history]) => {
+      const firstEntry = costHistories.find((e) => e.supplierId === supplierId);
+      return {
+        supplierId,
+        supplierName: firstEntry?.supplier.name || 'Unknown',
+        costHistory: history,
+      };
+    });
+
+    return { success: true, suppliers };
   }
 
   /**
@@ -462,19 +388,9 @@ export class ProductsController {
     @Query('locationId') locationId: string,
     @Req() req: any,
   ) {
-    try {
-      const targetLocationId = locationId || req.currentLocation?.locationId;
-      const result = await this.productsService.getProductCounts(targetLocationId);
-      return result;
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: getErrorMessage(error),
-        },
-        getErrorStatus(error),
-      );
-    }
+    const targetLocationId = locationId || req.currentLocation?.locationId;
+    const result = await this.productsService.getProductCounts(targetLocationId);
+    return result;
   }
 
   /**
@@ -491,19 +407,9 @@ export class ProductsController {
     @Query('locationId') locationId: string,
     @Req() req: any,
   ) {
-    try {
-      const targetLocationId = locationId || req.currentLocation?.locationId;
-      const result = await this.productsService.getProduct(id, targetLocationId);
-      return result;
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: getErrorMessage(error),
-        },
-        getErrorStatus(error),
-      );
-    }
+    const targetLocationId = locationId || req.currentLocation?.locationId;
+    const result = await this.productsService.getProduct(id, targetLocationId);
+    return result;
   }
 
   /**
@@ -518,50 +424,40 @@ export class ProductsController {
     @Body() body: UpdatePriceDto,
     @Req() req: any,
   ) {
-    try {
-      if (body.sellingPrice === undefined || body.sellingPrice === null) {
-        throw new HttpException(
-          { success: false, message: 'Selling price is required' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const locationId = body.locationId || req.currentLocation?.locationId;
-      if (!locationId) {
-        throw new HttpException(
-          { success: false, message: 'Location ID is required' },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      const input: UpdatePriceInput = {
-        productId: id,
-        sellingPrice: body.sellingPrice,
-        locationId,
-        syncToSquare: body.syncToSquare !== false,
-        applyToAllLocations: body.applyToAllLocations === true,
-      };
-
-      const result = await this.productsService.updatePrice(input);
-
-      return {
-        success: true,
-        message: result.message,
-        data: {
-          product: result.product,
-          previousPrice: result.previousPrice,
-          newPrice: result.newPrice,
-          squareSynced: result.squareSynced,
-        },
-      };
-    } catch (error) {
+    if (body.sellingPrice === undefined || body.sellingPrice === null) {
       throw new HttpException(
-        {
-          success: false,
-          message: getErrorMessage(error),
-        },
-        getErrorStatus(error),
+        { success: false, message: 'Selling price is required' },
+        HttpStatus.BAD_REQUEST,
       );
     }
+
+    const locationId = body.locationId || req.currentLocation?.locationId;
+    if (!locationId) {
+      throw new HttpException(
+        { success: false, message: 'Location ID is required' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const input: UpdatePriceInput = {
+      productId: id,
+      sellingPrice: body.sellingPrice,
+      locationId,
+      syncToSquare: body.syncToSquare !== false,
+      applyToAllLocations: body.applyToAllLocations === true,
+    };
+
+    const result = await this.productsService.updatePrice(input);
+
+    return {
+      success: true,
+      message: result.message,
+      data: {
+        product: result.product,
+        previousPrice: result.previousPrice,
+        newPrice: result.newPrice,
+        squareSynced: result.squareSynced,
+      },
+    };
   }
 }
