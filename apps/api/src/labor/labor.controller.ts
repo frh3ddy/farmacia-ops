@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -111,5 +112,15 @@ export class LaborController {
       message: 'Shift updated',
       data: updated,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // Delete a shift (e.g. accidental clock-in) - OWNER, MANAGER
+  // --------------------------------------------------------------------------
+  @Delete('shifts/:id')
+  @Roles('OWNER', 'MANAGER')
+  async deleteShift(@Param('id') id: string) {
+    await this.laborService.deleteShift(id);
+    return { success: true, message: 'Shift deleted' };
   }
 }

@@ -507,4 +507,30 @@ export class LaborService {
       );
     }
   }
+
+  // --------------------------------------------------------------------------
+  // Shift deletion (e.g. accidental clock-in)
+  // --------------------------------------------------------------------------
+
+  async deleteShift(shiftId: string): Promise<void> {
+    if (!shiftId) {
+      throw new HttpException(
+        { success: false, message: 'shiftId is required' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const client = this.getSquareClient();
+
+    try {
+      await client.labor.shifts.delete({ id: shiftId });
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error(`[LABOR] Failed to delete shift ${shiftId}`, error);
+      throw new HttpException(
+        { success: false, message: 'Failed to delete shift in Square' },
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+  }
 }
