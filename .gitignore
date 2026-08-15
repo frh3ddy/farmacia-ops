@@ -85,3 +85,6 @@ sudospecs
 ./.elasticsearch-data
 
 farmacia-ios/
+
+# graphify (local knowledge graph, not shared)
+graphify-out/
