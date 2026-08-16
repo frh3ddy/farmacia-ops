@@ -19,6 +19,7 @@ interface CreateAdjustmentInput {
   effectiveDate?: Date;
   adjustedBy?: string;
   syncToSquare?: boolean; // Whether to sync this adjustment to Square
+  clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
 }
 
 interface AdjustmentResult {
@@ -192,6 +193,18 @@ export class InventoryAdjustmentService {
   async createAdjustment(input: CreateAdjustmentInput): Promise<AdjustmentResult> {
     this.logger.log(`[ADJUSTMENT] Creating ${input.type} adjustment for product ${input.productId} at location ${input.locationId}, qty: ${input.quantity}`);
 
+    // Idempotent replay: the offline-queue (iOS) may retry a write whose
+    // original response was lost after it actually committed. Recognize the
+    // client-supplied dedup key and return the existing result instead of
+    // applying the delta twice.
+    if (input.clientRequestId) {
+      const existing = await this.findByClientRequestId(input.clientRequestId);
+      if (existing) {
+        this.logger.log(`[ADJUSTMENT] Duplicate clientRequestId ${input.clientRequestId} — returning existing adjustment ${existing.adjustment.id}`);
+        return existing;
+      }
+    }
+
     // Validate input
     if (input.quantity === 0) {
       throw new BadRequestException('Adjustment quantity cannot be zero');
@@ -307,6 +320,7 @@ export class InventoryAdjustmentService {
           totalCost: totalCost,
           effectiveDate: input.effectiveDate || new Date(),
           adjustedBy: input.adjustedBy,
+          clientRequestId: input.clientRequestId,
         },
       });
 
@@ -425,6 +439,7 @@ export class InventoryAdjustmentService {
           createdBatchId: inventoryBatch.id,
           effectiveDate: input.effectiveDate || new Date(),
           adjustedBy: input.adjustedBy,
+          clientRequestId: input.clientRequestId,
         },
       });
 
@@ -470,6 +485,47 @@ export class InventoryAdjustmentService {
   // --------------------------------------------------------------------------
   // Helper methods
   // --------------------------------------------------------------------------
+
+  private async findByClientRequestId(clientRequestId: string): Promise<AdjustmentResult | null> {
+    const existing = await this.prisma.inventoryAdjustment.findUnique({
+      where: { clientRequestId },
+      include: { createdBatch: true, consumptions: true },
+    });
+    if (!existing) return null;
+
+    const currentTotal = await this.prisma.inventory.aggregate({
+      where: { productId: existing.productId, locationId: existing.locationId, quantity: { gt: 0 } },
+      _sum: { quantity: true },
+    });
+    const newTotal = currentTotal._sum.quantity || 0;
+
+    return {
+      adjustment: {
+        id: existing.id,
+        type: existing.type,
+        quantity: existing.quantity,
+        unitCost: existing.unitCost.toString(),
+        totalCost: existing.totalCost.toString(),
+        reason: existing.reason,
+        notes: existing.notes,
+        adjustedAt: existing.adjustedAt,
+        effectiveDate: existing.effectiveDate,
+      },
+      inventoryImpact: {
+        previousTotal: newTotal - existing.quantity,
+        newTotal,
+        batchesConsumed: existing.consumptions.length || undefined,
+        batchCreated: existing.createdBatch?.id,
+      },
+      consumptions: existing.consumptions.length
+        ? existing.consumptions.map((c) => ({
+            inventoryId: c.inventoryId,
+            quantity: c.quantity,
+            unitCost: c.unitCost.toString(),
+          }))
+        : undefined,
+    };
+  }
 
   private async checkCutoverLock(locationId: string, effectiveDate: Date): Promise<boolean> {
     const lock = await this.prisma.cutoverLock.findFirst({

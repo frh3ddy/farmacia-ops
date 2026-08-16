@@ -45,6 +45,7 @@ interface CreateExpenseDto {
   paidAt?: string;
   notes?: string;
   createdBy?: string;
+  clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
 }
 
 @Controller('expenses')
@@ -170,6 +171,7 @@ export class ExpenseController {
       paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
       notes: body.notes,
       createdBy: currentEmployee.id,
+      clientRequestId: body.clientRequestId,
     });
 
     return {

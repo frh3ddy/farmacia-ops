@@ -22,6 +22,7 @@ interface ReceiveInventoryInput {
   receivedBy?: string;
   notes?: string;
   syncToSquare?: boolean;
+  clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
 }
 
 interface ReceivingResult {
@@ -155,6 +156,18 @@ export class InventoryReceivingService {
       `[RECEIVING] Receiving ${input.quantity} units of product ${input.productId} at location ${input.locationId}, cost: ${input.unitCost}`
     );
 
+    // Idempotent replay: the offline-queue (iOS) may retry a write whose
+    // original response was lost after it actually committed. Recognize the
+    // client-supplied dedup key and return the existing result instead of
+    // creating a duplicate batch.
+    if (input.clientRequestId) {
+      const existing = await this.findByClientRequestId(input.clientRequestId);
+      if (existing) {
+        this.logger.log(`[RECEIVING] Duplicate clientRequestId ${input.clientRequestId} — returning existing receiving ${existing.receiving.id}`);
+        return existing;
+      }
+    }
+
     // Validate input
     if (input.quantity <= 0) {
       throw new BadRequestException('Quantity must be positive');
@@ -222,6 +235,7 @@ export class InventoryReceivingService {
           inventoryBatchId: inventoryBatch.id,
           receivedBy: input.receivedBy,
           notes: input.notes,
+          clientRequestId: input.clientRequestId,
         },
       });
 
@@ -348,6 +362,39 @@ export class InventoryReceivingService {
         receivedAt: result.inventoryBatch.receivedAt,
       },
       squareSync,
+      inventoryTotal: inventoryTotal._sum.quantity || 0,
+    };
+  }
+
+  private async findByClientRequestId(clientRequestId: string): Promise<ReceivingResult | null> {
+    const existing = await this.prisma.inventoryReceiving.findUnique({
+      where: { clientRequestId },
+      include: { inventoryBatch: true },
+    });
+    if (!existing) return null;
+
+    const inventoryTotal = await this.prisma.inventory.aggregate({
+      where: { productId: existing.productId, locationId: existing.locationId, quantity: { gt: 0 } },
+      _sum: { quantity: true },
+    });
+
+    return {
+      receiving: {
+        id: existing.id,
+        quantity: existing.quantity,
+        unitCost: existing.unitCost.toString(),
+        totalCost: existing.totalCost.toString(),
+        invoiceNumber: existing.invoiceNumber,
+        batchNumber: existing.batchNumber,
+        receivedAt: existing.receivedAt,
+      },
+      inventoryBatch: {
+        id: existing.inventoryBatch.id,
+        quantity: existing.inventoryBatch.quantity,
+        unitCost: existing.inventoryBatch.unitCost.toString(),
+        receivedAt: existing.inventoryBatch.receivedAt,
+      },
+      squareSync: existing.squareSynced ? { synced: true } : undefined,
       inventoryTotal: inventoryTotal._sum.quantity || 0,
     };
   }

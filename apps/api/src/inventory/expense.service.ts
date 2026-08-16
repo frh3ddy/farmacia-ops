@@ -18,6 +18,7 @@ interface CreateExpenseInput {
   paidAt?: Date;
   notes?: string;
   createdBy?: string;
+  clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
 }
 
 interface ExpenseSummary {
@@ -58,6 +59,21 @@ export class ExpenseService {
   async createExpense(input: CreateExpenseInput) {
     this.logger.log(`[EXPENSE] Creating ${input.type} expense: $${input.amount}`);
 
+    // Idempotent replay: the offline-queue (iOS) may retry a write whose
+    // original response was lost after it actually committed. Recognize the
+    // client-supplied dedup key and return the existing row instead of
+    // creating a duplicate expense.
+    if (input.clientRequestId) {
+      const existing = await this.prisma.expense.findUnique({
+        where: { clientRequestId: input.clientRequestId },
+        include: { location: { select: { id: true, name: true } } },
+      });
+      if (existing) {
+        this.logger.log(`[EXPENSE] Duplicate clientRequestId ${input.clientRequestId} — returning existing expense ${existing.id}`);
+        return existing;
+      }
+    }
+
     const expense = await this.prisma.expense.create({
       data: {
         locationId: input.locationId,
@@ -71,6 +87,7 @@ export class ExpenseService {
         paidAt: input.paidAt,
         notes: input.notes,
         createdBy: input.createdBy,
+        clientRequestId: input.clientRequestId,
       },
       include: {
         location: { select: { id: true, name: true } },

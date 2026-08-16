@@ -33,6 +33,7 @@ interface ReceiveInventoryDto {
   receivedBy?: string;
   notes?: string;
   syncToSquare?: boolean;
+  clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
   // Optional selling price update
   sellingPrice?: number;
   syncPriceToSquare?: boolean;
@@ -148,6 +149,7 @@ export class InventoryReceivingController {
       receivedBy: currentEmployee.id,
       notes: body.notes,
       syncToSquare: body.syncToSquare,
+      clientRequestId: body.clientRequestId,
     });
 
     // Build response message

@@ -29,6 +29,7 @@ interface CreateAdjustmentDto {
   effectiveDate?: string;
   adjustedBy?: string;
   syncToSquare?: boolean; // If true, also update Square inventory
+  clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
 }
 
 /**
@@ -116,6 +117,7 @@ export class InventoryAdjustmentController {
       effectiveDate,
       adjustedBy: currentEmployee.id,
       syncToSquare: body.syncToSquare,
+      clientRequestId: body.clientRequestId,
     });
 
     // Build response message

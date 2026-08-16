@@ -358,6 +358,11 @@ model InventoryAdjustment {
   adjustedAt    DateTime @default(now())
   adjustedBy    String? // User ID who made the adjustment
 
+  // Client-supplied dedup key for offline-queue replay (iOS): lets a retried
+  // write after a dropped connection be recognized as the same request
+  // instead of double-applying the adjustment. Null for older/non-mobile writes.
+  clientRequestId String? @unique
+
   // Cutover validation
   effectiveDate DateTime @default(now()) // Date the adjustment applies to
 
@@ -417,6 +422,10 @@ model InventoryReceiving {
   // Created inventory batch reference
   inventoryBatchId String @unique
 
+  // Client-supplied dedup key for offline-queue replay (iOS) — see
+  // InventoryAdjustment.clientRequestId for the full rationale.
+  clientRequestId String? @unique
+
   // Square sync tracking
   squareSynced    Boolean @default(false)
   squareSyncedAt  DateTime?
@@ -456,6 +465,10 @@ model Expense {
   notes       String?
   createdBy   String?      // User who recorded it
   createdAt   DateTime     @default(now())
+
+  // Client-supplied dedup key for offline-queue replay (iOS) — see
+  // InventoryAdjustment.clientRequestId for the full rationale.
+  clientRequestId String? @unique
 
   location Location @relation(fields: [locationId], references: [id])
 
