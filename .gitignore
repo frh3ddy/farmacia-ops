@@ -90,3 +90,6 @@ farmacia-ios/
 
 # graphify (local knowledge graph, not shared)
 graphify-out/
+
+# interface-design skill's saved design-system notes (local only)
+.interface-design/
