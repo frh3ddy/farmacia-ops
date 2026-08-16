@@ -1,6 +1,8 @@
 # compiled output
 /dist
 **/dist
+# apps/web builds directly into here now — the whole directory is generated
+apps/api/public/
 node_modules
 **/node_modules
 package-lock.json
@@ -88,3 +90,6 @@ farmacia-ios/
 
 # graphify (local knowledge graph, not shared)
 graphify-out/
+
+# interface-design skill's saved design-system notes (local only)
+.interface-design/

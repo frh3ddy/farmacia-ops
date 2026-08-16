@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/*
+ * Ledger direction: back-office/paper world, not a consumer dashboard.
+ * See ../../.interface-design/system.md at the repo root for the full rationale.
+ * Every color below is a primitive — components should never reach for a raw hex.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Surfaces: warm paper, not gray. Elevation is a whisper, not a jump. */
+  --color-canvas: #f3efe6;
+  --color-surface: #f8f5ee;
+  --color-surface-inset: #ece7d9;
+  --color-surface-raised: #fffdf8;
+
+  /* Text hierarchy: warm ink, four levels. */
+  --color-ink: #2b2620;
+  --color-ink-secondary: #5b544a;
+  --color-ink-tertiary: #857c6e;
+  --color-ink-muted: #b3a996;
+
+  /* Borders: low-opacity, found on purpose not seen by accident. */
+  --color-border-subtle: rgb(43 38 32 / 8%);
+  --color-border-standard: rgb(43 38 32 / 14%);
+  --color-border-emphasis: rgb(43 38 32 / 24%);
+
+  /* Stamp-ink navy: primary actions, focus, audit/approval chrome. */
+  --color-accent: #1f3a5f;
+  --color-accent-hover: #16293f;
+  --color-accent-contrast: #f7f4ec;
+
+  /* Semantic — used with intention, not decoration. */
+  --color-success: #2f6b4f;
+  --color-success-bg: #e3ede7;
+  --color-warning: #9c6a0f;
+  --color-warning-bg: #f6e9cf;
+  --color-destructive: #a3271f;
+  --color-destructive-bg: #f6e0dd;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* Money, quantities, IDs — always tabular so columns of numbers align. */
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
