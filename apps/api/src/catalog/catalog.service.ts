@@ -78,6 +78,20 @@ export class CatalogService {
   }
 
   /**
+   * Square labels a variation "Sin variación" / "Regular" when an item has no
+   * real named variations — never usable as a display name on its own.
+   */
+  private isGenericVariationName(name: string | null | undefined): boolean {
+    if (!name) return true;
+    const lower = name.toLowerCase();
+    return (
+      lower.includes('sin variación') ||
+      lower.includes('no variation') ||
+      lower.includes('regular')
+    );
+  }
+
+  /**
    * Fetch multiple catalog objects in batch from Square
    * Handles "Sin variación" logic and Parent/Child image inheritance
    */
@@ -131,11 +145,7 @@ export class CatalogService {
           const itemName = itemData?.name || 'Unknown Product';
 
           // 3. NAMING LOGIC: Filter out "Sin variación"
-          const isGeneric =
-            !variationName ||
-            variationName.toLowerCase().includes('sin variación') ||
-            variationName.toLowerCase().includes('no variation') ||
-            variationName.toLowerCase().includes('regular');
+          const isGeneric = this.isGenericVariationName(variationName);
 
           // If generic, use just "Aspirina". If specific, use "Aspirina (Small)"
           const finalName = isGeneric
@@ -369,7 +379,11 @@ export class CatalogService {
              };
           }
 
-          const squareProductName = catalogData.productName || variationName;
+          // Don't let a failed/missing Square detail fetch leak the raw
+          // generic variation label ("Sin variación"/"Regular") into the name.
+          const squareProductName =
+            catalogData.productName ||
+            (this.isGenericVariationName(variationName) ? null : variationName);
 
           // --- ATOMIC DB WRITE START ---
           // We use a transaction here to ensure Product and Mapping are synced together
