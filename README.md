@@ -14,7 +14,7 @@ Backend and back-office tooling for a multi-location pharmacy operation running 
 
 **Square integration:** the worker consumes `payment.created` webhooks; the API syncs the Square catalog (products/pricing) and locations. FIFO consumption order is `Inventory.receivedAt ASC` — never `createdAt` — since backfilled/migrated batches can have a `createdAt` that lags the real receiving date.
 
-See `CONTEXT.md` for the full domain model and `API_CONTRACTS.md` for endpoint-level request/response contracts (written primarily for the iOS app, still accurate for the API in general).
+For architecture and domain-model questions, query the graphify knowledge graph (`graphify-out/`) — see the project's CLAUDE.md — instead of a hand-maintained doc that drifts out of date.
 
 ## Development setup
 
