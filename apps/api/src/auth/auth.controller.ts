@@ -194,22 +194,26 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Get('devices')
   async getActiveDevices(
-    @Headers('authorization') authorization: string,
+    @Headers('x-session-token') sessionToken: string,
     @Query('locationId') locationId?: string
   ) {
-    // Extract device token from Authorization header
-    const deviceToken = authorization?.replace('Bearer ', '');
-    if (!deviceToken) {
+    if (!sessionToken) {
       throw new HttpException(
-        { success: false, message: 'Device token required' },
+        { success: false, message: 'Session token required' },
         HttpStatus.UNAUTHORIZED
       );
     }
 
-    const device = await this.authService.validateDeviceToken(deviceToken);
-    const targetLocationId = locationId || device.locationId;
+    const { employee, currentLocation } = await this.authService.validateSession(sessionToken);
+    const targetLocationId = locationId || currentLocation?.locationId;
+    if (!targetLocationId) {
+      throw new HttpException(
+        { success: false, message: 'No location context' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
 
-    const devices = await this.authService.getActiveDevices(targetLocationId);
+    const devices = await this.authService.getActiveDevicesForOwner(employee.id, targetLocationId);
 
     return {
       success: true,

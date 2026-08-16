@@ -1,7 +1,7 @@
 import { Controller, Get, Post, HttpCode, HttpStatus, HttpException, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationsService } from './locations.service';
-import { AuthGuard, RoleGuard, Roles, Public } from '../auth/guards/auth.guard';
+import { AuthGuard, RoleGuard, DeviceGuard, Roles, Public } from '../auth/guards/auth.guard';
 
 @Controller()
 @UseGuards(AuthGuard, RoleGuard)
@@ -21,8 +21,13 @@ export class LocationsController {
     };
   }
 
+  // Public() bypasses the class-level AuthGuard's session requirement;
+  // DeviceGuard still enforces a valid activated-device token. Needed
+  // pre-session: the PIN-entry screen loads this to populate the location
+  // picker before the employee has logged in with a PIN.
   @Get('locations')
-  @Public()  // Locations list is public (needed for device activation)
+  @Public()
+  @UseGuards(DeviceGuard)
   async getLocations() {
     const locations = await this.prisma.location.findMany({
       orderBy: { createdAt: 'desc' }

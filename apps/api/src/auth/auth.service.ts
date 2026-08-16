@@ -228,6 +228,27 @@ export class AuthService {
   // Device Deactivation
   // --------------------------------------------------------------------------
 
+  // Shared by deactivateDevice and getActiveDevicesForOwner — device
+  // management (viewing or revoking) is OWNER-only, scoped to the device's
+  // own location, same rule both actions need.
+  private async assertOwnerForLocation(employeeId: string, locationId: string) {
+    const assignment = await this.prisma.employeeLocationAssignment.findFirst({
+      where: {
+        employeeId,
+        locationId,
+        role: 'OWNER',
+        isActive: true,
+      },
+    });
+
+    if (!assignment) {
+      throw new HttpException(
+        { success: false, message: 'Only owners can manage devices for this location' },
+        HttpStatus.FORBIDDEN
+      );
+    }
+  }
+
   async deactivateDevice(deviceId: string, employeeId: string) {
     const device = await this.prisma.device.findUnique({
       where: { id: deviceId },
@@ -240,22 +261,7 @@ export class AuthService {
       );
     }
 
-    // Check employee has OWNER access to this location
-    const assignment = await this.prisma.employeeLocationAssignment.findFirst({
-      where: {
-        employeeId,
-        locationId: device.locationId,
-        role: 'OWNER',
-        isActive: true,
-      },
-    });
-
-    if (!assignment) {
-      throw new HttpException(
-        { success: false, message: 'Only owners can deactivate devices' },
-        HttpStatus.FORBIDDEN
-      );
-    }
+    await this.assertOwnerForLocation(employeeId, device.locationId);
 
     // Deactivate the device
     await this.prisma.device.update({
@@ -646,6 +652,11 @@ export class AuthService {
       },
       orderBy: { lastActiveAt: 'desc' },
     });
+  }
+
+  async getActiveDevicesForOwner(employeeId: string, locationId: string) {
+    await this.assertOwnerForLocation(employeeId, locationId);
+    return this.getActiveDevices(locationId);
   }
 
   // --------------------------------------------------------------------------
