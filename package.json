@@ -20,9 +20,10 @@
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npm run build --workspace=apps/worker && npm run build --workspace=apps/api",
+    "build": "npm run build --workspace=apps/worker && npm run build --workspace=apps/api && npm run build --workspace=apps/web",
     "build:worker": "npm run build --workspace=apps/worker",
     "build:api": "npm run build --workspace=apps/api",
+    "build:web": "npm run build --workspace=apps/web",
     "start:worker": "npm run start --workspace=apps/worker",
     "start:api": "npm run start --workspace=apps/api",
     "postinstall": "prisma generate",
@@ -34,6 +35,7 @@
     "db:up": "docker compose up -d",
     "dev:api": "npm run start:dev --workspace=apps/api",
     "dev:worker": "npm run start:dev --workspace=apps/worker",
+    "dev:web": "npm run dev --workspace=apps/web",
     "prisma:dev": "npx prisma migrate dev",
     "db:down": "docker compose down"
   },
