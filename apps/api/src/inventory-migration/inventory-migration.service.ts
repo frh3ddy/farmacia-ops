@@ -414,6 +414,48 @@ export class InventoryMigrationService {
    * Extract costs from all products for migration preview and approval
    * OPTIMIZED: Bulk pre-fetching and improved resume logic with caching
    */
+  /**
+   * Every product mapped to Square for these locations, merged with live Square
+   * inventory counts. Square's inventory API only returns a count row once a
+   * variation has an inventory event (received, sold, etc.) — a mapped product
+   * that's never been counted simply isn't in that response. Driving the
+   * cutover item list off CatalogMapping instead means those items still show
+   * up (quantity 0) so their cost/price can be set and their history tracked,
+   * instead of silently skipping cost extraction for anything out of stock.
+   */
+  private async getCutoverItemsForLocations(
+    locationIds: string[],
+    locationById: Map<string, { id: string; squareId: string | null; name: string }>,
+  ): Promise<{ locationId: string; catalogObjectId: string; quantity: number }[]> {
+    const items: { locationId: string; catalogObjectId: string; quantity: number }[] = [];
+
+    for (const locationId of locationIds) {
+      const location = locationById.get(locationId);
+      if (!location?.squareId) continue;
+
+      const [mappings, squareCounts] = await Promise.all([
+        this.prisma.catalogMapping.findMany({
+          where: { OR: [{ locationId }, { locationId: null }] },
+          select: { squareVariationId: true },
+          distinct: ['squareVariationId'],
+        }),
+        this.squareInventory.fetchSquareInventory(location.squareId),
+      ]);
+
+      const quantityByVariation = new Map(squareCounts.map((c) => [c.catalogObjectId, c.quantity]));
+
+      for (const mapping of mappings) {
+        items.push({
+          locationId,
+          catalogObjectId: mapping.squareVariationId,
+          quantity: quantityByVariation.get(mapping.squareVariationId) ?? 0,
+        });
+      }
+    }
+
+    return items;
+  }
+
   async extractCostsForMigration(
     locationIds: string[],
     costBasis: 'DESCRIPTION',
@@ -429,27 +471,30 @@ export class InventoryMigrationService {
 
     // 1) Collect inventory items across selected locations
     let allItems: ItemToProcess[] = cachedItems || [];
-    
+
+    // Built unconditionally (not just on the cold-fetch path) because step 11 needs it too:
+    // Square's location_overrides are keyed by Square's own location id, not our internal
+    // Location.id, so resolving a per-location price override requires this translation.
+    const locations = await this.prisma.location.findMany({
+      where: { id: { in: locationIds } },
+    });
+    const locationById = new Map(locations.map((loc) => [loc.id, loc]));
+
     if (allItems.length === 0) {
-      // Single batched lookup instead of one findUnique per location (N+1).
-      const locations = await this.prisma.location.findMany({
-        where: { id: { in: locationIds } },
-      });
-      const locationById = new Map(locations.map((loc) => [loc.id, loc]));
-
-      for (const locationId of locationIds) {
-        const location = locationById.get(locationId);
-        if (!location?.squareId) continue;
-
-        const items = await this.squareInventory.fetchSquareInventory(location.squareId);
-        for (const item of items) {
-          allItems.push({
-            locationId,
-            locationName: location.name,
-            squareInventoryItem: item,
-            itemKey: `${locationId}:${item.catalogObjectId}`,
-          });
-        }
+      const mergedItems = await this.getCutoverItemsForLocations(locationIds, locationById);
+      for (const merged of mergedItems) {
+        const location = locationById.get(merged.locationId)!;
+        allItems.push({
+          locationId: merged.locationId,
+          locationName: location.name,
+          squareInventoryItem: {
+            catalogObjectId: merged.catalogObjectId,
+            locationId: location.squareId!,
+            quantity: merged.quantity,
+            catalogObject: null,
+          },
+          itemKey: `${merged.locationId}:${merged.catalogObjectId}`,
+        });
       }
     }
 
@@ -541,6 +586,9 @@ export class InventoryMigrationService {
     // Representative item used to fetch Square catalog data
     const representativeByProduct = new Map<string, (typeof nonSkipped)[0]>();
     const variationIdsByProduct = new Map<string, Set<string>>();
+    // productId -> variationId -> set of locationIds it was seen at this batch, so step 11 can
+    // resolve Square's per-location price overrides instead of only the base variation price.
+    const locationsByProductVariation = new Map<string, Map<string, Set<string>>>();
 
     for (const item of nonSkipped) {
       if (!representativeByProduct.has(item.productId)) {
@@ -549,7 +597,15 @@ export class InventoryMigrationService {
       if (!variationIdsByProduct.has(item.productId)) {
         variationIdsByProduct.set(item.productId, new Set());
       }
-      variationIdsByProduct.get(item.productId)!.add(item.squareInventoryItem.catalogObjectId);
+      const vid = item.squareInventoryItem.catalogObjectId;
+      variationIdsByProduct.get(item.productId)!.add(vid);
+
+      if (!locationsByProductVariation.has(item.productId)) {
+        locationsByProductVariation.set(item.productId, new Map());
+      }
+      const varLocMap = locationsByProductVariation.get(item.productId)!;
+      if (!varLocMap.has(vid)) varLocMap.set(vid, new Set());
+      varLocMap.get(vid)!.add(item.locationId);
     }
 
     const batchProductIds = Array.from(representativeByProduct.keys());
@@ -716,41 +772,51 @@ export class InventoryMigrationService {
       Array<{ variationId: string; variationName?: string | null; priceCents: number; currency: string }>
     >();
 
-    for (const [productId, vset] of variationIdsByProduct.entries()) {
+    for (const [productId, varLocMap] of locationsByProductVariation.entries()) {
       const list: Array<{ variationId: string; variationName?: string | null; priceCents: number; currency: string }> = [];
-      for (const vid of vset.values()) {
-        let priceCents: number | null = null;
-        let currency: string | null = null;
-        let variationName: string | null = null;
+      const seenPrices = new Set<string>();
 
-        // Try cached price first
-        const cached = cachedPriceMap.get(vid);
-        if (cached?.priceCents && cached?.currency) {
-          priceCents = cached.priceCents.toNumber();
-          currency = cached.currency;
-        }
-
-        // Always check fresh Square data for variation name and as fallback for price
+      for (const [vid, locationIds] of varLocMap.entries()) {
         const cat = catalogDataMap.get(vid);
-        if (cat) {
-          if (!priceCents) priceCents = cat.variationPriceCents;
-          if (!currency) currency = cat.variationCurrency;
-          // Always get variation name from Square if available (even if price is cached)
-          variationName = cat.itemVariationData?.name ?? null;
+        const cached = cachedPriceMap.get(vid);
+        const variationName: string | null = cat?.itemVariationData?.name ?? null;
+
+        // Resolve price per location this variation was actually seen at this batch —
+        // Square lets a location override the base price (e.g. same SKU, different price per store).
+        for (const locationId of locationIds) {
+          let priceCents: number | null = null;
+          let currency: string | null = null;
+
+          // Square's location_overrides key by Square's location id, not our internal Location.id.
+          const squareLocationId = locationById.get(locationId)?.squareId;
+
+          if (cat && squareLocationId) {
+            const resolved = this.squareInventory.resolvePriceForLocation(cat, squareLocationId);
+            if (resolved) {
+              priceCents = resolved.priceCents;
+              currency = resolved.currency;
+            }
+          }
+
+          // Fall back to the flat price cache when we didn't fetch fresh Square data this batch.
+          // ponytail: cache only stores the base (non-location) price — fine given location price
+          // overrides are rare (~0.3% of SKUs) and self-correct within the 24h staleness window.
+          if (priceCents === null && cached?.priceCents && cached?.currency) {
+            priceCents = cached.priceCents.toNumber();
+            currency = cached.currency;
+          }
+
+          if (!Number.isFinite(priceCents) || priceCents === null || !currency) continue;
+
+          const key = `${priceCents}:${currency}`;
+          if (seenPrices.has(key)) continue;
+          seenPrices.add(key);
+
+          list.push({ variationId: vid, variationName, priceCents, currency });
         }
-
-        if (!Number.isFinite(priceCents) || priceCents === null || !currency) continue;
-
-        list.push({
-          variationId: vid,
-          variationName: variationName,
-          priceCents,
-          currency,
-        });
       }
-      // de-dupe by variationId
-      const uniq = new Map(list.map((x) => [x.variationId, x]));
-      sellingPricesByProduct.set(productId, Array.from(uniq.values()));
+
+      sellingPricesByProduct.set(productId, list);
     }
 
     // 10) Assemble CostExtractionResult per productId
@@ -1116,12 +1182,18 @@ export class InventoryMigrationService {
     });
     const batchLocationById = new Map(batchLocations.map((loc) => [loc.id, loc]));
 
-    for (const locationId of input.locationIds) {
-      const location = batchLocationById.get(locationId);
-      if (!location?.squareId) continue;
-
-      const inventory = await this.squareInventory.fetchSquareInventory(location.squareId);
-      inventory.forEach(item => itemsToProcess.push({ locationId, squareInventoryItem: item }));
+    const mergedItems = await this.getCutoverItemsForLocations(input.locationIds, batchLocationById);
+    for (const merged of mergedItems) {
+      const location = batchLocationById.get(merged.locationId)!;
+      itemsToProcess.push({
+        locationId: merged.locationId,
+        squareInventoryItem: {
+          catalogObjectId: merged.catalogObjectId,
+          locationId: location.squareId!,
+          quantity: merged.quantity,
+          catalogObject: null,
+        },
+      });
     }
 
     // 3. Determine Batch
@@ -2418,11 +2490,8 @@ export class InventoryMigrationService {
         continue;
       }
 
-      let squareInventory;
       try {
-        squareInventory = await this.squareInventory.fetchSquareInventory(
-          location.squareId,
-        );
+        await this.squareInventory.fetchSquareInventory(location.squareId);
       } catch (error) {
         warnings.push({
           locationId: locationId,
@@ -2432,6 +2501,10 @@ export class InventoryMigrationService {
         });
         continue;
       }
+
+      // Every mapped product for this location, quantity defaulting to 0 for
+      // anything Square has no inventory count for yet (see getCutoverItemsForLocations).
+      const squareInventory = await this.getCutoverItemsForLocations([locationId], previewLocationById);
 
       // Optimization: Batch process
       // 1. Collect IDs
