@@ -17,9 +17,39 @@ export function LoginForm({ onLogin, onSwitchToSetup }: LoginFormProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [deviceToken, setDeviceToken] = useState(localStorage.getItem("deviceToken"));
+  const [checkingDevice, setCheckingDevice] = useState(true);
 
+  // A stored deviceToken only means we activated a device at some point — it
+  // doesn't mean that device is still valid (an owner may have deactivated it
+  // remotely from the new Devices screen). Confirm against the server before
+  // trusting it, otherwise a revoked device keeps landing on the PIN step
+  // instead of back on activation.
   useEffect(() => {
-    if (deviceToken) setStep("pin");
+    if (!deviceToken) {
+      setStep("device");
+      setCheckingDevice(false);
+      return;
+    }
+
+    let cancelled = false;
+    apiFetch("/locations")
+      .then(() => {
+        if (!cancelled) setStep("pin");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        localStorage.removeItem("deviceToken");
+        localStorage.removeItem("sessionToken");
+        setDeviceToken(null);
+        setStep("device");
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingDevice(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [deviceToken]);
 
   const handleDeviceActivation = async (e: FormEvent<HTMLFormElement>) => {
@@ -71,6 +101,14 @@ export function LoginForm({ onLogin, onSwitchToSetup }: LoginFormProps) {
     setDeviceToken(null);
     setStep("device");
   };
+
+  if (checkingDevice) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-(--color-canvas) p-4">
+        <p className="text-sm text-(--color-ink-tertiary)">Checking device…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-(--color-canvas) p-4">

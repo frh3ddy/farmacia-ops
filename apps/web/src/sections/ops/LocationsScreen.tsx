@@ -8,34 +8,14 @@ import type { Location } from "../../lib/types";
 
 type SyncResult = { created: number; updated: number; total: number };
 
-const columns: Column<Location>[] = [
-  { key: "id", header: "ID", render: v => <code className="tabular text-xs">{String(v).slice(0, 8)}…</code> },
-  { key: "name", header: "Name" },
-  { key: "address", header: "Address", render: v => (v as string | null) ?? "-" },
-  {
-    key: "isActive",
-    header: "Status",
-    render: v => (
-      <span
-        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-          v
-            ? "bg-(--color-success-bg) text-(--color-success)"
-            : "bg-(--color-destructive-bg) text-(--color-destructive)"
-        }`}
-      >
-        {v ? "Active" : "Inactive"}
-      </span>
-    ),
-  },
-  { key: "createdAt", header: "Created", render: v => new Date(v as string).toLocaleDateString() },
-];
-
 export function LocationsScreen() {
   const { user } = useAuth();
   const { locations, loading, error, refetch } = useLocations();
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -51,6 +31,65 @@ export function LocationsScreen() {
       setSyncing(false);
     }
   };
+
+  const handleAssign = async (locationId: string) => {
+    setAssigningId(locationId);
+    setAssignError(null);
+    try {
+      await apiFetch(`/auth/employees/${user.employee.id}/locations`, {
+        method: "POST",
+        body: JSON.stringify({ locationId, role: "OWNER" }),
+      });
+      // accessibleLocations lives on the session (/auth/me); reload to pick it up.
+      window.location.reload();
+    } catch (err) {
+      setAssignError(err instanceof ApiError ? err.message : "Failed to assign location");
+      setAssigningId(null);
+    }
+  };
+
+  const columns: Column<Location>[] = [
+    { key: "id", header: "ID", render: v => <code className="tabular text-xs">{String(v).slice(0, 8)}…</code> },
+    { key: "name", header: "Name" },
+    { key: "address", header: "Address", render: v => (v as string | null) ?? "-" },
+    {
+      key: "isActive",
+      header: "Status",
+      render: v => (
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+            v
+              ? "bg-(--color-success-bg) text-(--color-success)"
+              : "bg-(--color-destructive-bg) text-(--color-destructive)"
+          }`}
+        >
+          {v ? "Active" : "Inactive"}
+        </span>
+      ),
+    },
+    { key: "createdAt", header: "Created", render: v => new Date(v as string).toLocaleDateString() },
+    ...(isOwner(user)
+      ? [
+          {
+            key: "id",
+            header: "Actions",
+            render: (_v, location) => {
+              const alreadyAssigned = user.accessibleLocations.some(a => a.locationId === location.id);
+              if (alreadyAssigned) return <span className="text-(--color-ink-muted)">On your account</span>;
+              return (
+                <button
+                  onClick={() => handleAssign(location.id)}
+                  disabled={assigningId === location.id}
+                  className="text-(--color-accent) hover:text-(--color-accent-hover) disabled:opacity-50"
+                >
+                  {assigningId === location.id ? "Assigning…" : "Assign to my account"}
+                </button>
+              );
+            },
+          } satisfies Column<Location>,
+        ]
+      : []),
+  ];
 
   return (
     <div>
@@ -81,9 +120,9 @@ export function LocationsScreen() {
           {syncMessage}
         </div>
       )}
-      {(syncError || error) && (
+      {(syncError || assignError || error) && (
         <div className="mb-4 rounded-md border border-(--color-destructive) bg-(--color-destructive-bg) px-4 py-2 text-sm text-(--color-destructive)">
-          {syncError ?? error}
+          {syncError ?? assignError ?? error}
         </div>
       )}
 

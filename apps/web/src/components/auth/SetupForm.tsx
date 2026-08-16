@@ -12,8 +12,6 @@ type FormState = {
   ownerPin: string;
   confirmPin: string;
   locationId: string;
-  locationName: string;
-  useExistingLocation: boolean;
 };
 
 const initialForm: FormState = {
@@ -24,8 +22,6 @@ const initialForm: FormState = {
   ownerPin: "",
   confirmPin: "",
   locationId: "",
-  locationName: "",
-  useExistingLocation: false,
 };
 
 type SetupFormProps = {
@@ -47,7 +43,7 @@ export function SetupForm({ onSetupComplete, onSwitchToLogin }: SetupFormProps) 
       .then(body => {
         if (body.data.locations.length > 0) {
           setAvailableLocations(body.data.locations);
-          setForm(prev => ({ ...prev, useExistingLocation: true, locationId: body.data.locations[0].id }));
+          setForm(prev => ({ ...prev, locationId: body.data.locations[0].id }));
         }
       })
       .catch(err => console.error("Failed to fetch locations:", err))
@@ -63,7 +59,7 @@ export function SetupForm({ onSetupComplete, onSwitchToLogin }: SetupFormProps) 
       });
       if (body.data.locations.length > 0) {
         setAvailableLocations(body.data.locations);
-        setForm(prev => ({ ...prev, useExistingLocation: true, locationId: body.data.locations[0].id }));
+        setForm(prev => ({ ...prev, locationId: body.data.locations[0].id }));
         setSuccess(`Synced ${body.data.total} location(s) from Square!`);
         setTimeout(() => setSuccess(""), 3000);
       } else {
@@ -101,13 +97,8 @@ export function SetupForm({ onSetupComplete, onSwitchToLogin }: SetupFormProps) 
       setLoading(false);
       return;
     }
-    if (form.useExistingLocation && !form.locationId) {
-      setError("Please select a location");
-      setLoading(false);
-      return;
-    }
-    if (!form.useExistingLocation && !form.locationName) {
-      setError("Please enter a location name");
+    if (!form.locationId) {
+      setError("Please select a location. Sync from Square first if none are listed.");
       setLoading(false);
       return;
     }
@@ -120,7 +111,7 @@ export function SetupForm({ onSetupComplete, onSwitchToLogin }: SetupFormProps) 
           ownerEmail: form.ownerEmail,
           ownerPassword: form.ownerPassword,
           ownerPin: form.ownerPin,
-          ...(form.useExistingLocation ? { locationId: form.locationId } : { locationName: form.locationName }),
+          locationId: form.locationId,
         }),
       });
       setSuccess("Setup complete! You can now log in.");
@@ -235,32 +226,7 @@ export function SetupForm({ onSetupComplete, onSwitchToLogin }: SetupFormProps) 
               </button>
             </div>
 
-            {availableLocations.length > 0 && (
-              <div className="mb-4 flex items-center gap-4 text-sm text-(--color-ink-secondary)">
-                <label className="flex cursor-pointer items-center">
-                  <input
-                    type="radio"
-                    checked={form.useExistingLocation}
-                    onChange={() =>
-                      setForm({ ...form, useExistingLocation: true, locationId: availableLocations[0]?.id ?? "" })
-                    }
-                    className="mr-2"
-                  />
-                  Use existing location
-                </label>
-                <label className="flex cursor-pointer items-center">
-                  <input
-                    type="radio"
-                    checked={!form.useExistingLocation}
-                    onChange={() => setForm({ ...form, useExistingLocation: false, locationId: "" })}
-                    className="mr-2"
-                  />
-                  Create new location
-                </label>
-              </div>
-            )}
-
-            {form.useExistingLocation && availableLocations.length > 0 ? (
+            {availableLocations.length > 0 ? (
               <Field label="Select location">
                 <select name="locationId" value={form.locationId} onChange={handleChange} required className={inputClass}>
                   <option value="">Select a location…</option>
@@ -273,23 +239,15 @@ export function SetupForm({ onSetupComplete, onSwitchToLogin }: SetupFormProps) 
                 </select>
               </Field>
             ) : (
-              <Field label="Pharmacy name">
-                <input
-                  name="locationName"
-                  value={form.locationName}
-                  onChange={handleChange}
-                  placeholder="My Pharmacy"
-                  required={!form.useExistingLocation}
-                  className={inputClass}
-                />
-              </Field>
+              <p className="text-sm text-(--color-ink-tertiary)">
+                {loadingLocations ? "Loading locations…" : "No locations yet — sync from Square to continue."}
+              </p>
             )}
-            {loadingLocations && <p className="mt-1 text-xs text-(--color-ink-tertiary)">Loading locations…</p>}
           </div>
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || availableLocations.length === 0}
             className="mt-2 w-full rounded-sm bg-(--color-accent) py-2.5 text-sm font-medium text-(--color-accent-contrast) hover:bg-(--color-accent-hover) disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "Setting up…" : "Complete setup"}
