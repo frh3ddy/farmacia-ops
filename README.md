@@ -62,15 +62,9 @@ npm run db:up      # docker compose up -d
 npm run prisma:migrate:dev
 ```
 
-### 5. Seed a test owner (optional)
+### 5. Create the owner account
 
-`scripts/seed-owner.ts` creates a throwaway OWNER account, a CASHIER account, and a "Main Pharmacy" location — safe to run against a local dev database (upserts on fixed IDs):
-
-```bash
-npx ts-node scripts/seed-owner.ts
-```
-
-Prints the login credentials it created (device-activation email/password, PIN for both accounts).
+No seeding needed. On first boot the API has zero employees, so `GET /auth/setup/status` returns `needsSetup: true` and the app's setup screen walks you through creating the owner (name, email, password, PIN) and picking/creating a location. The endpoint 400s once an owner exists, so it can't be re-run by accident.
 
 ### 6. Run it
 
