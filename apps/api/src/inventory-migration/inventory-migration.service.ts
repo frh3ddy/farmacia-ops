@@ -1667,6 +1667,7 @@ export class InventoryMigrationService {
     selectedSupplierName?: string | null,
     sellingPrice?: { priceCents: number; currency: string } | null,
     sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null,
+    approvedBy?: string | null,
   ): Promise<{ success: boolean }> {
     this.logger.log(`[APPROVE_ITEM] cutoverId: ${cutoverId}, productId: ${productId}, cost: ${cost}`);
     try {
@@ -1697,6 +1698,7 @@ export class InventoryMigrationService {
             source,
             migrationStatus: 'APPROVED',
             notes: notes || null,
+            approvedBy: approvedBy || null,
             sellingPriceCents: sellingPrice?.priceCents || null,
             sellingPriceCurrency: sellingPrice?.currency || null,
             sellingPriceRangeMinCents: sellingPriceRange?.minCents || null,
@@ -1707,6 +1709,7 @@ export class InventoryMigrationService {
             source,
             migrationStatus: 'APPROVED',
             notes: notes || null,
+            approvedBy: approvedBy || null,
             sellingPriceCents: sellingPrice?.priceCents || null,
             sellingPriceCurrency: sellingPrice?.currency || null,
             sellingPriceRangeMinCents: sellingPriceRange?.minCents || null,

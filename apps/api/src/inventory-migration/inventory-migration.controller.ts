@@ -5,15 +5,18 @@ import {
   Body,
   Query,
   Param,
+  Req,
   HttpCode,
   HttpStatus,
   HttpException,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { InventoryMigrationService } from './inventory-migration.service';
 import { SupplierService } from './supplier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 import {
   CutoverInput,
   CostApprovalRequest,
@@ -29,6 +32,8 @@ import {
 } from './inventory-migration.dto';
 
 @Controller('admin/inventory/cutover')
+@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@Roles('OWNER', 'MANAGER')
 export class InventoryMigrationController {
   constructor(
     private readonly migrationService: InventoryMigrationService,
@@ -528,7 +533,8 @@ export class InventoryMigrationController {
   }
 
   @Post('approve-batch')
-  async approveBatch(@Body() body: ApproveBatchRequest) {
+  async approveBatch(@Body() body: ApproveBatchRequest, @Req() req: any) {
+    const currentEmployee = req.employee;
     try {
       const approvedCosts = body.approvedCosts.map((ac) => ({
         productId: ac.productId,
@@ -555,7 +561,7 @@ export class InventoryMigrationController {
         approvedCosts,
         body.supplierInitialsUpdates || null,
         entriesToAddToHistory,
-        null, // approvedBy placeholder
+        currentEmployee.id,
         null, // effectiveAt placeholder
       );
 
@@ -636,6 +642,7 @@ export class InventoryMigrationController {
       sellingPrice?: { priceCents: number; currency: string } | null;
       sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
     },
+    @Req() req: any,
   ) {
     try {
       const result = await this.migrationService.approveItem(
@@ -649,6 +656,7 @@ export class InventoryMigrationController {
         body.selectedSupplierName || null,
         body.sellingPrice || null,
         body.sellingPriceRange || null,
+        req.employee.id,
       );
       return result;
     } catch (error) {
@@ -783,7 +791,8 @@ export class InventoryMigrationController {
   }
 
   @Post('approve-costs')
-  async approveExtractedCosts(@Body() body: ApproveCostsRequest) {
+  async approveExtractedCosts(@Body() body: ApproveCostsRequest, @Req() req: any) {
+    const currentEmployee = req.employee;
     try {
       const approvedCosts = body.approvedCosts.map((ac) => ({
         productId: ac.productId,
@@ -808,7 +817,7 @@ export class InventoryMigrationController {
       await this.migrationService.storeCostApprovals(
         body.cutoverId,
         approvedCosts,
-        null, // approvedBy
+        currentEmployee.id,
         effectiveAt,
         entriesToAddToHistory,
       );
@@ -830,12 +839,13 @@ export class InventoryMigrationController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
-  async cutover(@Body() body: InitiateCutoverRequest) {
-    return this.initiateCutover(body);
+  async cutover(@Body() body: InitiateCutoverRequest, @Req() req: any) {
+    return this.initiateCutover(body, req);
   }
 
   @Post('initiate')
-  async initiateCutover(@Body() body: InitiateCutoverRequest) {
+  async initiateCutover(@Body() body: InitiateCutoverRequest, @Req() req: any) {
+    const currentEmployee = req.employee;
     const cutoverDate = this.parseDate(body.cutoverDate);
     if (!cutoverDate) {
       throw new BadRequestException('Invalid cutover date format');
@@ -859,7 +869,7 @@ export class InventoryMigrationController {
       costBasis: body.costBasis,
       ownerApproved: body.ownerApproved,
       ownerApprovedAt: new Date(),
-      ownerApprovedBy: null,
+      ownerApprovedBy: currentEmployee.id,
       approvedCosts: approvedCosts.length > 0 ? approvedCosts : null,
     };
 
