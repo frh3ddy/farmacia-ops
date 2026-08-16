@@ -14,7 +14,7 @@ Backend and back-office tooling for a multi-location pharmacy operation running 
 
 **Square integration:** the worker consumes `payment.created` webhooks; the API syncs the Square catalog (products/pricing) and locations. FIFO consumption order is `Inventory.receivedAt ASC` — never `createdAt` — since backfilled/migrated batches can have a `createdAt` that lags the real receiving date.
 
-See `CONTEXT.md` for the full domain model and `API_CONTRACTS.md` for endpoint-level request/response contracts (written primarily for the iOS app, still accurate for the API in general).
+For architecture and domain-model questions, query the graphify knowledge graph (`graphify-out/`) — see the project's CLAUDE.md — instead of a hand-maintained doc that drifts out of date.
 
 ## Development setup
 
@@ -62,15 +62,9 @@ npm run db:up      # docker compose up -d
 npm run prisma:migrate:dev
 ```
 
-### 5. Seed a test owner (optional)
+### 5. Create the owner account
 
-`scripts/seed-owner.ts` creates a throwaway OWNER account, a CASHIER account, and a "Main Pharmacy" location — safe to run against a local dev database (upserts on fixed IDs):
-
-```bash
-npx ts-node scripts/seed-owner.ts
-```
-
-Prints the login credentials it created (device-activation email/password, PIN for both accounts).
+No seeding needed. On first boot the API has zero employees, so `GET /auth/setup/status` returns `needsSetup: true` and the app's setup screen walks you through creating the owner (name, email, password, PIN) and picking/creating a location. The endpoint 400s once an owner exists, so it can't be re-run by accident.
 
 ### 6. Run it
 
