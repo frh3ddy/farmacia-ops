@@ -149,6 +149,10 @@ export interface SquareCatalogObject {
   // Normalized selling price from variation.priceMoney (cents)
   variationPriceCents?: number | null;
   variationCurrency?: string | null;
+
+  // Per-location price overrides parsed from item_variation_data.location_overrides,
+  // keyed by Square locationId. Only populated for locations that actually override price.
+  locationOverridePriceCents?: Record<string, { priceCents: number; currency: string }> | null;
 }
 
 export interface SquareInventoryCount {

@@ -250,11 +250,27 @@ export class SquareInventoryService {
             ? parseInt(rawAmount, 10)
             : null;
 
-      const variationCurrency = typeof pm?.currency === 'string' 
-        ? pm.currency 
-        : (typeof (varData as any)?.price_money?.currency === 'string' 
-            ? (varData as any).price_money.currency 
+      const variationCurrency = typeof pm?.currency === 'string'
+        ? pm.currency
+        : (typeof (varData as any)?.price_money?.currency === 'string'
+            ? (varData as any).price_money.currency
             : null);
+
+      // 5. Per-location price overrides (Square lets a location override the base price)
+      const overrides = (varData as any)?.locationOverrides || (varData as any)?.location_overrides || [];
+      let locationOverridePriceCents: Record<string, { priceCents: number; currency: string }> | null = null;
+      for (const ov of overrides) {
+        const ovLocationId = ov?.locationId || ov?.location_id;
+        const ovPm = ov?.priceMoney || ov?.price_money;
+        const ovAmount = ovPm?.amount;
+        const ovCents =
+          typeof ovAmount === 'number' ? ovAmount : typeof ovAmount === 'string' ? parseInt(ovAmount, 10) : null;
+
+        if (ovLocationId && Number.isFinite(ovCents) && typeof ovPm?.currency === 'string') {
+          locationOverridePriceCents ??= {};
+          locationOverridePriceCents[ovLocationId] = { priceCents: ovCents as number, currency: ovPm.currency };
+        }
+      }
 
       return {
         id: variationObj.id,
@@ -268,7 +284,26 @@ export class SquareInventoryService {
             ? (variationPriceCents as number)
             : null,
         variationCurrency,
+        locationOverridePriceCents,
       };
+  }
+
+  /**
+   * Resolve the selling price for a variation at a specific location, preferring a
+   * Square location-level price override over the variation's base price.
+   */
+  resolvePriceForLocation(
+    catalogObject: SquareCatalogObject,
+    locationId: string,
+  ): { priceCents: number; currency: string } | null {
+    const override = catalogObject.locationOverridePriceCents?.[locationId];
+    if (override) return override;
+
+    if (catalogObject.variationPriceCents != null && catalogObject.variationCurrency) {
+      return { priceCents: catalogObject.variationPriceCents, currency: catalogObject.variationCurrency };
+    }
+
+    return null;
   }
 
   /**

@@ -93,3 +93,6 @@ graphify-out/
 
 # interface-design skill's saved design-system notes (local only)
 .interface-design/
+
+# local snapshots/exports (e.g. Square catalog dump, not source of truth)
+data/

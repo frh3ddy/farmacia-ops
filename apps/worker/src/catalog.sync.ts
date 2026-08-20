@@ -426,7 +426,7 @@ export async function syncSquareCatalog(
             try {
               product = await tx.product.create({
                 data: {
-                  name: variationName,
+                  name: squareProductName,
                   sku: variationSku,
                   squareProductName: squareProductName,
                   squareDescription: catalogData.productDescription,
