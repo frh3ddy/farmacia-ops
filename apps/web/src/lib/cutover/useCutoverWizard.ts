@@ -255,6 +255,63 @@ export function useCutoverWizard() {
     [cutoverId, updateItemStatus]
   );
 
+  /** Marks a product permanently discontinued and, in the same action, skips
+   * it from this session's queue — mirrors handleDiscardItem, since the
+   * backend's markDiscontinued always routes through the same discard logic. */
+  const handleMarkDiscontinued = useCallback(
+    async (productId: string) => {
+      if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
+      const item = extractionResults.find(r => r.productId === productId);
+      setHideProductImageForTransition(true);
+      try {
+        await api.markDiscontinued({
+          cutoverId,
+          productId,
+          sellingPrice: item?.sellingPrice ?? null,
+          sellingPriceRange: item?.sellingPriceRange ?? null,
+        });
+        updateItemStatus(productId, { migrationStatus: "SKIPPED" });
+        setSessionItemCounts(prev => (prev ? { ...prev, skipped: prev.skipped + 1 } : prev));
+        advanceAfterAction();
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Failed to mark product discontinued");
+      } finally {
+        setHideProductImageForTransition(false);
+      }
+    },
+    [cutoverId, extractionResults, updateItemStatus, advanceAfterAction]
+  );
+
+  /** Re-parses a product's (possibly user-corrected) description. Replaces
+   * the regex-parsed entries with the fresh result but preserves any
+   * manually-added entries (tagged via originalLine, see ExtractionItemEditor's
+   * addManualEntry), re-appending them after the fresh parse so they survive
+   * a regenerate. Runs the merge back through normalizeExtractedEntries so
+   * isSelected/selectedCost/selectedSupplierName recompute with the last
+   * entry selected, matching the existing "last row is selected" convention. */
+  const handleRegenerateExtraction = useCallback(
+    async (productId: string, description: string) => {
+      const result = extractionResults.find(r => r.productId === productId);
+      if (!result) return;
+      const edited = editedResults[productId] ?? result;
+
+      try {
+        const res = await api.regenerateExtraction({ productId, description, cutoverDate: cutoverDate || null });
+        const manualEntries = (edited.extractedEntries ?? []).filter(e => e.originalLine === "Manually added");
+        const merged: CostExtractionResult = {
+          ...edited,
+          originalDescription: res.originalDescription,
+          extractedEntries: [...res.extractedEntries, ...manualEntries],
+        };
+        const [normalized] = normalizeExtractedEntries([merged], allSuppliers, supplierNameMappings, true);
+        setEditedResults(prev => ({ ...prev, [productId]: normalized }));
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Failed to regenerate extraction");
+      }
+    },
+    [extractionResults, editedResults, cutoverDate, allSuppliers, supplierNameMappings]
+  );
+
   const handleReusePreviousApprovals = useCallback(async () => {
     if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
     const itemsToReuse = extractionResults.filter(
@@ -427,7 +484,12 @@ export function useCutoverWizard() {
         locationIds: selectedLocationId ? [selectedLocationId] : [],
         costBasis,
         ownerApproved: true,
-        approvalId: currentCutoverId,
+        // `currentCutoverId` is null until the first migration batch returns —
+        // fall back to the extraction session's id (`cutoverId`), which is what
+        // approve/discard/mark-discontinued actually tagged CostApproval rows
+        // with during review. Sending `currentCutoverId` (always null here)
+        // silently dropped every discard/discontinue from the exclusion filter.
+        approvalId: cutoverId,
         batchSize,
       });
       setMigrationResult(result);
@@ -448,7 +510,7 @@ export function useCutoverWizard() {
     }
     // continueMigrationLoop intentionally omitted: it's referentially stable
     // ([] deps) and only closes over its `id` parameter, never stale state.
-  }, [cutoverDate, selectedLocationId, costBasis, currentCutoverId, batchSize]);
+  }, [cutoverDate, selectedLocationId, costBasis, cutoverId, batchSize]);
 
   const continueMigrationLoop = useCallback(async (id: string) => {
     try {
@@ -532,6 +594,8 @@ export function useCutoverWizard() {
     handleContinueBatch,
     handleDiscardItem,
     handleRestoreItem,
+    handleMarkDiscontinued,
+    handleRegenerateExtraction,
     handleReusePreviousApprovals,
     handleApproveItem,
     requestStartMigration,

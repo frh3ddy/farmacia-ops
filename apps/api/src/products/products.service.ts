@@ -724,6 +724,28 @@ export class ProductsService {
   }
 
   /**
+   * Permanently retires a catalog item in Square. `variationId` is an
+   * ITEM_VARIATION catalog object ID (what inventory rows store) — this
+   * resolves its parent ITEM id and deletes that, since BatchDeleteCatalogObjects
+   * cascades to all of an ITEM's variations, and deleting only a variation
+   * would leave the parent item and any sibling variations intact.
+   */
+  async deleteCatalogItem(variationId: string): Promise<void> {
+    const client = this.getSquareClient();
+
+    const retrieveResponse = await client.catalog.object.get({ objectId: variationId });
+    const currentObject = retrieveResponse.object;
+    const variationData = (currentObject as any)?.itemVariationData;
+    const parentItemId = variationData?.itemId;
+    if (!parentItemId) {
+      throw new Error(`Could not resolve parent item for Square variation ${variationId}`);
+    }
+
+    await client.catalog.batchDelete({ objectIds: [parentItemId] });
+    this.logger.log(`[PRODUCT] Deleted Square catalog item ${parentItemId} (via variation ${variationId})`);
+  }
+
+  /**
    * Upload product image — stream directly to Square, no disk storage.
    * The image buffer is sent to Square's Catalog API and the returned
    * Square-hosted URL is persisted in the database.

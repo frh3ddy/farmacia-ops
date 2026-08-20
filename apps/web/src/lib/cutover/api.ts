@@ -1,5 +1,5 @@
 import { apiFetch } from "../apiFetch";
-import type { CostBasis, ExtractCostsResult, ExtractionSessionSummary, MigrationResult, Supplier, SupplierSuggestion } from "./types";
+import type { CostBasis, ExtractCostsResult, ExtractedCostEntry, ExtractionSessionSummary, MigrationResult, Supplier, SupplierSuggestion } from "./types";
 
 const BASE = "/admin/inventory/cutover";
 
@@ -59,6 +59,34 @@ export function discardItem(payload: {
 
 export function restoreItem(payload: { cutoverId: string; productId: string }) {
   return apiFetch(`${BASE}/restore-item`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export type RegenerateExtractionResult = {
+  success: boolean;
+  productName: string;
+  originalDescription: string;
+  extractedEntries: ExtractedCostEntry[];
+};
+
+export function regenerateExtraction(payload: {
+  productId: string;
+  description: string;
+  persistDescription?: boolean;
+  cutoverDate?: string | null;
+}) {
+  return apiFetch<RegenerateExtractionResult>(`${BASE}/regenerate-extraction`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function markDiscontinued(payload: {
+  cutoverId: string;
+  productId: string;
+  sellingPrice?: { priceCents: number; currency: string } | null;
+  sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
+}) {
+  return apiFetch(`${BASE}/mark-discontinued`, { method: "POST", body: JSON.stringify(payload) });
 }
 
 export async function reusePreviousApprovals(cutoverId: string, productIds: string[]) {

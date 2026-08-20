@@ -7,9 +7,10 @@ import { CatalogMapperService } from './catalog-mapper.service';
 import { SupplierService } from './supplier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
+import { ProductsModule } from '../products/products.module';
 
 @Module({
-  imports: [forwardRef(() => AuthModule)],
+  imports: [forwardRef(() => AuthModule), ProductsModule],
   controllers: [InventoryMigrationController],
   providers: [
     InventoryMigrationService,

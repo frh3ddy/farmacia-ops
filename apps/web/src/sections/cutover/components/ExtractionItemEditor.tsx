@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { SupplierAutocompleteInput } from "./SupplierAutocompleteInput";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import type { CostExtractionResult, ExtractedCostEntry, SupplierSuggestion } from "../../../lib/cutover/types";
 
 const MONTH_NAMES = [
@@ -38,6 +39,8 @@ type ExtractionItemEditorProps = {
   cutoverDate: string;
   onApprove: (result: CostExtractionResult) => void;
   onDiscard: (productId: string) => void;
+  onMarkDiscontinued: (productId: string) => Promise<void>;
+  onRegenerateExtraction: (productId: string, description: string) => Promise<void>;
   setError: (message: string) => void;
   hideProductImageForTransition: boolean;
 };
@@ -53,6 +56,8 @@ export function ExtractionItemEditor({
   cutoverDate,
   onApprove,
   onDiscard,
+  onMarkDiscontinued,
+  onRegenerateExtraction,
   setError,
   hideProductImageForTransition,
 }: ExtractionItemEditorProps) {
@@ -61,7 +66,14 @@ export function ExtractionItemEditor({
   // number input snaps back to its last committed value on every re-render,
   // so an in-progress edit (e.g. deleting down to "") needs to be tracked
   // separately from the committed numeric value until blur.
-  const [costDraft, setCostDraft] = useState<{ idx: number | null; raw: string } | null>(null);
+  const [costDraft, setCostDraft] = useState<{ idx: number; raw: string } | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [confirmingDiscontinue, setConfirmingDiscontinue] = useState(false);
+  const [discontinuing, setDiscontinuing] = useState(false);
+  const [newEntrySupplier, setNewEntrySupplier] = useState("");
+  const [newEntrySupplierId, setNewEntrySupplierId] = useState<string | null>(null);
+  const [newEntryCost, setNewEntryCost] = useState("");
+  const [newEntryDate, setNewEntryDate] = useState(cutoverDate);
   const extractingCount = extractingItems.length;
 
   // Preload the next 10 product images so Next navigation feels instant.
@@ -81,6 +93,15 @@ export function ExtractionItemEditor({
     const displaySupplier = edited.selectedSupplierName || (last ? last.editedSupplierName || last.supplier : null) || "";
     return { selectedEntry: last, displayCost, displaySupplier };
   }, [edited]);
+
+  // Reset the new-entry staging date whenever the current item changes, so
+  // it doesn't carry a stale date from the previous product.
+  useEffect(() => {
+    setNewEntrySupplier("");
+    setNewEntrySupplierId(null);
+    setNewEntryCost("");
+    setNewEntryDate(cutoverDate);
+  }, [result?.productId, cutoverDate]);
 
   if (!result || !edited) {
     return <p className="py-8 text-center text-sm text-(--color-ink-tertiary)">No items need action</p>;
@@ -108,24 +129,80 @@ export function ExtractionItemEditor({
     setEditedResults(prev => ({ ...prev, [result.productId]: { ...(prev[result.productId] ?? result), ...patch } }));
   };
 
-  const handleCostChange = (idx: number | null, rawValue: string) => {
+  const handleCostChange = (idx: number, rawValue: string) => {
     setCostDraft({ idx, raw: rawValue });
     if (rawValue === "") return;
     const newCost = parseFloat(rawValue) || 0;
-    if (idx === null) updateManualField({ selectedCost: newCost });
-    else updateEntry(idx, { editedCost: newCost });
+    updateEntry(idx, { editedCost: newCost });
   };
 
-  const handleCostBlur = (idx: number | null, e: React.FocusEvent<HTMLInputElement>) => {
+  const handleCostBlur = (idx: number, e: React.FocusEvent<HTMLInputElement>) => {
     const newCost = parseFloat(e.target.value) || 0;
     if (newCost < 0) return setError("Cost cannot be negative");
     if (newCost === 0 && !window.confirm("Cost is zero. Are you sure?")) {
       e.target.focus();
       return; // keep the draft so the refocused field still shows what they typed
     }
-    if (idx === null) updateManualField({ selectedCost: newCost });
-    else updateEntry(idx, { editedCost: newCost });
+    updateEntry(idx, { editedCost: newCost });
     setCostDraft(null);
+  };
+
+  // Always appends to the end of extractedEntries — never inserts. The
+  // approve flow's initials-learning diff (collectInitialsToLearn) zips
+  // original/edited entries by array index, so a tail-appended entry safely
+  // falls outside the original array's bounds; inserting anywhere else
+  // would desync that diff.
+  const addManualEntry = () => {
+    const amount = parseFloat(newEntryCost) || 0;
+    if (!newEntrySupplier.trim() || amount <= 0) return setError("Enter a supplier and a cost greater than 0");
+    setEditedResults(prev => {
+      const base = prev[result.productId] ?? result;
+      const entries = (base.extractedEntries ?? []).map(e => ({ ...e, isSelected: false }));
+      entries.push({
+        supplier: newEntrySupplier,
+        amount,
+        originalLine: "Manually added",
+        confidence: "LOW",
+        supplierId: newEntrySupplierId,
+        editedSupplierName: newEntrySupplier,
+        editedCost: amount,
+        editedEffectiveDate: newEntryDate,
+        isSelected: true,
+      });
+      return {
+        ...prev,
+        [result.productId]: {
+          ...base,
+          extractedEntries: entries,
+          selectedSupplierName: newEntrySupplier,
+          selectedSupplierId: newEntrySupplierId,
+          selectedCost: amount,
+        },
+      };
+    });
+    setNewEntrySupplier("");
+    setNewEntrySupplierId(null);
+    setNewEntryCost("");
+    setNewEntryDate(cutoverDate);
+  };
+
+  const handleRegenerate = async () => {
+    setRegenerating(true);
+    try {
+      await onRegenerateExtraction(result.productId, edited.originalDescription ?? "");
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const handleConfirmDiscontinue = async () => {
+    setDiscontinuing(true);
+    try {
+      await onMarkDiscontinued(result.productId);
+    } finally {
+      setDiscontinuing(false);
+      setConfirmingDiscontinue(false);
+    }
   };
 
   const priceGuardWarning = (() => {
@@ -154,96 +231,125 @@ export function ExtractionItemEditor({
             </div>
             <div>
               <h3 className="text-lg font-semibold text-(--color-ink)">{result.productName}</h3>
-              {result.originalDescription && result.originalDescription !== result.productName && (
-                <p className="mt-1 text-sm text-(--color-ink-tertiary)">{result.originalDescription}</p>
-              )}
+              <label className="mt-1 block text-xs text-(--color-ink-tertiary)">Source description</label>
+              <textarea
+                value={edited.originalDescription ?? ""}
+                onChange={e => updateManualField({ originalDescription: e.target.value })}
+                rows={2}
+                placeholder="No description on file"
+                className="mt-0.5 w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm text-(--color-ink-secondary) focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+              />
+              <button
+                onClick={handleRegenerate}
+                disabled={regenerating}
+                className="mt-1 text-sm font-medium text-(--color-accent) hover:text-(--color-accent-hover) disabled:opacity-50"
+              >
+                {regenerating ? "Regenerating…" : "Regenerate from description"}
+              </button>
             </div>
 
-            {hasExtraction ? (
-              <div className="overflow-hidden rounded-md border border-(--color-border-standard)">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-(--color-surface) text-xs uppercase text-(--color-ink-tertiary)">
-                      <th className="px-4 py-2 text-left">Supplier</th>
-                      <th className="px-4 py-2 text-left">Cost</th>
-                      <th className="px-4 py-2 text-left">Date</th>
-                      <th className="px-4 py-2 text-left">Source</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {edited.extractedEntries!.map((entry, idx) => {
-                      const isLast = idx === edited.extractedEntries!.length - 1;
-                      const displayDate =
-                        entry.editedEffectiveDate || computeExtractedDate(entry, cutoverDate) || cutoverDate || new Date().toISOString().split("T")[0];
-                      return (
-                        <tr key={idx} className={isLast ? "bg-(--color-accent)/5" : "border-t border-(--color-border-subtle)"}>
-                          <td className="px-4 py-2">
-                            <SupplierAutocompleteInput
-                              value={entry.editedSupplierName ?? entry.supplier ?? ""}
-                              onChange={v => updateEntry(idx, { editedSupplierName: v })}
-                              onSelectSuggestion={s => updateEntry(idx, { editedSupplierName: s.name, supplierId: s.id ?? undefined })}
-                              getLocalSuggestions={getSupplierSuggestions}
-                              highlighted={isLast}
-                              matchedByInitialLabel={entry.matchedByInitial ? entry.supplier : null}
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={costDraft?.idx === idx ? costDraft.raw : (entry.editedCost ?? entry.amount)}
-                              onChange={e => handleCostChange(idx, e.target.value)}
-                              onBlur={e => handleCostBlur(idx, e)}
-                              className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
-                                isLast ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
-                              }`}
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="date"
-                              value={displayDate}
-                              onChange={e => updateEntry(idx, { editedEffectiveDate: e.target.value })}
-                              className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
-                                isLast ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
-                              }`}
-                            />
-                          </td>
-                          <td className="px-4 py-2 text-(--color-ink-tertiary)">{entry.originalLine || `$${entry.amount.toFixed(2)}`}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="space-y-3 rounded-lg border border-(--color-destructive) bg-(--color-destructive-bg) p-4">
-                <p className="text-sm font-medium text-(--color-destructive)">No cost extracted — manual input required</p>
-                <div>
-                  <label className="mb-1 block text-xs text-(--color-ink-secondary)">Supplier name *</label>
-                  <SupplierAutocompleteInput
-                    value={edited.selectedSupplierName ?? ""}
-                    onChange={v => updateManualField({ selectedSupplierName: v })}
-                    onSelectSuggestion={s => updateManualField({ selectedSupplierName: s.name, selectedSupplierId: s.id })}
-                    getLocalSuggestions={getSupplierSuggestions}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs text-(--color-ink-secondary)">Cost *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={costDraft?.idx === null ? costDraft.raw : (edited.selectedCost ?? "")}
-                    onChange={e => handleCostChange(null, e.target.value)}
-                    onBlur={e => handleCostBlur(null, e)}
-                    placeholder="Enter cost"
-                    className="w-full rounded-sm border border-(--color-border-standard) px-3 py-2 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                  />
-                </div>
-              </div>
+            {!hasExtraction && (
+              <p className="text-sm font-medium text-(--color-destructive)">No cost extracted — add one manually below</p>
             )}
+
+            <div className="overflow-hidden rounded-md border border-(--color-border-standard)">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-(--color-surface) text-xs uppercase text-(--color-ink-tertiary)">
+                    <th className="px-4 py-2 text-left">Supplier</th>
+                    <th className="px-4 py-2 text-left">Cost</th>
+                    <th className="px-4 py-2 text-left">Date</th>
+                    <th className="px-4 py-2 text-left">Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(edited.extractedEntries ?? []).map((entry, idx) => {
+                    const isLast = idx === (edited.extractedEntries?.length ?? 0) - 1;
+                    const displayDate =
+                      entry.editedEffectiveDate || computeExtractedDate(entry, cutoverDate) || cutoverDate || new Date().toISOString().split("T")[0];
+                    return (
+                      <tr key={idx} className={isLast ? "bg-(--color-accent)/5" : "border-t border-(--color-border-subtle)"}>
+                        <td className="px-4 py-2">
+                          <SupplierAutocompleteInput
+                            value={entry.editedSupplierName ?? entry.supplier ?? ""}
+                            onChange={v => updateEntry(idx, { editedSupplierName: v })}
+                            onSelectSuggestion={s => updateEntry(idx, { editedSupplierName: s.name, supplierId: s.id ?? undefined })}
+                            getLocalSuggestions={getSupplierSuggestions}
+                            highlighted={isLast}
+                            matchedByInitialLabel={entry.matchedByInitial ? entry.supplier : null}
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={costDraft?.idx === idx ? costDraft.raw : (entry.editedCost ?? entry.amount)}
+                            onChange={e => handleCostChange(idx, e.target.value)}
+                            onBlur={e => handleCostBlur(idx, e)}
+                            className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
+                              isLast ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
+                            }`}
+                          />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input
+                            type="date"
+                            value={displayDate}
+                            onChange={e => updateEntry(idx, { editedEffectiveDate: e.target.value })}
+                            className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
+                              isLast ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
+                            }`}
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-(--color-ink-tertiary)">{entry.originalLine || `$${entry.amount.toFixed(2)}`}</td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="border-t border-(--color-border-subtle)">
+                    <td className="px-4 py-2">
+                      <SupplierAutocompleteInput
+                        value={newEntrySupplier}
+                        onChange={setNewEntrySupplier}
+                        onSelectSuggestion={s => {
+                          setNewEntrySupplier(s.name);
+                          setNewEntrySupplierId(s.id ?? null);
+                        }}
+                        getLocalSuggestions={getSupplierSuggestions}
+                        placeholder="Add supplier"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={newEntryCost}
+                        onChange={e => setNewEntryCost(e.target.value)}
+                        placeholder="Cost"
+                        className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="date"
+                        value={newEntryDate}
+                        onChange={e => setNewEntryDate(e.target.value)}
+                        className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <button
+                        onClick={addManualEntry}
+                        className="rounded-sm border border-(--color-border-standard) px-3 py-1 text-sm font-medium text-(--color-ink-secondary) hover:bg-(--color-surface)"
+                      >
+                        + Add entry
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Right: product review */}
@@ -331,6 +437,12 @@ export function ExtractionItemEditor({
                 Discard
               </button>
             </div>
+            <button
+              onClick={() => setConfirmingDiscontinue(true)}
+              className="w-full rounded-sm border border-(--color-destructive) py-1.5 text-xs font-medium text-(--color-destructive) hover:bg-(--color-destructive-bg)"
+            >
+              Mark as no longer for sale
+            </button>
           </div>
         </div>
       </div>
@@ -356,6 +468,17 @@ export function ExtractionItemEditor({
           </button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmingDiscontinue}
+        title="Mark as no longer for sale?"
+        description={`"${result.productName}" will be permanently removed from Square's catalog once migration runs, and excluded from inventory in this and all future cutover sessions.`}
+        mathChallenge
+        confirmLabel={discontinuing ? "Marking…" : "Mark discontinued"}
+        destructive
+        onConfirm={handleConfirmDiscontinue}
+        onCancel={() => setConfirmingDiscontinue(false)}
+      />
     </div>
   );
 }

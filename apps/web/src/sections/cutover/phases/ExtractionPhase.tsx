@@ -20,6 +20,9 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
     cutoverDate,
     handleApproveItem,
     handleDiscardItem,
+    handleMarkDiscontinued,
+    handleRegenerateExtraction,
+    handleRestoreItem,
     handleReusePreviousApprovals,
     handleContinueBatch,
     requestStartMigration,
@@ -127,6 +130,8 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
           cutoverDate={cutoverDate}
           onApprove={handleApproveItem}
           onDiscard={handleDiscardItem}
+          onMarkDiscontinued={handleMarkDiscontinued}
+          onRegenerateExtraction={handleRegenerateExtraction}
           setError={setError}
           hideProductImageForTransition={hideProductImageForTransition}
         />
@@ -158,6 +163,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
               cutoverId={cutoverId}
               getSupplierSuggestions={getSupplierSuggestions}
               onSaved={onSavedReviewedItem}
+              onRestore={handleRestoreItem}
               setError={setError}
             />
           ))}

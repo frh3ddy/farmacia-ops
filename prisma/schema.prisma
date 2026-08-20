@@ -169,10 +169,11 @@ enum MigrationStatus {
 }
 
 model Product {
-  id         String  @id @default(uuid())
-  name       String
-  sku        String? @unique
-  categoryId String?
+  id             String  @id @default(uuid())
+  name           String
+  sku            String? @unique
+  categoryId     String?
+  isDiscontinued Boolean @default(false)
 
   // Square catalog data (cached to avoid API calls during extraction)
   squareProductName   String? // Product name from Square ITEM

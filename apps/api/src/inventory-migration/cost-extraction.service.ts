@@ -56,6 +56,9 @@ export class CostExtractionService {
   // Matches: (Supplier text) $ (Amount)
   private static readonly SUPPLIER_REGEX = /([A-Za-z0-9][A-Za-z0-9\s'.-]{0,15})\s*[\$💲]/;
   private static readonly AMOUNT_REGEX = /[\$💲]\s*(\d+[.,]?\d*)/;
+  // ponytail: fallback for cost-shaped decimals with no currency symbol (e.g. "Sugar 1.38 nov").
+  // Requires exactly 2 decimal digits (cents) to avoid matching dosages like "0.5mg".
+  private static readonly BARE_AMOUNT_REGEX = /\b(\d+[.,]\d{2})\b/;
   private static readonly MONTH_REGEX = new RegExp(MONTH_REGEX_STRING, 'i');
   // Matches MM/DD/YYYY or MM-DD-YYYY at start of line
   private static readonly DATE_PREFIX_REGEX = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s+/;
@@ -92,7 +95,7 @@ export class CostExtractionService {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
-      const hasCurrency = line.includes('$') || line.includes('💲');
+      const hasCurrency = line.includes('$') || line.includes('💲') || CostExtractionService.BARE_AMOUNT_REGEX.test(line);
       if (hasCurrency) {
         mergedLines.push(line);
       } else if (mergedLines.length > 0 && MONTH_ONLY_REGEX.test(line)) {
@@ -112,13 +115,17 @@ export class CostExtractionService {
         continue;
       }
 
-      // Fast fail: must contain currency symbol
-      if (!line.includes('$') && !line.includes('💲')) {
+      const hasCurrencySymbol = line.includes('$') || line.includes('💲');
+
+      // Fast fail: must contain a currency symbol or a cost-shaped decimal (X.XX)
+      if (!hasCurrencySymbol && !CostExtractionService.BARE_AMOUNT_REGEX.test(line)) {
         continue;
       }
 
       // 1. Extract Amount
-      const amountMatch = line.match(CostExtractionService.AMOUNT_REGEX);
+      const amountMatch = hasCurrencySymbol
+        ? line.match(CostExtractionService.AMOUNT_REGEX)
+        : line.match(CostExtractionService.BARE_AMOUNT_REGEX);
       if (!amountMatch) continue;
 
       const rawAmount = amountMatch[1].replace(',', '.');
@@ -138,9 +145,10 @@ export class CostExtractionService {
       if (supplierMatch) {
         supplier = supplierMatch[1].trim();
       } else {
-        const dollarIndex = lineForSupplier.search(/[\$💲]/);
-        if (dollarIndex > 0) {
-          const prefix = lineForSupplier.substring(0, dollarIndex).trim();
+        const symbolIndex = lineForSupplier.search(/[\$💲]/);
+        const amountIndex = symbolIndex >= 0 ? symbolIndex : lineForSupplier.search(CostExtractionService.BARE_AMOUNT_REGEX);
+        if (amountIndex > 0) {
+          const prefix = lineForSupplier.substring(0, amountIndex).trim();
           // Heuristic: If prefix is short (<= 3 words, <= 15 chars), it's likely a code/supplier
           // If it's long, it's likely the product name, so we default to "General"
           const words = prefix.split(/\s+/);

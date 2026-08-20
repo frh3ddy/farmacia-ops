@@ -10,6 +10,9 @@ type ReviewedItemCardProps = {
   cutoverId: string | null;
   getSupplierSuggestions: (input: string) => SupplierSuggestion[];
   onSaved: (productId: string, updates: Partial<CostExtractionResult>) => void;
+  /** Only meaningful for variant="skipped" — undoes a plain discard or a
+   * mark-discontinued (the backend clears the discontinued flag either way). */
+  onRestore?: (productId: string) => Promise<void>;
   setError: (error: CutoverError | null) => void;
 };
 
@@ -22,14 +25,25 @@ type ReviewedItemCardProps = {
  * initials-learning flow — that's specific to the primary extraction
  * workspace review (handleApproveItem), matching the legacy split.
  */
-export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSuggestions, onSaved, setError }: ReviewedItemCardProps) {
+export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSuggestions, onSaved, onRestore, setError }: ReviewedItemCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [cost, setCost] = useState(() => String(result.selectedCost ?? ""));
   const [supplierName, setSupplierName] = useState(result.selectedSupplierName ?? "");
   const [supplierId, setSupplierId] = useState(result.selectedSupplierId ?? null);
   const [saving, setSaving] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   const isApproved = variant === "approved";
+
+  const handleRestore = async () => {
+    if (!onRestore) return;
+    setRestoring(true);
+    try {
+      await onRestore(result.productId);
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   const startEdit = () => {
     setCost(String(result.selectedCost ?? ""));
@@ -158,16 +172,27 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
               </button>
             </>
           ) : (
-            <button
-              onClick={startEdit}
-              className={`rounded-sm px-3 py-1 text-sm ${
-                isApproved
-                  ? "border border-(--color-border-standard) text-(--color-ink-secondary)"
-                  : "bg-(--color-accent) text-(--color-accent-contrast)"
-              }`}
-            >
-              Edit
-            </button>
+            <>
+              <button
+                onClick={startEdit}
+                className={`rounded-sm px-3 py-1 text-sm ${
+                  isApproved
+                    ? "border border-(--color-border-standard) text-(--color-ink-secondary)"
+                    : "bg-(--color-accent) text-(--color-accent-contrast)"
+                }`}
+              >
+                Edit
+              </button>
+              {!isApproved && onRestore && (
+                <button
+                  onClick={handleRestore}
+                  disabled={restoring}
+                  className="rounded-sm border border-(--color-border-standard) px-3 py-1 text-sm text-(--color-ink-secondary) disabled:opacity-50"
+                >
+                  {restoring ? "Restoring…" : "Restore"}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

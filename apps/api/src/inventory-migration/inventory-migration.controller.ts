@@ -580,6 +580,58 @@ export class InventoryMigrationController {
     }
   }
 
+  @Post('regenerate-extraction')
+  async regenerateExtraction(
+    @Body()
+    body: {
+      productId: string;
+      description: string;
+      persistDescription?: boolean;
+      cutoverDate?: string | null;
+    },
+  ) {
+    try {
+      const result = await this.migrationService.regenerateExtractionForProduct(
+        body.productId,
+        body.description,
+        body.persistDescription ?? true,
+        body.cutoverDate ?? null,
+      );
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to regenerate extraction: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  @Post('mark-discontinued')
+  async markDiscontinued(
+    @Body()
+    body: {
+      cutoverId: string;
+      productId: string;
+      sellingPrice?: { priceCents: number; currency: string } | null;
+      sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
+    },
+  ) {
+    try {
+      const result = await this.migrationService.markProductDiscontinued(
+        body.cutoverId,
+        body.productId,
+        body.sellingPrice || null,
+        body.sellingPriceRange || null,
+      );
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to mark product discontinued: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Post('discard-item')
   async discardItem(
     @Body()
@@ -881,6 +933,7 @@ export class InventoryMigrationController {
         approvedCosts,
         batchSize,
         body.cutoverId || null,
+        body.approvalId || null,
       );
 
       return {
@@ -917,7 +970,10 @@ export class InventoryMigrationController {
         cost: new Prisma.Decimal(ac.cost),
       }));
     } else if (cutoverRecord.costBasis === 'DESCRIPTION') {
-      approvedCosts = await this.migrationService.getCostApprovals(body.cutoverId);
+      // CostApproval rows are keyed by the extraction session's id, stashed in
+      // batchState when this Cutover row was created — not this row's own id.
+      const sessionCutoverId = (cutoverRecord.batchState as any)?.extractionSessionId || body.cutoverId;
+      approvedCosts = await this.migrationService.getCostApprovals(sessionCutoverId);
     }
 
     try {

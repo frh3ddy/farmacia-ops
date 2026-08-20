@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import {
   CutoverInput,
   CostExtractionResult,
+  ExtractedCostEntry,
   CostApprovalRequest,
   OpeningBalanceItem,
   MigrationResult,
@@ -25,6 +26,7 @@ import { SquareInventoryService } from './square-inventory.service';
 import { CostExtractionService } from './cost-extraction.service';
 import { CatalogMapperService } from './catalog-mapper.service';
 import { SupplierService } from './supplier.service';
+import { ProductsService } from '../products/products.service';
 
 @Injectable()
 export class InventoryMigrationService {
@@ -36,6 +38,7 @@ export class InventoryMigrationService {
     private readonly costExtraction: CostExtractionService,
     private readonly catalogMapper: CatalogMapperService,
     private readonly supplierService: SupplierService,
+    private readonly productsService: ProductsService,
   ) {}
 
   /**
@@ -188,6 +191,46 @@ export class InventoryMigrationService {
       }
     }
     return fallbackResult;
+  }
+
+  /**
+   * Shared by the batch extraction path and the single-item regenerate path:
+   * attaches timeline-aware dates and supplier-suggestion metadata to raw
+   * parser output.
+   */
+  private async enrichExtractedEntries(
+    entries: ExtractedCostEntry[],
+    cutoverDate: string | null | undefined,
+    learnedSupplierInitials: Record<string, string[]>,
+  ): Promise<ExtractedCostEntry[]> {
+    const refDate = cutoverDate
+      ? (() => {
+          const d = new Date(cutoverDate);
+          return isNaN(d.getTime()) ? new Date() : d;
+        })()
+      : new Date();
+    const timelineDates = this.computeTimelineAwareDates(entries, refDate);
+
+    return Promise.all(
+      entries.map(async (entry, idx) => {
+        const inferred = this.inferSupplierNameFromInitials(entry.supplier, learnedSupplierInitials || {});
+        const term = inferred || entry.supplier;
+        const suggestions = await this.supplierService.suggestSuppliers(term, 1);
+        const effectiveDateString = timelineDates[idx] ?? refDate.toISOString().split('T')[0];
+
+        return {
+          ...entry,
+          supplierId: suggestions.find((s) => s.name.toLowerCase() === term.toLowerCase())?.id || null,
+          isEditable: true,
+          suggestedSuppliers: suggestions,
+          addToHistory: true,
+          editedSupplierName: null,
+          editedCost: null,
+          editedEffectiveDate: effectiveDateString,
+          isSelected: idx === entries.length - 1,
+        };
+      }),
+    );
   }
 
   private buildPriceGuard(
@@ -898,7 +941,7 @@ export class InventoryMigrationService {
         extractionResults.push({
           productId,
           productName,
-          originalDescription: productName,
+          originalDescription: productDescription ?? productName,
           extractedEntries: [],
           selectedCost,
           selectedSupplierName: supplierName,
@@ -919,36 +962,10 @@ export class InventoryMigrationService {
       } else {
         const extraction = this.costExtraction.extractCostFromDescription(productName, productDescription);
 
-        const refDate = cutoverDate
-          ? (() => {
-              const d = new Date(cutoverDate);
-              return isNaN(d.getTime()) ? new Date() : d;
-            })()
-          : new Date();
-        const timelineDates = this.computeTimelineAwareDates(
+        const enrichedEntries = await this.enrichExtractedEntries(
           extraction.extractedEntries,
-          refDate,
-        );
-
-        const enrichedEntries = await Promise.all(
-          extraction.extractedEntries.map(async (entry, idx) => {
-            const inferred = this.inferSupplierNameFromInitials(entry.supplier, (dbSession!.learnedSupplierInitials as any) || {});
-            const term = inferred || entry.supplier;
-            const suggestions = await this.supplierService.suggestSuppliers(term, 1);
-            const effectiveDateString = timelineDates[idx] ?? refDate.toISOString().split('T')[0];
-
-            return {
-              ...entry,
-              supplierId: suggestions.find((s) => s.name.toLowerCase() === term.toLowerCase())?.id || null,
-              isEditable: true,
-              suggestedSuppliers: suggestions,
-              addToHistory: true,
-              editedSupplierName: null,
-              editedCost: null,
-              editedEffectiveDate: effectiveDateString,
-              isSelected: idx === extraction.extractedEntries.length - 1,
-            };
-          }),
+          cutoverDate,
+          (dbSession!.learnedSupplierInitials as any) || {},
         );
 
         const guard = this.buildPriceGuard(sellingPrice, extraction.selectedCost);
@@ -957,7 +974,7 @@ export class InventoryMigrationService {
           ...extraction,
           productId,
           productName,
-          originalDescription: productName,
+          originalDescription: productDescription ?? productName,
           extractedEntries: enrichedEntries,
           imageUrl,
           migrationStatus: 'PENDING' as const,
@@ -1128,6 +1145,7 @@ export class InventoryMigrationService {
     approvedCosts: { productId: string; cost: Prisma.Decimal }[],
     batchSize?: number | null,
     cutoverId?: string | null,
+    extractionSessionId?: string | null,
   ): Promise<MigrationResult> {
     // 1. Validation & Setup
     const validation = await this.validateCutoverInput(input);
@@ -1135,7 +1153,7 @@ export class InventoryMigrationService {
 
     const approvedCostsMap = new Map(approvedCosts.map(ac => [ac.productId, ac.cost]));
 
-    let cutoverRecord = cutoverId 
+    let cutoverRecord = cutoverId
       ? await this.prisma.cutover.findUnique({ where: { id: cutoverId } })
       : await this.prisma.cutover.create({
           data: {
@@ -1150,6 +1168,7 @@ export class InventoryMigrationService {
             processedItems: 0,
             batchState: {
               locationIds: input.locationIds,
+              extractionSessionId: extractionSessionId || null,
             } as any
           }
         });
@@ -1158,9 +1177,16 @@ export class InventoryMigrationService {
     if (cutoverRecord.status === 'COMPLETED') throw new CutoverValidationError('Cutover already completed', []);
 
     // 2. Get SKIPPED product IDs to exclude from migration
+      // CostApproval rows are written during the review phase (approve/discard/
+      // mark-discontinued) keyed by the extraction session's id — no Cutover row
+      // exists yet at that point. Read that same id back from batchState (stashed
+      // above on first call, already present on continuation calls) rather than
+      // this Cutover row's own freshly-generated id, or every discard/discontinue
+      // silently fails to exclude the item from migration.
+      const sessionCutoverId = ((cutoverRecord as any).batchState as any)?.extractionSessionId || extractionSessionId || cutoverRecord.id;
       const skippedApprovals = await this.prisma.costApproval.findMany({
         where: {
-          cutoverId: cutoverRecord.id,
+          cutoverId: sessionCutoverId,
           migrationStatus: 'SKIPPED',
         },
         select: { productId: true },
@@ -1415,6 +1441,31 @@ export class InventoryMigrationService {
 
       }, { timeout: 30000 }); // Increase timeout for batch write
 
+      // 5b. Best-effort: retire any newly-discontinued products' Square
+      // catalog items, then remove them from Products entirely. These were
+      // already excluded from nonSkippedBatch (and therefore from the
+      // inventory insert above) via isDiscontinued — this performs the
+      // deferred Square-side deletion and, only once Square confirms it,
+      // deletes the local Product row too. Never blocks or fails the
+      // migration; on Square failure the Product row (and its
+      // isDiscontinued flag) is left as-is so it's retried on the next
+      // migration run instead of desyncing from a still-live Square item.
+      const resolvedBatchPids = [...new Set(resolvedBatch.map(i => i.productId).filter(Boolean))] as string[];
+      if (resolvedBatchPids.length > 0) {
+        const discontinuedProducts = await this.prisma.product.findMany({
+          where: { id: { in: resolvedBatchPids }, isDiscontinued: true },
+          select: { id: true },
+        });
+        const discontinuedIds = new Set(discontinuedProducts.map(p => p.id));
+        for (const item of resolvedBatch) {
+          if (item.productId && discontinuedIds.has(item.productId)) {
+            this.finalizeDiscontinuedProductDeletion(item.productId, item.squareInventoryItem.catalogObjectId).catch(e =>
+              this.logger.error(`[SQUARE_DELETE] Unexpected error finalizing discontinued product ${item.productId}: ${e}`),
+            );
+          }
+        }
+      }
+
       // 6. Update Cutover Record
       const isLastBatch = currentBatch + 1 >= result.totalBatches!;
       const newProcessed = (cutoverRecord.processedItems || 0) + batchItems.length;
@@ -1578,6 +1629,47 @@ export class InventoryMigrationService {
       };
   }
   
+  /**
+   * Re-parses a single product's (possibly user-corrected) description with
+   * the same regex extractor the batch path uses, returning fresh entries
+   * without touching any cutover/approval state — a stateless redo.
+   */
+  async regenerateExtractionForProduct(
+    productId: string,
+    description: string,
+    persistDescription: boolean,
+    cutoverDate?: string | null,
+  ): Promise<{
+    success: boolean;
+    productName: string;
+    originalDescription: string;
+    extractedEntries: ExtractedCostEntry[];
+  }> {
+    const product = await this.prisma.product.findUniqueOrThrow({ where: { id: productId } });
+
+    if (persistDescription) {
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { squareDescription: description },
+      });
+    }
+
+    const productName = product.squareProductName || product.squareVariationName || product.name;
+    const extraction = this.costExtraction.extractCostFromDescription(productName, description);
+    // ponytail: learned supplier initials aren't looked up here (would need a
+    // cutoverId -> ExtractionSession round trip) — regenerated entries just
+    // won't get "matched by initial" pre-fill. Add cutoverId to the payload
+    // and look up ExtractionSession.learnedSupplierInitials if that's missed.
+    const enrichedEntries = await this.enrichExtractedEntries(extraction.extractedEntries, cutoverDate, {});
+
+    return {
+      success: true,
+      productName,
+      originalDescription: description,
+      extractedEntries: enrichedEntries,
+    };
+  }
+
   async discardItem(
     cutoverId: string,
     productId: string,
@@ -1657,6 +1749,57 @@ export class InventoryMigrationService {
     }
   }
 
+  /**
+   * Marks a product permanently discontinued ("no longer for sale") and, in
+   * the same action, skips it from the current cutover session — reusing
+   * discardItem's transactional upsert rather than re-implementing it.
+   * The actual Square catalog deletion happens later, deferred to migration
+   * execution (see executeInventoryMigration).
+   */
+  async markProductDiscontinued(
+    cutoverId: string,
+    productId: string,
+    sellingPrice?: { priceCents: number; currency: string } | null,
+    sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null,
+  ): Promise<{ success: boolean }> {
+    await this.prisma.product.update({
+      where: { id: productId },
+      data: { isDiscontinued: true },
+    });
+    return this.discardItem(cutoverId, productId, sellingPrice, sellingPriceRange);
+  }
+
+  /**
+   * Deletes a discontinued product's Square catalog item, and only if that
+   * succeeds, deletes the local Product row (and everything referencing it
+   * via ON DELETE RESTRICT — CatalogMapping cascades on its own). Order
+   * matters: deleting Product first and Square second would let a Square
+   * failure leave the item still live in Square while gone locally, so a
+   * future catalog sync would silently resurrect it with the discontinued
+   * flag lost.
+   */
+  private async finalizeDiscontinuedProductDeletion(productId: string, catalogObjectId: string): Promise<void> {
+    try {
+      await this.productsService.deleteCatalogItem(catalogObjectId);
+    } catch (e) {
+      this.logger.warn(`[SQUARE_DELETE] Failed to delete catalog object for product ${productId}: ${e}`);
+      return;
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.costApproval.deleteMany({ where: { productId } }),
+      this.prisma.supplierProduct.deleteMany({ where: { productId } }),
+      this.prisma.supplierCostHistory.deleteMany({ where: { productId } }),
+      this.prisma.inventory.deleteMany({ where: { productId } }),
+      this.prisma.saleItem.deleteMany({ where: { productId } }),
+      this.prisma.placement.deleteMany({ where: { productId } }),
+      this.prisma.inventoryAdjustment.deleteMany({ where: { productId } }),
+      this.prisma.inventoryReceiving.deleteMany({ where: { productId } }),
+      this.prisma.product.delete({ where: { id: productId } }),
+    ]);
+    this.logger.log(`[SQUARE_DELETE] Deleted Square catalog item and local Product ${productId}`);
+  }
+
   async restoreItem(
     cutoverId: string,
     productId: string,
@@ -1675,7 +1818,7 @@ export class InventoryMigrationService {
         if (!existing) {
           return { success: true };
         }
-        
+
         const wasProcessed = existing.migrationStatus === 'APPROVED' || existing.migrationStatus === 'SKIPPED';
 
         await tx.costApproval.update({
@@ -1689,7 +1832,15 @@ export class InventoryMigrationService {
             migrationStatus: 'PENDING',
           },
         });
-        
+
+        // Harmless no-op if the product wasn't flagged discontinued — lets
+        // one "Restore" action undo either a plain discard or a
+        // mark-discontinued (which always routes through discard above).
+        await tx.product.update({
+          where: { id: productId },
+          data: { isDiscontinued: false },
+        });
+
         if (wasProcessed) {
           const session = await tx.extractionSession.findFirst({
             where: {
