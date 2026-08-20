@@ -37,6 +37,10 @@ export type CostExtractionResult = {
   selectedCost?: number | null;
   selectedSupplierId?: string | null;
   selectedSupplierName?: string | null;
+  categoryId?: string | null;
+  categoryName?: string | null;
+  suggestedCategoryId?: string | null;
+  suggestedCategoryName?: string | null;
   imageUrl?: string | null;
   sellingPrices?: SellingPriceVariation[] | null;
   sellingPrice?: SellingPrice | null;
@@ -164,6 +168,8 @@ export type StructuredError = {
 };
 
 export type CutoverError = string | StructuredError;
+
+export type CategoryOption = { id: string; name: string; parentId: string | null };
 
 export type SupplierSuggestion = {
   id: string | null;

@@ -43,6 +43,12 @@ export interface CostExtractionResult {
   latestCostHistoryDate?: string | null; // Latest cost history date for selected supplier
   imageUrl?: string | null; // Product image URL from Square catalog
 
+  // --- Product category ---
+  categoryId?: string | null; // Product's current categoryId, if any
+  categoryName?: string | null; // Current category's name, for display
+  suggestedCategoryId?: string | null; // Classifier's suggestion, resolved to an id
+  suggestedCategoryName?: string | null; // Classifier's suggestion, human-readable
+
   // --- Selling price (Square catalog) - extraction-time only ---
   sellingPrices?: Array<{
     variationId: string;

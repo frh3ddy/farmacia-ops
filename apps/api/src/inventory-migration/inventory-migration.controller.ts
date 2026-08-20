@@ -693,6 +693,7 @@ export class InventoryMigrationController {
       selectedSupplierName?: string | null;
       sellingPrice?: { priceCents: number; currency: string } | null;
       sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
+      categoryId?: string | null;
     },
     @Req() req: any,
   ) {
@@ -708,6 +709,7 @@ export class InventoryMigrationController {
         body.selectedSupplierName || null,
         body.sellingPrice || null,
         body.sellingPriceRange || null,
+        body.categoryId || null,
         req.employee.id,
       );
       return result;

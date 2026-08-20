@@ -31,6 +31,13 @@ interface CreateProductDto {
   initialStock?: number;
   locationId?: string; // Optional - will use current location if not provided
   syncToSquare?: boolean;
+  categoryId?: string;
+  labId?: string;
+  medicationType?: 'GENERICO' | 'DE_MARCA' | 'SIMILAR';
+  activeIngredient?: string;
+  concentration?: string;
+  presentation?: string;
+  requiresPrescription?: boolean;
 }
 
 interface UpdatePriceDto {
@@ -102,6 +109,13 @@ export class ProductsController {
       initialStock: body.initialStock,
       locationId,
       syncToSquare: body.syncToSquare !== false, // Default true
+      categoryId: body.categoryId,
+      labId: body.labId,
+      medicationType: body.medicationType,
+      activeIngredient: body.activeIngredient,
+      concentration: body.concentration,
+      presentation: body.presentation,
+      requiresPrescription: body.requiresPrescription,
     };
 
     const result = await this.productsService.createProduct(input);
@@ -138,6 +152,36 @@ export class ProductsController {
       message: `Synced ${result.synced}/${result.total} products to Square${result.failed > 0 ? ` (${result.failed} failed)` : ''}`,
       data: result,
     };
+  }
+
+  /**
+   * List categories (flat, with parentId for building the category/subcategory cascade)
+   * GET /products/categories
+   * NOTE: Must be BEFORE @Get(':id') so "categories" is not captured as an id param.
+   */
+  @Get('categories')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async listCategories() {
+    const categories = await this.prisma.category.findMany({
+      select: { id: true, name: true, parentId: true },
+      orderBy: { name: 'asc' },
+    });
+    return { success: true, categories };
+  }
+
+  /**
+   * List laboratories/manufacturers
+   * GET /products/laboratories
+   * NOTE: Must be BEFORE @Get(':id') so "laboratories" is not captured as an id param.
+   */
+  @Get('laboratories')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async listLaboratories() {
+    const laboratories = await this.prisma.laboratory.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    return { success: true, laboratories };
   }
 
   /**

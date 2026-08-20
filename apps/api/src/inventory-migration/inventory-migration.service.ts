@@ -27,6 +27,7 @@ import { CostExtractionService } from './cost-extraction.service';
 import { CatalogMapperService } from './catalog-mapper.service';
 import { SupplierService } from './supplier.service';
 import { ProductsService } from '../products/products.service';
+import { classifyProductName, classifySubcategory, ensureCategoryIds, type CategoryRow } from './category-classifier';
 
 @Injectable()
 export class InventoryMigrationService {
@@ -664,6 +665,8 @@ export class InventoryMigrationService {
           squareDescription: true,
           squareImageUrl: true,
           squareVariationName: true,
+          categoryId: true,
+          category: { select: { id: true, name: true } },
         },
       }),
       // NOTE: If you want approvals strictly per session, add cutoverId filter.
@@ -866,6 +869,17 @@ export class InventoryMigrationService {
     const extractionResults: CostExtractionResult[] = [];
     let productsWithExtraction = 0;
     let productsRequiringManualInput = 0;
+    const categoryIdByName = await ensureCategoryIds(this.prisma);
+    const allSubcategories = await this.prisma.category.findMany({
+      where: { parentId: { not: null } },
+      select: { id: true, name: true, parentId: true },
+    });
+    const subcategoriesByParent = new Map<string, CategoryRow[]>();
+    for (const sub of allSubcategories) {
+      const list = subcategoriesByParent.get(sub.parentId!) ?? [];
+      list.push(sub);
+      subcategoriesByParent.set(sub.parentId!, list);
+    }
 
     for (const productId of batchProductIds) {
       const product = productMap.get(productId);
@@ -928,6 +942,26 @@ export class InventoryMigrationService {
         if (minCents !== maxCents) sellingPriceRange = { minCents, maxCents, currency };
       }
 
+      const suggestedCategoryName = classifyProductName(productName);
+      const suggestedCategoryId = categoryIdByName.get(suggestedCategoryName) ?? null;
+
+      // Confidence-gated subcategory guess, scoped to the already-suggested
+      // top category's children — classifySubcategory returns null on no
+      // match or an ambiguous one, so this only ever narrows the suggestion,
+      // never overrides a real answer with a bad guess.
+      const subcategoryMatch = suggestedCategoryId
+        ? classifySubcategory(productName, subcategoriesByParent.get(suggestedCategoryId) ?? [])
+        : null;
+
+      // Only auto-fill when nothing has been classified yet (fresh sync or
+      // never run through classify-product-categories.ts) — never override
+      // an existing manual or prior classification. Prefer the more
+      // specific subcategory guess, fall back to the top-level one.
+      const effectiveCategoryId = product.categoryId ?? subcategoryMatch?.id ?? suggestedCategoryId;
+      const effectiveCategoryName = product.categoryId
+        ? (product.category?.name ?? null)
+        : (subcategoryMatch?.name ?? suggestedCategoryName ?? null);
+
       if (existingApproval) {
         let supplierName = null;
         if (existingApproval.notes) {
@@ -958,6 +992,11 @@ export class InventoryMigrationService {
           sellingPrice,
           sellingPriceRange,
           priceGuard: guard,
+
+          categoryId: effectiveCategoryId,
+          categoryName: effectiveCategoryName,
+          suggestedCategoryId,
+          suggestedCategoryName,
         });
       } else {
         const extraction = this.costExtraction.extractCostFromDescription(productName, productDescription);
@@ -984,6 +1023,11 @@ export class InventoryMigrationService {
           sellingPrice,
           sellingPriceRange,
           priceGuard: guard,
+
+          categoryId: effectiveCategoryId,
+          categoryName: effectiveCategoryName,
+          suggestedCategoryId,
+          suggestedCategoryName,
         });
 
         if (extraction.extractedEntries.length > 0) productsWithExtraction++;
@@ -1890,6 +1934,7 @@ export class InventoryMigrationService {
     selectedSupplierName?: string | null,
     sellingPrice?: { priceCents: number; currency: string } | null,
     sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null,
+    categoryId?: string | null,
     approvedBy?: string | null,
   ): Promise<{ success: boolean }> {
     this.logger.log(`[APPROVE_ITEM] cutoverId: ${cutoverId}, productId: ${productId}, cost: ${cost}`);
@@ -1939,7 +1984,11 @@ export class InventoryMigrationService {
             sellingPriceRangeMaxCents: sellingPriceRange?.maxCents || null,
           },
         });
-        
+
+        if (categoryId) {
+          await tx.product.update({ where: { id: productId }, data: { categoryId } });
+        }
+
         if (wasPending && !wasAlreadyProcessed) {
           const session = await tx.extractionSession.findFirst({
             where: {

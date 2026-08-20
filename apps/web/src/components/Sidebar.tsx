@@ -7,7 +7,7 @@ type SidebarProps = {
 
 export function Sidebar({ activeItem, onSelect }: SidebarProps) {
   return (
-    <nav className="w-60 shrink-0 border-r border-(--color-border-standard) bg-(--color-canvas) py-4">
+    <nav className="sticky top-0 h-screen w-60 shrink-0 overflow-y-auto border-r border-(--color-border-standard) bg-(--color-canvas) py-4">
       <div className="px-4 pb-4">
         <span className="text-sm font-semibold tracking-tight text-(--color-ink)">Farmacia Ops</span>
       </div>

@@ -24,13 +24,19 @@ export function normalizeExtractedEntries(
   forceSelectLast: boolean
 ): CostExtractionResult[] {
   return results.map(productResult => {
-    if (!productResult.extractedEntries || productResult.extractedEntries.length === 0) {
-      return productResult;
+    const withCategory: CostExtractionResult = {
+      ...productResult,
+      categoryId: productResult.categoryId ?? productResult.suggestedCategoryId ?? null,
+      categoryName: productResult.categoryName ?? productResult.suggestedCategoryName ?? null,
+    };
+
+    if (!withCategory.extractedEntries || withCategory.extractedEntries.length === 0) {
+      return withCategory;
     }
 
-    const entries = productResult.extractedEntries.map((entry, idx) => {
+    const entries = withCategory.extractedEntries.map((entry, idx) => {
       const match = matchSupplierByInitialOrName(entry.supplier, allSuppliers, supplierNameMappings);
-      const isLast = idx === productResult.extractedEntries.length - 1;
+      const isLast = idx === withCategory.extractedEntries.length - 1;
       return {
         ...entry,
         editedSupplierName: match.name ?? (forceSelectLast ? entry.supplier : entry.editedSupplierName),
@@ -43,7 +49,7 @@ export function normalizeExtractedEntries(
     const selected = entries.find(e => e.isSelected) ?? entries[entries.length - 1];
 
     return {
-      ...productResult,
+      ...withCategory,
       extractedEntries: entries,
       selectedSupplierName: selected.editedSupplierName || selected.supplier,
       selectedSupplierId: selected.supplierId ?? null,

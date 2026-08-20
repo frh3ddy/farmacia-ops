@@ -4,6 +4,7 @@ import { UserHeader } from "./components/UserHeader";
 import { NAV_SECTIONS } from "./lib/navigation";
 import { LocationsScreen } from "./sections/ops/LocationsScreen";
 import { ProductsScreen } from "./sections/ops/ProductsScreen";
+import { AddProductScreen } from "./sections/ops/AddProductScreen";
 import { SuppliersScreen } from "./sections/ops/SuppliersScreen";
 import { CatalogMappingsScreen } from "./sections/ops/CatalogMappingsScreen";
 import { CatalogSyncScreen } from "./sections/ops/CatalogSyncScreen";
@@ -17,6 +18,7 @@ import { InventoryMigrationScreen } from "./sections/cutover/InventoryMigrationS
 const SCREENS: Record<string, ComponentType> = {
   locations: LocationsScreen,
   products: ProductsScreen,
+  "add-product": AddProductScreen,
   suppliers: SuppliersScreen,
   "catalog-mappings": CatalogMappingsScreen,
   "catalog-sync": CatalogSyncScreen,
@@ -52,7 +54,7 @@ export function App() {
       <Sidebar activeItem={activeItem} onSelect={setActiveItem} />
       <div className="flex flex-1 flex-col">
         <UserHeader />
-        <main className="flex-1 bg-(--color-surface) p-8">
+        <main className="flex-1 bg-(--color-surface) px-8 py-4 ">
           {Screen ? <Screen /> : <ComingSoon label={item.label} sectionDescription={section.description} />}
         </main>
       </div>

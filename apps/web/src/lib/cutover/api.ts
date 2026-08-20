@@ -1,11 +1,28 @@
 import { apiFetch } from "../apiFetch";
-import type { CostBasis, ExtractCostsResult, ExtractedCostEntry, ExtractionSessionSummary, MigrationResult, Supplier, SupplierSuggestion } from "./types";
+import type {
+  CategoryOption,
+  CostBasis,
+  ExtractCostsResult,
+  ExtractedCostEntry,
+  ExtractionSessionSummary,
+  MigrationResult,
+  Supplier,
+  SupplierSuggestion,
+} from "./types";
 
 const BASE = "/admin/inventory/cutover";
 
 export async function fetchAllSuppliers(): Promise<Supplier[]> {
   const body = await apiFetch<{ data: Supplier[] }>(`${BASE}/suppliers`);
   return body.data;
+}
+
+// Shares the same taxonomy as the Add Product screen (parent/subcategory
+// cascade), not the classifier's own flat bucket list — /products/categories,
+// not the cutover-scoped endpoint.
+export async function fetchCategories(): Promise<CategoryOption[]> {
+  const body = await apiFetch<{ categories: CategoryOption[] }>(`/products/categories`);
+  return body.categories;
 }
 
 export async function fetchInProgressSessions(locationId?: string | null): Promise<ExtractionSessionSummary[]> {
@@ -42,6 +59,7 @@ export type ApproveItemPayload = {
   selectedSupplierName?: string | null;
   sellingPrice?: { priceCents: number; currency: string } | null;
   sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
+  categoryId?: string | null;
 };
 
 export function approveItem(payload: ApproveItemPayload) {

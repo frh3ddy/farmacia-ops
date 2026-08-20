@@ -17,6 +17,13 @@ export interface CreateProductInput {
   initialStock?: number; // Initial inventory quantity
   locationId: string; // Required for inventory and Square sync
   syncToSquare?: boolean; // Default true
+  categoryId?: string;
+  labId?: string;
+  medicationType?: 'GENERICO' | 'DE_MARCA' | 'SIMILAR';
+  activeIngredient?: string;
+  concentration?: string;
+  presentation?: string;
+  requiresPrescription?: boolean;
 }
 
 export interface UpdatePriceInput {
@@ -126,6 +133,13 @@ export class ProductsService {
       initialStock,
       locationId,
       syncToSquare = true,
+      categoryId,
+      labId,
+      medicationType,
+      activeIngredient,
+      concentration,
+      presentation,
+      requiresPrescription,
     } = input;
 
     this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} ${CURRENCY}`);
@@ -195,6 +209,13 @@ export class ProductsService {
         squareDescription: description || null,
         squareVariationName: 'Regular', // Simple product
         squareDataSyncedAt: squareSynced ? new Date() : null,
+        categoryId: categoryId || null,
+        labId: labId || null,
+        medicationType: medicationType || null,
+        activeIngredient: activeIngredient || null,
+        concentration: concentration || null,
+        presentation: presentation || null,
+        requiresPrescription: requiresPrescription ?? false,
       },
     });
 

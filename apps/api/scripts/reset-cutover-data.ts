@@ -3,7 +3,14 @@
  * CatalogMapping, CostApproval, Cutover, CutoverLock, ExtractionSession,
  * ExtractionBatch, SupplierProduct, SupplierCostHistory) so a fresh
  * migration can be run from a clean slate. Leaves Location, Employee/User,
- * auth tables, and Category untouched.
+ * auth tables untouched.
+ *
+ * Also leaves Category/Laboratory untouched, deliberately: they're a
+ * reusable, idempotently-seeded taxonomy (scripts/seed-category-hierarchy.ts,
+ * scripts/classify-product-categories.ts), not per-migration data — Product
+ * only holds nullable ON DELETE SET NULL references to them, so wiping
+ * Product never requires touching either table. Re-running the migration
+ * classifies fresh Product rows back into these same existing categories.
  *
  * Does NOT touch Square — the live/sandbox catalog is left as-is.
  *
@@ -39,6 +46,9 @@ const MODELS_IN_DELETE_ORDER = [
   'supplier',
 ] as const;
 
+// Not deleted — see file header. Counts are only printed for visibility.
+const PRESERVED_MODELS = ['category', 'laboratory'] as const;
+
 async function main() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error('DATABASE_URL not set');
@@ -64,6 +74,11 @@ async function main() {
       const count = await (prisma as any)[model].count();
       console.log(model, count);
     }
+    console.log();
+    for (const model of PRESERVED_MODELS) {
+      const count = await (prisma as any)[model].count();
+      console.log(model, count, '(preserved, not deleted)');
+    }
     await prisma.$disconnect();
     return;
   }
@@ -73,6 +88,11 @@ async function main() {
     MODELS_IN_DELETE_ORDER.map((model) => (prisma as any)[model].deleteMany()),
   );
   MODELS_IN_DELETE_ORDER.forEach((model, i) => console.log(model, 'deleted:', result[i].count));
+  console.log();
+  for (const model of PRESERVED_MODELS) {
+    const count = await (prisma as any)[model].count();
+    console.log(model, count, '(preserved, not deleted)');
+  }
   await prisma.$disconnect();
 }
 

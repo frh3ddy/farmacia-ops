@@ -6,6 +6,7 @@ import { buildSessionPlaceholders, fetchSessionExtras, mergeBatchResults, normal
 import { networkError } from "./errorFormat";
 import { findAutoSelectMatch, getSupplierSuggestions, type SupplierNameMapping } from "./supplierMatching";
 import type {
+  CategoryOption,
   CostBasis,
   CostExtractionResult,
   CutoverError,
@@ -43,9 +44,24 @@ export function useCutoverWizard() {
   const [currentExtractingIndex, setCurrentExtractingIndex] = useState(0);
   const [editedResults, setEditedResults] = useState<Record<string, CostExtractionResult>>({});
   const [allSuppliers, setAllSuppliers] = useState<Supplier[]>([]);
+  const [allCategories, setAllCategories] = useState<CategoryOption[]>([]);
   const [supplierNameMappings, setSupplierNameMappings] = useState<SupplierNameMapping[]>([]);
   const [supplierInitialsMap, setSupplierInitialsMap] = useState<Record<string, string[]>>({});
   const [sessionItemCounts, setSessionItemCounts] = useState<SessionItemCounts | null>(null);
+  // Whether every batch in this session has been fetched (no more un-extracted
+  // items hiding beyond what's currently loaded) — distinct from `phase`,
+  // which can already read "reviewing" once the *currently loaded* batch is
+  // drained even though later batches haven't been fetched yet.
+  const [sessionExtractionComplete, setSessionExtractionComplete] = useState(false);
+  // Location-level total (all items for the selected location(s) across the
+  // whole cutover session), as opposed to groupedResults/pendingCount which
+  // only cover the currently loaded batch. Deliberately doesn't track its own
+  // "processed" counter — that drifted out of sync with reality (backend's
+  // ExtractionSession.processedItems increments conditionally and can miss
+  // edge cases like a resumed session or a stale prior approval). Location
+  // remaining is instead derived from sessionItemCounts.approved/skipped,
+  // which are recomputed from a real CostApproval query on every fetch.
+  const [sessionTotals, setSessionTotals] = useState<{ totalItems: number } | null>(null);
   const [hideProductImageForTransition, setHideProductImageForTransition] = useState(false);
   const [batchComplete, setBatchComplete] = useState(false);
 
@@ -68,6 +84,7 @@ export function useCutoverWizard() {
       .then(body => setLocations(body.data))
       .catch((err: unknown) => setError(err instanceof ApiError ? err.message : "Failed to fetch locations"));
     api.fetchAllSuppliers().then(setAllSuppliers).catch(() => undefined);
+    api.fetchCategories().then(setAllCategories).catch(() => undefined);
   }, []);
 
   const cutoverId = currentCutoverId ?? extractionSessionId;
@@ -88,6 +105,8 @@ export function useCutoverWizard() {
         setExtractionResults([]);
         setExtractionSessionId(null);
         setEditedResults({});
+        setSessionExtractionComplete(false);
+        setSessionTotals(null);
       }
 
       const sessionIdToUse = opts.explicitSessionId ?? (opts.continueExtraction ? extractionSessionId : null);
@@ -121,6 +140,9 @@ export function useCutoverWizard() {
             setSessionItemCounts(extras.itemsByStatus);
           }
         }
+        if (result.totalItems != null) {
+          setSessionTotals({ totalItems: result.totalItems });
+        }
 
         setEditedResults(prev => {
           const keep = new Set(normalized.map(r => r.productId));
@@ -131,6 +153,7 @@ export function useCutoverWizard() {
         setExtractionResults(merged);
         setCurrentCutoverId(prev => prev ?? result.cutoverId ?? null);
         setCurrentExtractingIndex(0);
+        setSessionExtractionComplete(!!result.isComplete);
 
         if (result.isComplete || (merged.filter(r => !r.migrationStatus || r.migrationStatus === "PENDING").length === 0 && merged.length > 0)) {
           setPhase("reviewing");
@@ -419,6 +442,7 @@ export function useCutoverWizard() {
           selectedSupplierName: supplierName,
           sellingPrice: result.sellingPrice ?? null,
           sellingPriceRange: result.sellingPriceRange ?? null,
+          categoryId: edited.categoryId ?? edited.suggestedCategoryId ?? null,
         });
 
         if (initialsToAdd.length > 0) {
@@ -568,11 +592,14 @@ export function useCutoverWizard() {
     editedResults,
     setEditedResults,
     allSuppliers,
+    allCategories,
     supplierNameMappings,
     setSupplierNameMappings,
     supplierInitialsMap,
     setSupplierInitialsMap,
     sessionItemCounts,
+    sessionExtractionComplete,
+    sessionTotals,
     hideProductImageForTransition,
     batchComplete,
     existingSessions,

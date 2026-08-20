@@ -182,7 +182,16 @@ model Product {
   squareVariationName String? // Variation name from Square
   squareDataSyncedAt  DateTime? // When Square data was last synced
 
+  // Pharmacy catalog attributes
+  labId                String?
+  medicationType       MedicationType?
+  activeIngredient     String? // Principio activo
+  concentration        String? // e.g. "500mg"
+  presentation         String? // e.g. "Caja c/20 tabletas"
+  requiresPrescription Boolean         @default(false)
+
   category            Category?             @relation(fields: [categoryId], references: [id])
+  laboratory          Laboratory?           @relation(fields: [labId], references: [id])
   suppliers           SupplierProduct[]
   supplierCostHistory SupplierCostHistory[]
   inventories         Inventory[]
@@ -196,9 +205,27 @@ model Product {
   createdAt DateTime @default(now())
 }
 
+enum MedicationType {
+  GENERICO
+  DE_MARCA
+  SIMILAR
+}
+
 model Category {
+  id       String  @id @default(uuid())
+  name     String
+  parentId String?
+
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+  products Product[]
+
+  @@index([parentId])
+}
+
+model Laboratory {
   id   String @id @default(uuid())
-  name String
+  name String @unique
 
   products Product[]
 }

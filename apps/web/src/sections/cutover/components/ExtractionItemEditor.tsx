@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SupplierAutocompleteInput } from "./SupplierAutocompleteInput";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
-import type { CostExtractionResult, ExtractedCostEntry, SupplierSuggestion } from "../../../lib/cutover/types";
+import type { CategoryOption, CostExtractionResult, ExtractedCostEntry, SupplierSuggestion } from "../../../lib/cutover/types";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -32,7 +32,6 @@ type ExtractionItemEditorProps = {
   result: CostExtractionResult | undefined;
   extractingItems: CostExtractionResult[];
   currentIndex: number;
-  setCurrentIndex: (updater: (prev: number) => number) => void;
   editedResults: Record<string, CostExtractionResult>;
   setEditedResults: React.Dispatch<React.SetStateAction<Record<string, CostExtractionResult>>>;
   getSupplierSuggestions: (input: string) => SupplierSuggestion[];
@@ -43,13 +42,13 @@ type ExtractionItemEditorProps = {
   onRegenerateExtraction: (productId: string, description: string) => Promise<void>;
   setError: (message: string) => void;
   hideProductImageForTransition: boolean;
+  allCategories: CategoryOption[];
 };
 
 export function ExtractionItemEditor({
   result,
   extractingItems,
   currentIndex,
-  setCurrentIndex,
   editedResults,
   setEditedResults,
   getSupplierSuggestions,
@@ -60,6 +59,7 @@ export function ExtractionItemEditor({
   onRegenerateExtraction,
   setError,
   hideProductImageForTransition,
+  allCategories,
 }: ExtractionItemEditorProps) {
   const [showPriceDetails, setShowPriceDetails] = useState(false);
   // Raw text of whichever cost field is currently focused. A controlled
@@ -74,7 +74,6 @@ export function ExtractionItemEditor({
   const [newEntrySupplierId, setNewEntrySupplierId] = useState<string | null>(null);
   const [newEntryCost, setNewEntryCost] = useState("");
   const [newEntryDate, setNewEntryDate] = useState(cutoverDate);
-  const extractingCount = extractingItems.length;
 
   // Preload the next 10 product images so Next navigation feels instant.
   useEffect(() => {
@@ -93,6 +92,25 @@ export function ExtractionItemEditor({
     const displaySupplier = edited.selectedSupplierName || (last ? last.editedSupplierName || last.supplier : null) || "";
     return { selectedEntry: last, displayCost, displaySupplier };
   }, [edited]);
+
+  // Category/Subcategory cascade, mirroring AddProductScreen — same
+  // taxonomy (allCategories comes from /products/categories), derived from
+  // edited.categoryId rather than tracked as separate local state so it
+  // stays correct after a regenerate or a reused prior approval changes it
+  // out from under the picker.
+  const topCategories = useMemo(() => allCategories.filter(c => c.parentId === null), [allCategories]);
+  const categoryTopId = useMemo(() => {
+    if (!edited?.categoryId) return "";
+    const cat = allCategories.find(c => c.id === edited.categoryId);
+    if (!cat) return "";
+    return cat.parentId ?? cat.id;
+  }, [edited?.categoryId, allCategories]);
+  const subcategories = useMemo(() => allCategories.filter(c => c.parentId === categoryTopId), [allCategories, categoryTopId]);
+  const categorySubId = useMemo(() => {
+    if (!edited?.categoryId) return "";
+    const cat = allCategories.find(c => c.id === edited.categoryId);
+    return cat?.parentId ? cat.id : "";
+  }, [edited?.categoryId, allCategories]);
 
   // Reset the new-entry staging date whenever the current item changes, so
   // it doesn't carry a stale date from the previous product.
@@ -215,23 +233,14 @@ export function ExtractionItemEditor({
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-(--color-border-standard) bg-(--color-surface-raised)">
+        <div className="border-b border-(--color-border-standard) px-6 py-3">
+          <h3 className="text-base font-semibold text-(--color-ink)">{result.productName}</h3>
+        </div>
         <div className="grid grid-cols-3 gap-6 p-6">
           {/* Left: extracted costs table / manual input */}
           <div className="col-span-2 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-(--color-ink)">Extracted costs</h3>
-                <p className="text-sm text-(--color-ink-tertiary)">Select the most accurate cost entry below.</p>
-              </div>
-              {hasExtraction && (
-                <span className="rounded-full bg-(--color-accent)/10 px-3 py-1 text-sm font-medium text-(--color-accent)">
-                  {edited.extractedEntries!.length} found
-                </span>
-              )}
-            </div>
             <div>
-              <h3 className="text-lg font-semibold text-(--color-ink)">{result.productName}</h3>
-              <label className="mt-1 block text-xs text-(--color-ink-tertiary)">Source description</label>
+              <label className="block text-xs text-(--color-ink-tertiary)">Source description</label>
               <textarea
                 value={edited.originalDescription ?? ""}
                 onChange={e => updateManualField({ originalDescription: e.target.value })}
@@ -354,17 +363,14 @@ export function ExtractionItemEditor({
 
           {/* Right: product review */}
           <div className="space-y-4">
-            <div>
-              <h4 className="text-base font-semibold text-(--color-ink)">{result.productName}</h4>
-              <div className="mt-4 flex min-h-[200px] items-center justify-center rounded-lg bg-(--color-surface-inset) p-8">
-                {result.imageUrl && !hideProductImageForTransition ? (
-                  <img src={result.imageUrl} alt={result.productName} className="max-h-48 max-w-full object-contain" />
-                ) : (
-                  <span className="text-sm text-(--color-ink-muted)">
-                    {hideProductImageForTransition ? "Loading next product…" : "No image available"}
-                  </span>
-                )}
-              </div>
+            <div className="flex min-h-[200px] items-center justify-center rounded-lg bg-(--color-surface-inset) p-8">
+              {result.imageUrl && !hideProductImageForTransition ? (
+                <img src={result.imageUrl} alt={result.productName} className="max-h-48 max-w-full object-contain" />
+              ) : (
+                <span className="text-sm text-(--color-ink-muted)">
+                  {hideProductImageForTransition ? "Loading next product…" : "No image available"}
+                </span>
+              )}
             </div>
 
             {result.sellingPrice && (
@@ -421,6 +427,51 @@ export function ExtractionItemEditor({
                   {priceGuardWarning}
                 </div>
               )}
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Category</label>
+                  <select
+                    value={categoryTopId}
+                    onChange={e => {
+                      const topId = e.target.value;
+                      updateManualField({
+                        categoryId: topId || null,
+                        categoryName: allCategories.find(c => c.id === topId)?.name ?? null,
+                      });
+                    }}
+                    className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
+                  >
+                    <option value="">Uncategorized</option>
+                    {topCategories.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Subcategory</label>
+                  <select
+                    value={categorySubId}
+                    onChange={e => {
+                      const targetId = e.target.value || categoryTopId;
+                      updateManualField({
+                        categoryId: targetId || null,
+                        categoryName: allCategories.find(c => c.id === targetId)?.name ?? null,
+                      });
+                    }}
+                    disabled={!categoryTopId || subcategories.length === 0}
+                    className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none disabled:opacity-50"
+                  >
+                    <option value="">{categoryTopId ? "None" : "Choose a category first"}</option>
+                    {subcategories.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-3 pt-2">
@@ -446,28 +497,6 @@ export function ExtractionItemEditor({
           </div>
         </div>
       </div>
-
-      {extractingCount > 0 && (
-        <div className="flex items-center gap-4 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-3">
-          <button
-            onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
-            disabled={currentIndex === 0}
-            className="rounded-sm bg-(--color-accent) px-4 py-1.5 text-sm font-medium text-(--color-accent-contrast) disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            ← Previous
-          </button>
-          <span className="text-sm font-medium text-(--color-ink-secondary)">
-            Item {currentIndex + 1} of {extractingCount}
-          </span>
-          <button
-            onClick={() => setCurrentIndex(prev => Math.min(extractingCount - 1, prev + 1))}
-            disabled={currentIndex >= extractingCount - 1}
-            className="rounded-sm bg-(--color-accent) px-4 py-1.5 text-sm font-medium text-(--color-accent-contrast) disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Next →
-          </button>
-        </div>
-      )}
 
       <ConfirmDialog
         open={confirmingDiscontinue}
