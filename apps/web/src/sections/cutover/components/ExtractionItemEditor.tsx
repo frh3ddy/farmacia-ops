@@ -57,6 +57,11 @@ export function ExtractionItemEditor({
   hideProductImageForTransition,
 }: ExtractionItemEditorProps) {
   const [showPriceDetails, setShowPriceDetails] = useState(false);
+  // Raw text of whichever cost field is currently focused. A controlled
+  // number input snaps back to its last committed value on every re-render,
+  // so an in-progress edit (e.g. deleting down to "") needs to be tracked
+  // separately from the committed numeric value until blur.
+  const [costDraft, setCostDraft] = useState<{ idx: number | null; raw: string } | null>(null);
   const extractingCount = extractingItems.length;
 
   // Preload the next 10 product images so Next navigation feels instant.
@@ -104,11 +109,23 @@ export function ExtractionItemEditor({
   };
 
   const handleCostChange = (idx: number | null, rawValue: string) => {
+    setCostDraft({ idx, raw: rawValue });
+    if (rawValue === "") return;
     const newCost = parseFloat(rawValue) || 0;
-    if (newCost < 0) return setError("Cost cannot be negative");
-    if (newCost === 0 && !window.confirm("Cost is zero. Are you sure?")) return;
     if (idx === null) updateManualField({ selectedCost: newCost });
     else updateEntry(idx, { editedCost: newCost });
+  };
+
+  const handleCostBlur = (idx: number | null, e: React.FocusEvent<HTMLInputElement>) => {
+    const newCost = parseFloat(e.target.value) || 0;
+    if (newCost < 0) return setError("Cost cannot be negative");
+    if (newCost === 0 && !window.confirm("Cost is zero. Are you sure?")) {
+      e.target.focus();
+      return; // keep the draft so the refocused field still shows what they typed
+    }
+    if (idx === null) updateManualField({ selectedCost: newCost });
+    else updateEntry(idx, { editedCost: newCost });
+    setCostDraft(null);
   };
 
   const priceGuardWarning = (() => {
@@ -175,8 +192,9 @@ export function ExtractionItemEditor({
                               type="number"
                               step="0.01"
                               min="0"
-                              value={entry.editedCost ?? entry.amount}
+                              value={costDraft?.idx === idx ? costDraft.raw : (entry.editedCost ?? entry.amount)}
                               onChange={e => handleCostChange(idx, e.target.value)}
+                              onBlur={e => handleCostBlur(idx, e)}
                               className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
                                 isLast ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
                               }`}
@@ -217,8 +235,9 @@ export function ExtractionItemEditor({
                     type="number"
                     step="0.01"
                     min="0"
-                    value={edited.selectedCost ?? ""}
+                    value={costDraft?.idx === null ? costDraft.raw : (edited.selectedCost ?? "")}
                     onChange={e => handleCostChange(null, e.target.value)}
+                    onBlur={e => handleCostBlur(null, e)}
                     placeholder="Enter cost"
                     className="w-full rounded-sm border border-(--color-border-standard) px-3 py-2 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
                   />
