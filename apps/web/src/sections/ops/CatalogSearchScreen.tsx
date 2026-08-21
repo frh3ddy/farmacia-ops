@@ -3,6 +3,12 @@ import { apiFetch, ApiError } from "../../lib/apiFetch";
 
 type MedicationType = "GENERICO" | "DE_MARCA" | "SIMILAR" | null;
 
+type EquivalentRef = {
+  id: string;
+  name: string;
+  inStock: boolean;
+};
+
 type CatalogProduct = {
   id: string;
   name: string;
@@ -17,6 +23,7 @@ type CatalogProduct = {
   currency: string;
   quantity: number;
   inStock: boolean;
+  equivalents?: EquivalentRef[];
 };
 
 type SearchResponse = {
@@ -73,6 +80,11 @@ function ProductCard({ product, highlighted }: { product: CatalogProduct; highli
               {[product.requiresPrescription && "Requiere receta", product.isControlled && "Sustancia controlada"]
                 .filter(Boolean)
                 .join(" · ")}
+            </p>
+          )}
+          {product.equivalents != null && product.equivalents.length > 0 && (
+            <p className="mt-1 text-xs text-(--color-ink-tertiary)">
+              Equivalente a: {product.equivalents.map(e => e.name).join(", ")}
             </p>
           )}
         </div>

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MedicationEquivalenceService } from './medication-equivalence.service';
 import { CATALOG_PRODUCT_INCLUDE, toProductView, type CatalogProductView } from './catalog-product-view';
-import { rankSearchCandidates, buildSearchResult, isStrongMatch, type MatchType, type SearchCandidate } from './catalog-search';
+import { rankSearchCandidates, buildSearchResult, shouldShowAlternatives, type MatchType } from './catalog-search';
 import { stripAccents } from '../inventory-migration/category-classifier';
 
 type SearchProductCandidate = CatalogProductView & { matchType: MatchType };
@@ -17,7 +17,11 @@ export class CatalogSearchService {
   async search(
     query: string,
     locationId?: string,
-  ): Promise<{ requested: SearchProductCandidate[]; alternatives: CatalogProductView[]; alternativesChecked: boolean }> {
+  ): Promise<{
+    requested: (SearchProductCandidate & { equivalents: CatalogProductView[] })[];
+    alternatives: CatalogProductView[];
+    alternativesChecked: boolean;
+  }> {
     const q = query.trim();
     if (!q) return { requested: [], alternatives: [], alternativesChecked: false };
     const normalizedQuery = stripAccents(q.toLowerCase());
@@ -89,13 +93,25 @@ export class CatalogSearchService {
     }
 
     const ranked = rankSearchCandidates(candidates);
-    const top = ranked[0];
-    const alternativesChecked = Boolean(top && isStrongMatch(top as SearchCandidate) && !top.inStock);
+    const alternativesChecked = shouldShowAlternatives(ranked);
 
     const alternatives = alternativesChecked
-      ? await this.equivalenceService.findEquivalentProducts(top.id, locationId)
+      ? await this.equivalenceService.findEquivalentProducts(ranked[0].id, locationId)
       : [];
 
-    return { ...buildSearchResult(ranked, () => alternatives), alternativesChecked };
+    const result = buildSearchResult(ranked, () => alternatives);
+
+    // Always tag each result with its own equivalents (same MedicationDefinition),
+    // in stock or not — not just the out-of-stock top-match branch above.
+    const requested = await Promise.all(
+      result.requested.map(async (p) => ({
+        ...p,
+        equivalents: p.medicationDefinitionId
+          ? await this.equivalenceService.findEquivalentProducts(p.id, locationId)
+          : [],
+      })),
+    );
+
+    return { requested, alternatives: result.alternatives, alternativesChecked };
   }
 }

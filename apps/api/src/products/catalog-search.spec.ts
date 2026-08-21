@@ -76,4 +76,19 @@ describe('buildSearchResult', () => {
     expect(result.requested).toHaveLength(3);
     expect(result.alternatives).toEqual([]);
   });
+
+  it('checks alternatives for a sole partial brand-name match that is out of stock (e.g. "Tylenol" vs "Tylenol 500 mg")', () => {
+    const ranked = rankSearchCandidates([candidate(tylenol, 'name-contains')]);
+    const result = buildSearchResult(ranked, () => [genericB, genericA]);
+    expect(result.requested.map((r) => r.id)).toEqual(['tylenol']);
+    expect(result.alternatives.map((r) => r.id)).toEqual(['generic-b', 'generic-a']);
+  });
+
+  it('does not split for a sole partial name match that is in stock', () => {
+    const ranked = rankSearchCandidates([candidate({ ...tylenol, inStock: true }, 'name-contains')]);
+    const result = buildSearchResult(ranked, () => {
+      throw new Error('should not compute alternatives when in stock');
+    });
+    expect(result.requested.map((r) => r.id)).toEqual(['tylenol']);
+  });
 });

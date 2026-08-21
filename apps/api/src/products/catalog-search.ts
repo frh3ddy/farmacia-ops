@@ -59,17 +59,29 @@ export function isStrongMatch(candidate: SearchCandidate): boolean {
   return candidate.matchType === 'sku' || candidate.matchType === 'name-exact';
 }
 
+/**
+ * True when the ranked list is unambiguous enough to check for equivalents
+ * once we know the top result is out of stock: a strong/exact match, or the
+ * sole name match (e.g. searching "Tylenol" against a product literally
+ * named "Tylenol 500 mg" — only a `name-contains` hit, but there's nothing
+ * else it could mean).
+ */
+export function shouldShowAlternatives(ranked: SearchCandidate[]): boolean {
+  if (ranked.length === 0) return false;
+  const top = ranked[0];
+  const isSoleNameMatch = ranked.length === 1 && top.matchType === 'name-contains';
+  return (isStrongMatch(top) || isSoleNameMatch) && !top.inStock;
+}
+
 export type SearchResult<T extends SearchCandidate, A> = {
   requested: T[];
   alternatives: A[];
 };
 
 /**
- * Split ranked candidates into "requested" vs "alternatives": only when the
- * single best match is a strong/exact one (SKU or exact name — i.e. the
- * shopper searched for one specific product) AND it's out of stock do we
- * pull in equivalents. An ambiguous/generic query just returns a flat
- * ranked list with no split.
+ * Split ranked candidates into "requested" vs "alternatives": only when
+ * shouldShowAlternatives(ranked) holds do we pull in equivalents. An
+ * ambiguous/generic query just returns a flat ranked list with no split.
  */
 export function buildSearchResult<T extends SearchCandidate, A>(
   ranked: T[],
@@ -77,9 +89,8 @@ export function buildSearchResult<T extends SearchCandidate, A>(
 ): SearchResult<T, A> {
   if (ranked.length === 0) return { requested: [], alternatives: [] };
 
-  const top = ranked[0];
-  if (isStrongMatch(top) && !top.inStock) {
-    return { requested: [top], alternatives: findAlternatives(top) };
+  if (shouldShowAlternatives(ranked)) {
+    return { requested: [ranked[0]], alternatives: findAlternatives(ranked[0]) };
   }
   return { requested: ranked, alternatives: [] };
 }
