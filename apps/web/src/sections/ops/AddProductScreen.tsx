@@ -99,6 +99,7 @@ export function AddProductScreen() {
   const [empaquePrimario, setEmpaquePrimario] = useState<Empaque | "">("");
   const [empaqueSecundario, setEmpaqueSecundario] = useState<Empaque | "">("");
   const [cantidad, setCantidad] = useState("");
+  const [searchAliases, setSearchAliases] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,6 +157,7 @@ export function AddProductScreen() {
     setEmpaquePrimario("");
     setEmpaqueSecundario("");
     setCantidad("");
+    setSearchAliases("");
   };
 
   const handleSubmit = async () => {
@@ -198,6 +200,10 @@ export function AddProductScreen() {
           empaquePrimario: isMedicine && empaquePrimario ? empaquePrimario : undefined,
           empaqueSecundario: isMedicine && empaqueSecundario ? empaqueSecundario : undefined,
           cantidad: isMedicine && cantidad.trim() ? parseInt(cantidad, 10) : undefined,
+          searchAliases:
+            isMedicine && searchAliases.trim()
+              ? searchAliases.split(",").map(t => t.trim()).filter(Boolean)
+              : undefined,
           medication: hasMedicationInfo
             ? {
                 name: medicationDisplayName,
@@ -518,6 +524,20 @@ export function AddProductScreen() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label className={labelClass}>Marcas conocidas</label>
+              <input
+                value={searchAliases}
+                onChange={e => setSearchAliases(e.target.value)}
+                placeholder="Tylenol, Panadol"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-(--color-ink-tertiary)">
+                Separadas por comas. Para que este genérico aparezca al buscar una marca aunque no exista un
+                producto de esa marca.
+              </p>
             </div>
 
             <div className="flex gap-6">

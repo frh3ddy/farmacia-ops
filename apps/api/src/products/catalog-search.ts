@@ -5,12 +5,15 @@
  * matchType, and hands them to this module.
  */
 import { rankEquivalents, type EquivalenceCandidate } from './medication-equivalence';
+import { stripAccents } from '../inventory-migration/category-classifier';
 
 export type MatchType =
   | 'sku'
   | 'name-exact'
+  | 'alias-exact'
   | 'ingredient-exact'
   | 'definition-contains'
+  | 'alias-contains'
   | 'ingredient-contains'
   | 'name-contains';
 
@@ -19,15 +22,46 @@ export type SearchCandidate = EquivalenceCandidate & {
 };
 
 // Priority order from the spec: exact barcode/SKU > exact brand name >
-// exact active-ingredient/generic name > same medication definition > other.
+// curated brand-name tag > exact active-ingredient/generic name > same
+// medication definition > other.
 const MATCH_SCORE: Record<MatchType, number> = {
   sku: 100,
   'name-exact': 90,
+  'alias-exact': 88,
   'ingredient-exact': 80,
   'definition-contains': 65,
+  'alias-contains': 63,
   'ingredient-contains': 60,
   'name-contains': 55,
 };
+
+/**
+ * Normalize brand-name search tags (Product.searchAliases) the same way a
+ * query is normalized before matching: trim, lowercase, strip accents, dedupe.
+ * Storing already-normalized means matching is a plain array-membership check
+ * (`{ has: normalizedQuery }`) with no per-element re-normalization needed.
+ */
+export function normalizeSearchAliases(tags: string[]): string[] {
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    const normalized = stripAccents(tag.trim().toLowerCase());
+    if (normalized) seen.add(normalized);
+  }
+  return [...seen];
+}
+
+/**
+ * Match a normalized query against a product's normalized brand-name tags.
+ * `has` in Prisma is exact-membership only, so the DB query can't filter by
+ * substring — this runs in JS after a broad `searchAliases: { isEmpty: false }`
+ * fetch. Exact tag match ranks above a substring hit within a longer tag
+ * (e.g. querying "marca" against a tag "test marca").
+ */
+export function matchSearchAlias(aliases: string[], normalizedQuery: string): 'alias-exact' | 'alias-contains' | null {
+  if (aliases.includes(normalizedQuery)) return 'alias-exact';
+  if (aliases.some((a) => a.includes(normalizedQuery))) return 'alias-contains';
+  return null;
+}
 
 /** Dedupe by product id, keeping each product's single best matchType. */
 export function dedupeByBestMatch<T extends SearchCandidate>(candidates: T[]): T[] {
@@ -56,7 +90,7 @@ export function rankSearchCandidates<T extends SearchCandidate>(candidates: T[])
 }
 
 export function isStrongMatch(candidate: SearchCandidate): boolean {
-  return candidate.matchType === 'sku' || candidate.matchType === 'name-exact';
+  return candidate.matchType === 'sku' || candidate.matchType === 'name-exact' || candidate.matchType === 'alias-exact';
 }
 
 /**
@@ -64,11 +98,14 @@ export function isStrongMatch(candidate: SearchCandidate): boolean {
  * once we know the top result is out of stock: a strong/exact match, or the
  * sole name match (e.g. searching "Tylenol" against a product literally
  * named "Tylenol 500 mg" — only a `name-contains` hit, but there's nothing
- * else it could mean).
+ * else it could mean). Requires a `medicationDefinitionId` too — with none,
+ * there's no possible equivalent to look up, so collapsing to just the top
+ * result would silently drop every other legitimate match for nothing.
  */
 export function shouldShowAlternatives(ranked: SearchCandidate[]): boolean {
   if (ranked.length === 0) return false;
   const top = ranked[0];
+  if (!top.medicationDefinitionId) return false;
   const isSoleNameMatch = ranked.length === 1 && top.matchType === 'name-contains';
   return (isStrongMatch(top) || isSoleNameMatch) && !top.inStock;
 }

@@ -4,6 +4,7 @@ import { SquareClient, SquareEnvironment } from 'square';
 import { Prisma, Empaque } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { deriveNombre, derivePresentacion, type Sustancia } from './derived-naming';
+import { normalizeSearchAliases } from './catalog-search';
 
 // Currency constant - must match Square merchant account currency
 // Square merchant is configured with USD
@@ -33,6 +34,9 @@ export interface CreateProductInput {
   // Sueltos: links this (caja) product to its already-existing loose
   // counterpart Product, so break-bulk knows where converted stock goes.
   sueltoProductId?: string;
+  // Brand-name search tags (e.g. a generic's known brand names: "Tylenol",
+  // "Panadol") — matched in catalog-search.service.ts, not a Product relation.
+  searchAliases?: string[];
 }
 
 export interface UpdatePriceInput {
@@ -156,6 +160,7 @@ export class ProductsService {
       nombreManual,
       presentacionManual,
       sueltoProductId,
+      searchAliases,
     } = input;
 
     this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} ${CURRENCY}`);
@@ -262,6 +267,7 @@ export class ProductsService {
         nombreManual: nombreManual?.trim() || null,
         presentacionManual: presentacionManual?.trim() || null,
         sueltoProductId: sueltoProductId || null,
+        searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
       },
     });
 
@@ -1258,6 +1264,23 @@ export class ProductsService {
     return this.prisma.product.update({
       where: { id: productId },
       data: { sueltoProductId, ...(cantidad !== undefined && { cantidad }) },
+    });
+  }
+
+  /**
+   * Set (replace) a product's brand-name search tags — e.g. tagging a
+   * generic with the brand names customers actually ask for, so catalog
+   * search surfaces it even when no branded Product row exists at all.
+   */
+  async setSearchAliases(productId: string, searchAliases: string[]) {
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product) {
+      throw new NotFoundException(`Product ${productId} not found`);
+    }
+
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { searchAliases: normalizeSearchAliases(searchAliases) },
     });
   }
 }

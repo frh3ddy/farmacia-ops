@@ -24,6 +24,7 @@ type CatalogProduct = {
   quantity: number;
   inStock: boolean;
   equivalents?: EquivalentRef[];
+  searchAliases: string[];
 };
 
 type SearchResponse = {
@@ -85,6 +86,11 @@ function ProductCard({ product, highlighted }: { product: CatalogProduct; highli
           {product.equivalents != null && product.equivalents.length > 0 && (
             <p className="mt-1 text-xs text-(--color-ink-tertiary)">
               Equivalente a: {product.equivalents.map(e => e.name).join(", ")}
+            </p>
+          )}
+          {product.searchAliases.length > 0 && (
+            <p className="mt-1 text-xs text-(--color-ink-tertiary)">
+              También conocido como: {product.searchAliases.join(", ")}
             </p>
           )}
         </div>

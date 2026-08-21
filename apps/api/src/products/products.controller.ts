@@ -51,6 +51,8 @@ interface CreateProductDto {
   presentacionManual?: string;
   // Sueltos: links this (caja) product to its already-existing loose Product.
   sueltoProductId?: string;
+  // Brand-name search tags, e.g. a generic's known brand names.
+  searchAliases?: string[];
   // Either an existing definition id, or enough inline info to find-or-create one.
   medicationDefinitionId?: string;
   medication?: {
@@ -169,6 +171,7 @@ export class ProductsController {
       nombreManual: body.nombreManual,
       presentacionManual: body.presentacionManual,
       sueltoProductId: body.sueltoProductId,
+      searchAliases: body.searchAliases,
     };
 
     const result = await this.productsService.createProduct(input);
@@ -602,6 +605,19 @@ export class ProductsController {
     @Body() body: { sueltoProductId: string | null; cantidad?: number },
   ) {
     const product = await this.productsService.setSueltoLink(id, body.sueltoProductId, body.cantidad);
+    return { success: true, data: { product } };
+  }
+
+  /**
+   * Set a product's brand-name search tags (e.g. a generic tagged with the
+   * brand names customers ask for), so catalog search surfaces it even
+   * when no branded Product exists at all. Replaces the full list.
+   * Roles: OWNER, MANAGER
+   */
+  @Patch(':id/search-aliases')
+  @Roles('OWNER', 'MANAGER')
+  async setSearchAliases(@Param('id') id: string, @Body() body: { searchAliases: string[] }) {
+    const product = await this.productsService.setSearchAliases(id, body.searchAliases ?? []);
     return { success: true, data: { product } };
   }
 }

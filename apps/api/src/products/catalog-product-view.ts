@@ -36,6 +36,7 @@ export type CatalogProductView = {
   currency: string;
   quantity: number;
   inStock: boolean;
+  searchAliases: string[];
 };
 
 export function toProductView(product: CatalogProduct, locationId?: string): CatalogProductView {
@@ -61,5 +62,6 @@ export function toProductView(product: CatalogProduct, locationId?: string): Cat
     currency: mapping?.currency || 'USD',
     quantity,
     inStock: quantity > 0,
+    searchAliases: product.searchAliases,
   };
 }

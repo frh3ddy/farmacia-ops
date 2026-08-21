@@ -1,12 +1,21 @@
-import { rankSearchCandidates, buildSearchResult, type SearchCandidate } from './catalog-search';
+import {
+  rankSearchCandidates,
+  buildSearchResult,
+  normalizeSearchAliases,
+  matchSearchAlias,
+  type SearchCandidate,
+} from './catalog-search';
 
 const tylenol = { id: 'tylenol', medicationDefinitionId: 'med-para-500-tab', isDiscontinued: false, inStock: false, price: 58 };
 const genericA = { id: 'generic-a', medicationDefinitionId: 'med-para-500-tab', isDiscontinued: false, inStock: true, price: 22 };
 const genericB = { id: 'generic-b', medicationDefinitionId: 'med-para-500-tab', isDiscontinued: false, inStock: true, price: 18 };
 const genericDiscontinued = { id: 'generic-c', medicationDefinitionId: 'med-para-500-tab', isDiscontinued: true, inStock: true, price: 15 };
 const loneBrand = { id: 'lone-brand', medicationDefinitionId: 'med-lonely', isDiscontinued: false, inStock: false, price: 40 };
+// A non-medication product (no medicationDefinitionId) — e.g. a plain test/misc product.
+const plainA = { id: 'plain-a', medicationDefinitionId: null, isDiscontinued: false, inStock: false, price: 10 };
+const plainB = { id: 'plain-b', medicationDefinitionId: null, isDiscontinued: false, inStock: false, price: 12 };
 
-function candidate(base: typeof tylenol, matchType: SearchCandidate['matchType']): SearchCandidate {
+function candidate(base: Omit<SearchCandidate, 'matchType'>, matchType: SearchCandidate['matchType']): SearchCandidate {
   return { ...base, matchType };
 }
 
@@ -90,5 +99,69 @@ describe('buildSearchResult', () => {
       throw new Error('should not compute alternatives when in stock');
     });
     expect(result.requested.map((r) => r.id)).toEqual(['tylenol']);
+  });
+
+  it('surfaces a generic directly via a curated brand-name tag, with no branded product involved at all', () => {
+    // e.g. genericA (a real product) tagged with "advil" — no "Advil" product row exists anywhere.
+    const ranked = rankSearchCandidates([candidate(genericA, 'alias-exact')]);
+    const result = buildSearchResult(ranked, () => {
+      throw new Error('in stock — should not compute alternatives');
+    });
+    expect(result.requested.map((r) => r.id)).toEqual(['generic-a']);
+  });
+
+  it('checks alternatives for an alias-tag match when the tagged product is out of stock', () => {
+    const ranked = rankSearchCandidates([candidate({ ...genericA, inStock: false }, 'alias-exact')]);
+    const result = buildSearchResult(ranked, () => [genericB]);
+    expect(result.requested.map((r) => r.id)).toEqual(['generic-a']);
+    expect(result.alternatives.map((r) => r.id)).toEqual(['generic-b']);
+  });
+
+  it('does not collapse to a single result when the out-of-stock exact match has no medicationDefinitionId (e.g. two non-medication test products)', () => {
+    // Regression: searching "test" against products "test" (exact, no def, out of stock)
+    // and "test generic" (contains, out of stock) used to drop "test generic" entirely,
+    // since there's no medicationDefinitionId to look up any equivalent for.
+    const ranked = rankSearchCandidates([candidate(plainA, 'name-exact'), candidate(plainB, 'name-contains')]);
+    const result = buildSearchResult(ranked, () => {
+      throw new Error('no medicationDefinitionId — should never attempt to compute alternatives');
+    });
+    expect(result.requested.map((r) => r.id)).toEqual(['plain-a', 'plain-b']);
+    expect(result.alternatives).toEqual([]);
+  });
+});
+
+describe('matchSearchAlias', () => {
+  it('returns alias-exact for a whole-tag match', () => {
+    expect(matchSearchAlias(['tylenol', 'panadol'], 'tylenol')).toBe('alias-exact');
+  });
+
+  it('returns alias-contains for a substring hit within a longer tag (e.g. "marca" within "test marca")', () => {
+    expect(matchSearchAlias(['test marca', 'test marca 2'], 'marca')).toBe('alias-contains');
+  });
+
+  it('prefers alias-exact over alias-contains when both would match', () => {
+    expect(matchSearchAlias(['marca', 'test marca'], 'marca')).toBe('alias-exact');
+  });
+
+  it('returns null when no tag matches at all', () => {
+    expect(matchSearchAlias(['tylenol'], 'panadol')).toBeNull();
+  });
+});
+
+describe('normalizeSearchAliases', () => {
+  it('trims, lowercases, and strips accents', () => {
+    expect(normalizeSearchAliases([' Tylenol ', 'PANADOL', 'Acetaminofén'])).toEqual([
+      'tylenol',
+      'panadol',
+      'acetaminofen',
+    ]);
+  });
+
+  it('dedupes tags that normalize to the same value', () => {
+    expect(normalizeSearchAliases(['Tylenol', 'tylenol', ' TYLENOL '])).toEqual(['tylenol']);
+  });
+
+  it('drops empty/whitespace-only tags', () => {
+    expect(normalizeSearchAliases(['Tylenol', '   ', ''])).toEqual(['tylenol']);
   });
 });

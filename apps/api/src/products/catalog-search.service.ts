@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MedicationEquivalenceService } from './medication-equivalence.service';
 import { CATALOG_PRODUCT_INCLUDE, toProductView, type CatalogProductView } from './catalog-product-view';
-import { rankSearchCandidates, buildSearchResult, shouldShowAlternatives, type MatchType } from './catalog-search';
+import { rankSearchCandidates, buildSearchResult, shouldShowAlternatives, matchSearchAlias, type MatchType } from './catalog-search';
 import { stripAccents } from '../inventory-migration/category-classifier';
 
 type SearchProductCandidate = CatalogProductView & { matchType: MatchType };
@@ -28,7 +28,7 @@ export class CatalogSearchService {
 
     const include = CATALOG_PRODUCT_INCLUDE(locationId);
 
-    const [skuMatches, nameMatches, ingredientMatches, definitionMatches] = await Promise.all([
+    const [skuMatches, nameMatches, aliasMatches, ingredientMatches, definitionMatches] = await Promise.all([
       this.prisma.product.findMany({
         where: { sku: { equals: q, mode: 'insensitive' }, isDiscontinued: false },
         include,
@@ -41,6 +41,13 @@ export class CatalogSearchService {
             { squareProductName: { contains: q, mode: 'insensitive' } },
           ],
         },
+        include,
+      }),
+      this.prisma.product.findMany({
+        // Prisma's array `has` is exact-membership only, so this can't filter
+        // by substring at the DB level — fetch every tagged product (cheap;
+        // most products carry none) and substring-match in JS below.
+        where: { isDiscontinued: false, searchAliases: { isEmpty: false } },
         include,
       }),
       this.prisma.activeIngredient.findMany({
@@ -72,6 +79,13 @@ export class CatalogSearchService {
     for (const product of nameMatches) {
       const isExact = stripAccents(product.name.toLowerCase()) === normalizedQuery;
       candidates.push({ ...toProductView(product, locationId), matchType: isExact ? 'name-exact' : 'name-contains' });
+    }
+
+    for (const product of aliasMatches) {
+      const matchType = matchSearchAlias(product.searchAliases, normalizedQuery);
+      if (matchType) {
+        candidates.push({ ...toProductView(product, locationId), matchType });
+      }
     }
 
     for (const ingredient of ingredientMatches) {

@@ -16,6 +16,7 @@ export type Product = {
   category?: { id: string; name: string } | null;
   catalogMappings?: unknown[];
   supplierCount: number;
+  searchAliases?: string[];
 };
 
 export type Supplier = {

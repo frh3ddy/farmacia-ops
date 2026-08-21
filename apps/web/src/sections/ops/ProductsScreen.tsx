@@ -80,8 +80,101 @@ export function ProductsScreen() {
         />
 
         {selectedProductId && selectedProduct && (
-          <ProductSupplierPanel product={selectedProduct} />
+          <div className="space-y-4">
+            <SearchAliasesPanel product={selectedProduct} />
+            <ProductSupplierPanel product={selectedProduct} />
+          </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SearchAliasesPanel({ product }: { product: Product }) {
+  const [tags, setTags] = useState<string[]>(product.searchAliases ?? []);
+  const [input, setInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTags(product.searchAliases ?? []);
+    setInput("");
+    setError(null);
+  }, [product.id]);
+
+  const save = async (next: string[]) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const body = await apiFetch<{ data: { product: { searchAliases: string[] } } }>(
+        `/products/${product.id}/search-aliases`,
+        { method: "PATCH", body: JSON.stringify({ searchAliases: next }) },
+      );
+      setTags(body.data.product.searchAliases);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update tags");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addTag = () => {
+    const trimmed = input.trim();
+    if (trimmed) save([...tags, trimmed]);
+    setInput("");
+  };
+
+  const removeTag = (tag: string) => save(tags.filter(t => t !== tag));
+
+  return (
+    <div className="space-y-2 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-ink-tertiary)">Marcas conocidas</h4>
+      <p className="text-xs text-(--color-ink-tertiary)">
+        Nombres de marca por los que los clientes conocen este producto (ej. Tylenol para un genérico de paracetamol).
+      </p>
+      {error && <p className="text-xs text-(--color-destructive)">{error}</p>}
+      <div className="flex flex-wrap gap-1.5">
+        {tags.length === 0 && <span className="text-xs text-(--color-ink-tertiary)">Sin marcas registradas</span>}
+        {tags.map(tag => (
+          <span
+            key={tag}
+            className="flex items-center gap-1 rounded-full bg-(--color-accent)/10 px-2.5 py-0.5 text-xs font-medium text-(--color-accent)"
+          >
+            {tag}
+            <button
+              type="button"
+              onClick={() => removeTag(tag)}
+              disabled={saving}
+              aria-label={`Quitar ${tag}`}
+              className="text-(--color-accent)/70 hover:text-(--color-accent)"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addTag();
+            }
+          }}
+          placeholder="Tylenol"
+          disabled={saving}
+          className="flex-1 rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-3 py-1.5 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={addTag}
+          disabled={saving || !input.trim()}
+          className="shrink-0 rounded-sm border border-(--color-border-standard) px-3 py-1.5 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface) disabled:opacity-50"
+        >
+          Agregar
+        </button>
       </div>
     </div>
   );
