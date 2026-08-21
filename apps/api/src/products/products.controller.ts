@@ -18,8 +18,12 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ProductsService, CreateProductInput, UpdatePriceInput } from './products.service';
+import { CatalogSearchService } from './catalog-search.service';
+import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from './medication-definition';
+import { findOrCreateLaboratory } from './laboratory';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
 
 // DTOs
 interface CreateProductDto {
@@ -33,11 +37,20 @@ interface CreateProductDto {
   syncToSquare?: boolean;
   categoryId?: string;
   labId?: string;
+  labName?: string; // find-or-create by name when labId isn't already known
   medicationType?: 'GENERICO' | 'DE_MARCA' | 'SIMILAR';
-  activeIngredient?: string;
-  concentration?: string;
   presentation?: string;
   requiresPrescription?: boolean;
+  isControlled?: boolean;
+  // Either an existing definition id, or enough inline info to find-or-create one.
+  medicationDefinitionId?: string;
+  medication?: {
+    name: string;
+    form: PharmaceuticalForm;
+    route: AdministrationRoute;
+    strength: string;
+    activeIngredientNames: string[];
+  };
 }
 
 interface UpdatePriceDto {
@@ -65,6 +78,7 @@ export class ProductsController {
   constructor(
     private readonly productsService: ProductsService,
     private readonly prisma: PrismaService,
+    private readonly catalogSearchService: CatalogSearchService,
   ) {}
 
   /**
@@ -100,6 +114,26 @@ export class ProductsController {
       );
     }
 
+    // Resolve the laboratory: either an existing id, or a name to find-or-create.
+    const labId = body.labId || (body.labName ? await findOrCreateLaboratory(this.prisma, body.labName) : undefined);
+
+    // Resolve the medication definition: either an id already picked from
+    // the search/picker, or inline ingredient/strength/form/route info that
+    // gets resolved to an existing (or newly created) definition here.
+    let medicationDefinitionId = body.medicationDefinitionId;
+    if (!medicationDefinitionId && body.medication) {
+      const activeIngredientIds = await Promise.all(
+        body.medication.activeIngredientNames.map((n) => findOrCreateActiveIngredient(this.prisma, n)),
+      );
+      medicationDefinitionId = await findOrCreateMedicationDefinition(this.prisma, {
+        name: body.medication.name,
+        form: body.medication.form,
+        route: body.medication.route,
+        strength: body.medication.strength,
+        activeIngredientIds,
+      });
+    }
+
     const input: CreateProductInput = {
       name: body.name,
       sku: body.sku,
@@ -110,12 +144,12 @@ export class ProductsController {
       locationId,
       syncToSquare: body.syncToSquare !== false, // Default true
       categoryId: body.categoryId,
-      labId: body.labId,
+      labId,
       medicationType: body.medicationType,
-      activeIngredient: body.activeIngredient,
-      concentration: body.concentration,
+      medicationDefinitionId,
       presentation: body.presentation,
       requiresPrescription: body.requiresPrescription,
+      isControlled: body.isControlled,
     };
 
     const result = await this.productsService.createProduct(input);
@@ -152,6 +186,35 @@ export class ProductsController {
       message: `Synced ${result.synced}/${result.total} products to Square${result.failed > 0 ? ` (${result.failed} failed)` : ''}`,
       data: result,
     };
+  }
+
+  /**
+   * Catalog search: brand/generic/active-ingredient/SKU lookup, with generic
+   * alternatives surfaced when the requested brand is out of stock.
+   * GET /products/catalog-search?q=...&locationId=...
+   * NOTE: Must be BEFORE @Get(':id') so "catalog-search" is not captured as an id param.
+   */
+  @Get('catalog-search')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async catalogSearch(@Query('q') q: string, @Query('locationId') locationId: string, @Req() req: any) {
+    const targetLocationId = locationId || req.currentLocation?.locationId;
+    const result = await this.catalogSearchService.search(q || '', targetLocationId);
+    return { success: true, ...result };
+  }
+
+  /**
+   * List active ingredients (for the medication picker on Add Product)
+   * GET /products/active-ingredients
+   * NOTE: Must be BEFORE @Get(':id') so "active-ingredients" is not captured as an id param.
+   */
+  @Get('active-ingredients')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async listActiveIngredients() {
+    const activeIngredients = await this.prisma.activeIngredient.findMany({
+      select: { id: true, name: true, aliases: true },
+      orderBy: { name: 'asc' },
+    });
+    return { success: true, activeIngredients };
   }
 
   /**

@@ -50,7 +50,7 @@ const RULES: Array<{ category: CategoryName; pattern: RegExp }> = [
   { category: 'General/Misceláneos', pattern: /juguete|vaso entrenador|regalo/i },
 ];
 
-function stripAccents(s: string): string {
+export function stripAccents(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 

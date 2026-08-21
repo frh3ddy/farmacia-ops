@@ -21,6 +21,7 @@ export const NAV_SECTIONS: NavSection[] = [
     description: "Reference data and day-to-day sync",
     items: [
       { id: "locations", label: "Locations", status: "ready" },
+      { id: "catalog-search", label: "Catalog Search", status: "ready" },
       { id: "products", label: "Products", status: "ready" },
       { id: "add-product", label: "Add Product", status: "ready" },
       { id: "suppliers", label: "Suppliers", status: "ready" },

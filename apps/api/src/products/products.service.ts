@@ -20,10 +20,10 @@ export interface CreateProductInput {
   categoryId?: string;
   labId?: string;
   medicationType?: 'GENERICO' | 'DE_MARCA' | 'SIMILAR';
-  activeIngredient?: string;
-  concentration?: string;
+  medicationDefinitionId?: string;
   presentation?: string;
   requiresPrescription?: boolean;
+  isControlled?: boolean;
 }
 
 export interface UpdatePriceInput {
@@ -136,10 +136,10 @@ export class ProductsService {
       categoryId,
       labId,
       medicationType,
-      activeIngredient,
-      concentration,
+      medicationDefinitionId,
       presentation,
       requiresPrescription,
+      isControlled,
     } = input;
 
     this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} ${CURRENCY}`);
@@ -212,10 +212,10 @@ export class ProductsService {
         categoryId: categoryId || null,
         labId: labId || null,
         medicationType: medicationType || null,
-        activeIngredient: activeIngredient || null,
-        concentration: concentration || null,
+        medicationDefinitionId: medicationDefinitionId || null,
         presentation: presentation || null,
         requiresPrescription: requiresPrescription ?? false,
+        isControlled: isControlled ?? false,
       },
     });
 

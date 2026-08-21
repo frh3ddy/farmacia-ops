@@ -183,15 +183,17 @@ model Product {
   squareDataSyncedAt  DateTime? // When Square data was last synced
 
   // Pharmacy catalog attributes
-  labId                String?
-  medicationType       MedicationType?
-  activeIngredient     String? // Principio activo
-  concentration        String? // e.g. "500mg"
-  presentation         String? // e.g. "Caja c/20 tabletas"
-  requiresPrescription Boolean         @default(false)
+  labId                  String?
+  medicationType         MedicationType?
+  medicationDefinitionId String? // links to the underlying medication (brand/generic equivalence)
+  presentation           String? // e.g. "Caja c/20 tabletas"
+  requiresPrescription   Boolean          @default(false)
+  isControlled           Boolean          @default(false) // controlled/restricted substance
+  searchAliases          String[]         @default([]) // extra search synonyms/misspellings
 
-  category            Category?             @relation(fields: [categoryId], references: [id])
-  laboratory          Laboratory?           @relation(fields: [labId], references: [id])
+  category             Category?             @relation(fields: [categoryId], references: [id])
+  laboratory           Laboratory?           @relation(fields: [labId], references: [id])
+  medicationDefinition  MedicationDefinition? @relation(fields: [medicationDefinitionId], references: [id])
   suppliers           SupplierProduct[]
   supplierCostHistory SupplierCostHistory[]
   inventories         Inventory[]
@@ -203,12 +205,87 @@ model Product {
   receivings          InventoryReceiving[]
 
   createdAt DateTime @default(now())
+
+  @@index([medicationDefinitionId])
 }
 
 enum MedicationType {
   GENERICO
   DE_MARCA
   SIMILAR
+}
+
+// ============================================================================
+// Medication catalog: separates the underlying medication (ActiveIngredient +
+// MedicationDefinition) from the commercial Product/SKU, so brand-name and
+// generic products that are the *same medication* can be linked for
+// equivalence search without inferring anything from product names.
+// ============================================================================
+model ActiveIngredient {
+  id      String   @id @default(uuid())
+  name    String   @unique
+  aliases String[] @default([]) // spelling/regional variants, e.g. "Acetaminofén" for "Paracetamol"
+
+  ingredients MedicationDefinitionIngredient[]
+}
+
+enum PharmaceuticalForm {
+  TABLET
+  CAPSULE
+  SUSPENSION
+  SYRUP
+  CREAM
+  OINTMENT
+  GEL
+  INJECTION
+  DROPS
+  SPRAY
+  PATCH
+  SUPPOSITORY
+  INHALER
+  OTHER
+}
+
+enum AdministrationRoute {
+  ORAL
+  TOPICAL
+  INJECTABLE
+  OPHTHALMIC
+  OTIC
+  NASAL
+  RECTAL
+  VAGINAL
+  INHALED
+  SUBLINGUAL
+  OTHER
+}
+
+// Identity is (ingredient set, strength, form, route) — enforced in application
+// code (findOrCreateMedicationDefinition) since a many-to-many ingredient set
+// can't be expressed as a single DB unique constraint. Two Products are
+// considered equivalent alternatives iff they share a medicationDefinitionId.
+model MedicationDefinition {
+  id       String               @id @default(uuid())
+  name     String // display name, e.g. "Paracetamol 500 mg tablet"
+  form     PharmaceuticalForm
+  route    AdministrationRoute
+  strength String // canonical string, e.g. "500 mg", "250 mg/5 mL"
+
+  ingredients MedicationDefinitionIngredient[]
+  products    Product[]
+
+  @@index([form, route, strength])
+}
+
+model MedicationDefinitionIngredient {
+  medicationDefinitionId String
+  activeIngredientId     String
+  amount                 String? // e.g. "500 mg" when relevant per-ingredient (combination drugs)
+
+  medicationDefinition MedicationDefinition @relation(fields: [medicationDefinitionId], references: [id], onDelete: Cascade)
+  activeIngredient     ActiveIngredient     @relation(fields: [activeIngredientId], references: [id])
+
+  @@id([medicationDefinitionId, activeIngredientId])
 }
 
 model Category {
