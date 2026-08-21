@@ -21,6 +21,8 @@ model Location {
   cutoverLocks    CutoverLock[]
   adjustments     InventoryAdjustment[]
   receivings      InventoryReceiving[]
+  transfersOut    Transfer[] @relation("TransferFrom")
+  transfersIn     Transfer[] @relation("TransferTo")
 
   // Authentication relations
   devices     Device[]
@@ -220,6 +222,7 @@ model Product {
   costApprovals       CostApproval[]
   adjustments         InventoryAdjustment[]
   receivings          InventoryReceiving[]
+  transfers           Transfer[]
 
   createdAt DateTime @default(now())
 
@@ -397,6 +400,10 @@ model Inventory {
   // Created by receiving
   createdByReceiving InventoryReceiving? @relation("ReceivingCreatedBatch")
 
+  // Transfer: this lot as a ship-out source, or as the batch a receive created
+  transferLinesAsSource      TransferLine[] @relation("TransferLineSource")
+  createdByTransferLine      TransferLine?  @relation("TransferLineDestination")
+
   createdAt DateTime @default(now())
 
   // Note: Removed unique constraint on (productId, locationId, source) to allow multiple FIFO batches
@@ -535,6 +542,62 @@ enum AdjustmentType {
   BREAK_BULK_IN   // Received as loose units broken from a linked caja product (positive)
   WRITE_OFF       // General write-off
   OTHER           // Other reason (requires notes)
+}
+
+enum TransferStatus {
+  PENDING
+  IN_TRANSIT
+  RECEIVED
+  CANCELLED
+}
+
+// ============================================================================
+// Location transfers — move stock between locations for the SAME product,
+// preserving FIFO lot identity across the move (unlike break-bulk, which
+// preserves cost but blends it into one new lot for a DIFFERENT product).
+// Ship consumes FIFO from fromLocationId (via InventoryAdjustmentService,
+// TRANSFER_OUT); receive creates one Inventory row PER TransferLine at
+// toLocationId, each keeping that line's own unitCost and originalReceivedAt
+// so destination FIFO ordering isn't corrupted by transferred stock looking
+// "new". Never touches Sale/SaleItem — zero COGS/margin impact by construction.
+// ============================================================================
+model Transfer {
+  id             String         @id @default(uuid())
+  productId      String
+  fromLocationId String
+  toLocationId   String
+  quantity       Int // shipped, in the product's own inventory units
+  status         TransferStatus @default(PENDING)
+  shippedAt      DateTime?
+  receivedAt     DateTime?
+  createdBy      String?
+
+  product      Product  @relation(fields: [productId], references: [id])
+  fromLocation Location @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location @relation("TransferTo", fields: [toLocationId], references: [id])
+  lines        TransferLine[]
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+  @@index([status])
+}
+
+model TransferLine {
+  id                 String    @id @default(uuid())
+  transferId         String
+  sourceInventoryId  String // which origin lot this line drew from
+  quantity           Int // shipped from this lot
+  quantityReceived   Int? // null until received; discrepancy = quantity - quantityReceived
+  unitCost           Decimal
+  originalReceivedAt DateTime // preserved so destination FIFO ordering isn't corrupted
+  destinationInventoryId String? @unique // set once received
+
+  transfer             Transfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  sourceInventory      Inventory @relation("TransferLineSource", fields: [sourceInventoryId], references: [id])
+  destinationInventory Inventory? @relation("TransferLineDestination", fields: [destinationInventoryId], references: [id])
 }
 
 // ============================================================================

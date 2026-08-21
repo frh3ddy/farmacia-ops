@@ -49,6 +49,11 @@ interface InventoryValuationReport {
     totalValue: string;
     totalProducts: number;
     averageCostPerUnit: string;
+    // In-transit transfers: value only, not units (they're not yet countable
+    // stock at any specific location). Only populated for the consolidated
+    // (no locationId filter) view — in-transit stock belongs to neither
+    // location's own on-hand total.
+    inTransitValue?: string;
   };
   byProduct: Array<{
     productId: string;
@@ -408,6 +413,22 @@ export class InventoryReportsService {
       ? totalValue.div(totalUnits)
       : new Prisma.Decimal(0);
 
+    // In-transit transfers: excluded from both locations' on-hand by
+    // construction (no Inventory row exists for shipped-but-unreceived
+    // stock), but its value shouldn't just vanish from the consolidated
+    // total — only computed for the all-locations view.
+    let inTransitValue: Prisma.Decimal | undefined;
+    if (!locationId) {
+      const inTransitLines = await this.prisma.transferLine.findMany({
+        where: { transfer: { status: 'IN_TRANSIT', ...(productId && { productId }) } },
+        select: { quantity: true, unitCost: true },
+      });
+      inTransitValue = inTransitLines.reduce(
+        (sum, line) => sum.add(line.unitCost.mul(line.quantity)),
+        new Prisma.Decimal(0),
+      );
+    }
+
     return {
       asOfDate: now,
       locationId,
@@ -416,6 +437,7 @@ export class InventoryReportsService {
         totalValue: totalValue.toString(),
         totalProducts: productMap.size,
         averageCostPerUnit: avgCostPerUnit.toFixed(2),
+        ...(inTransitValue !== undefined && { inTransitValue: inTransitValue.toString() }),
       },
       byProduct,
       agingSummary: {
