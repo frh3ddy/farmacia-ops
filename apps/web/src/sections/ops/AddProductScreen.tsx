@@ -11,6 +11,10 @@ type PharmaceuticalForm =
 type AdministrationRoute =
   | "ORAL" | "TOPICAL" | "INJECTABLE" | "OPHTHALMIC" | "OTIC" | "NASAL" | "RECTAL"
   | "VAGINAL" | "INHALED" | "SUBLINGUAL" | "OTHER";
+type Empaque =
+  | "FRASCO" | "FRASCO_AMPULA" | "TUBO" | "BLISTER" | "SOBRE" | "AMPOLLETA"
+  | "GOTERO" | "AEROSOL" | "PARCHE" | "CAJA";
+type IngredientEntry = { name: string; valor: string; unidad: string };
 
 const MEDICATION_TYPES: { value: MedicationType; label: string }[] = [
   { value: "GENERICO", label: "Genérico" },
@@ -49,6 +53,21 @@ const ROUTES: { value: AdministrationRoute; label: string }[] = [
   { value: "OTHER", label: "Otra" },
 ];
 
+const EMPAQUES: { value: Empaque; label: string }[] = [
+  { value: "FRASCO", label: "Frasco" },
+  { value: "FRASCO_AMPULA", label: "Frasco ámpula" },
+  { value: "TUBO", label: "Tubo" },
+  { value: "BLISTER", label: "Blíster" },
+  { value: "SOBRE", label: "Sobre" },
+  { value: "AMPOLLETA", label: "Ampolleta" },
+  { value: "GOTERO", label: "Gotero" },
+  { value: "AEROSOL", label: "Aerosol" },
+  { value: "PARCHE", label: "Parche" },
+  { value: "CAJA", label: "Caja" },
+];
+
+const CONCENTRACION_UNIDADES = ["mg", "mg/ml", "%", "mcg", "UI"];
+
 const inputClass =
   "w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-3 py-2 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none";
 const labelClass = "mb-2 block text-sm font-medium text-(--color-ink-secondary)";
@@ -68,13 +87,18 @@ export function AddProductScreen() {
   const [labName, setLabName] = useState("");
   const [presentation, setPresentation] = useState("");
   const [medicationType, setMedicationType] = useState<MedicationType | "">("");
-  const [ingredientNames, setIngredientNames] = useState<string[]>([]);
+  const [ingredients, setIngredients] = useState<IngredientEntry[]>([]);
   const [ingredientInput, setIngredientInput] = useState("");
+  const [ingredientValorInput, setIngredientValorInput] = useState("");
+  const [ingredientUnidadInput, setIngredientUnidadInput] = useState("");
   const [strength, setStrength] = useState("");
   const [form, setForm] = useState<PharmaceuticalForm | "">("");
   const [route, setRoute] = useState<AdministrationRoute | "">("");
   const [requiresPrescription, setRequiresPrescription] = useState(false);
   const [isControlled, setIsControlled] = useState(false);
+  const [empaquePrimario, setEmpaquePrimario] = useState<Empaque | "">("");
+  const [empaqueSecundario, setEmpaqueSecundario] = useState<Empaque | "">("");
+  const [cantidad, setCantidad] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,10 +126,12 @@ export function AddProductScreen() {
 
   const addIngredient = () => {
     const trimmed = ingredientInput.trim();
-    if (trimmed && !ingredientNames.includes(trimmed)) {
-      setIngredientNames(prev => [...prev, trimmed]);
+    if (trimmed && !ingredients.some(i => i.name === trimmed)) {
+      setIngredients(prev => [...prev, { name: trimmed, valor: ingredientValorInput.trim(), unidad: ingredientUnidadInput }]);
     }
     setIngredientInput("");
+    setIngredientValorInput("");
+    setIngredientUnidadInput("");
   };
 
   const resetForm = () => {
@@ -118,20 +144,29 @@ export function AddProductScreen() {
     setLabName("");
     setPresentation("");
     setMedicationType("");
-    setIngredientNames([]);
+    setIngredients([]);
     setIngredientInput("");
+    setIngredientValorInput("");
+    setIngredientUnidadInput("");
     setStrength("");
     setForm("");
     setRoute("");
     setRequiresPrescription(false);
     setIsControlled(false);
+    setEmpaquePrimario("");
+    setEmpaqueSecundario("");
+    setCantidad("");
   };
 
   const handleSubmit = async () => {
     setError(null);
     setSuccessMessage(null);
 
-    if (!name.trim()) {
+    const hasMedicationInfo = isMedicine && ingredients.length > 0 && strength.trim() && form && route;
+
+    // For medicamento products the name can be derived from the ingredients —
+    // only require a typed name when there isn't enough medication info yet.
+    if (!hasMedicationInfo && !name.trim()) {
       setError("Product name is required");
       return;
     }
@@ -141,30 +176,39 @@ export function AddProductScreen() {
       return;
     }
 
-    const hasMedicationInfo = isMedicine && ingredientNames.length > 0 && strength.trim() && form && route;
+    const medicationDisplayName = `${ingredients.map(i => i.name).join(" + ")} ${strength.trim()} ${FORMS.find(f => f.value === form)?.label ?? ""}`.trim();
 
     setSubmitting(true);
     try {
       const body = await apiFetch<{ message: string; data: { product: { name: string } } }>("/products", {
         method: "POST",
         body: JSON.stringify({
-          name: name.trim(),
+          name: name.trim() || (hasMedicationInfo ? medicationDisplayName : ""),
+          nombreManual: isMedicine && name.trim() ? name.trim() : undefined,
           sku: sku.trim() || undefined,
           sellingPrice: price,
           costPrice: costPrice.trim() ? parseFloat(costPrice) : undefined,
           categoryId: subcategoryId || topCategoryId || undefined,
           labName: labName.trim() || undefined,
-          presentation: presentation.trim() || undefined,
+          presentation: !isMedicine ? presentation.trim() || undefined : undefined,
+          presentacionManual: isMedicine && presentation.trim() ? presentation.trim() : undefined,
           medicationType: isMedicine && medicationType ? medicationType : undefined,
           requiresPrescription: isMedicine ? requiresPrescription : undefined,
           isControlled: isMedicine ? isControlled : undefined,
+          empaquePrimario: isMedicine && empaquePrimario ? empaquePrimario : undefined,
+          empaqueSecundario: isMedicine && empaqueSecundario ? empaqueSecundario : undefined,
+          cantidad: isMedicine && cantidad.trim() ? parseInt(cantidad, 10) : undefined,
           medication: hasMedicationInfo
             ? {
-                name: `${ingredientNames.join(" + ")} ${strength.trim()} ${FORMS.find(f => f.value === form)?.label ?? ""}`.trim(),
+                name: medicationDisplayName,
                 form,
                 route,
                 strength: strength.trim(),
-                activeIngredientNames: ingredientNames,
+                activeIngredients: ingredients.map(i => ({
+                  name: i.name,
+                  concentracionValor: i.valor.trim() ? parseFloat(i.valor) : undefined,
+                  concentracionUnidad: i.unidad || undefined,
+                })),
               }
             : undefined,
           syncToSquare: false,
@@ -199,9 +243,14 @@ export function AddProductScreen() {
       <div className="space-y-6">
         <div>
           <label className={labelClass}>
-            Nombre comercial <span className="text-(--color-destructive)">*</span>
+            Nombre comercial {!isMedicine && <span className="text-(--color-destructive)">*</span>}
           </label>
-          <input value={name} onChange={e => setName(e.target.value)} className={inputClass} />
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder={isMedicine ? "Se genera automáticamente si se deja vacío" : undefined}
+            className={inputClass}
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -294,7 +343,7 @@ export function AddProductScreen() {
             <input
               value={presentation}
               onChange={e => setPresentation(e.target.value)}
-              placeholder="Caja c/20 tabletas"
+              placeholder={isMedicine ? "Se genera automáticamente si se deja vacío" : "Caja c/20 tabletas"}
               className={inputClass}
             />
           </div>
@@ -320,8 +369,27 @@ export function AddProductScreen() {
                     }
                   }}
                   placeholder="Paracetamol"
-                  className={inputClass}
+                  className={`${inputClass} flex-1`}
                 />
+                <input
+                  value={ingredientValorInput}
+                  onChange={e => setIngredientValorInput(e.target.value)}
+                  placeholder="500"
+                  type="number"
+                  className={`${inputClass} w-20`}
+                />
+                <select
+                  value={ingredientUnidadInput}
+                  onChange={e => setIngredientUnidadInput(e.target.value)}
+                  className={`${inputClass} w-24`}
+                >
+                  <option value="">–</option>
+                  {CONCENTRACION_UNIDADES.map(u => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                </select>
                 <datalist id="ingredient-suggestions">
                   {activeIngredients.map(i => (
                     <option key={i.id} value={i.name} />
@@ -335,18 +403,19 @@ export function AddProductScreen() {
                   Agregar
                 </button>
               </div>
-              {ingredientNames.length > 0 && (
+              {ingredients.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  {ingredientNames.map(n => (
+                  {ingredients.map(i => (
                     <span
-                      key={n}
+                      key={i.name}
                       className="flex items-center gap-1 rounded-full bg-(--color-accent)/10 px-2.5 py-0.5 text-xs font-medium text-(--color-accent)"
                     >
-                      {n}
+                      {i.name}
+                      {i.valor && ` ${i.valor}${i.unidad}`}
                       <button
                         type="button"
-                        onClick={() => setIngredientNames(prev => prev.filter(x => x !== n))}
-                        aria-label={`Quitar ${n}`}
+                        onClick={() => setIngredients(prev => prev.filter(x => x.name !== i.name))}
+                        aria-label={`Quitar ${i.name}`}
                         className="text-(--color-accent)/70 hover:text-(--color-accent)"
                       >
                         ×
@@ -388,6 +457,50 @@ export function AddProductScreen() {
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className={labelClass}>Empaque primario</label>
+                <select
+                  value={empaquePrimario}
+                  onChange={e => setEmpaquePrimario(e.target.value as Empaque | "")}
+                  className={inputClass}
+                >
+                  <option value="">Sin especificar</option>
+                  {EMPAQUES.map(e => (
+                    <option key={e.value} value={e.value}>
+                      {e.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Empaque secundario</label>
+                <select
+                  value={empaqueSecundario}
+                  onChange={e => setEmpaqueSecundario(e.target.value as Empaque | "")}
+                  className={inputClass}
+                >
+                  <option value="">Sin empaque exterior</option>
+                  {EMPAQUES.map(e => (
+                    <option key={e.value} value={e.value}>
+                      {e.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelClass}>Cantidad</label>
+                <input
+                  value={cantidad}
+                  onChange={e => setCantidad(e.target.value)}
+                  type="number"
+                  min={0}
+                  placeholder="20"
+                  className={inputClass}
+                />
               </div>
             </div>
 

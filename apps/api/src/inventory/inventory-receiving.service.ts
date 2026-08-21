@@ -77,6 +77,7 @@ export class InventoryReceivingService {
       this.squareClient = new SquareClient({
         token,
         environment: isSandbox ? SquareEnvironment.Sandbox : SquareEnvironment.Production,
+        version: '2025-01-23', // pinned so an SDK bump can't silently change behavior
       });
     }
     return this.squareClient;

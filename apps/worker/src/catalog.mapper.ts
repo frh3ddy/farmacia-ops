@@ -3,7 +3,7 @@ import { UnmappedVariationError, ProductNotFoundError } from './errors';
 
 /**
  * Map a Square variation ID to a Product ID using CatalogMapping table
- * 
+ *
  * Algorithm:
  * 1. Convert Square location ID to internal location ID
  * 2. Look up location-specific mapping (squareVariationId + locationId)
@@ -11,7 +11,7 @@ import { UnmappedVariationError, ProductNotFoundError } from './errors';
  * 4. Validate mapping exists (throw UnmappedVariationError if not)
  * 5. Validate product exists (throw ProductNotFoundError if not)
  * 6. Return productId
- * 
+ *
  * @param squareVariationId - ITEM_VARIATION.id from Square
  * @param squareLocationId - Square location_id string (e.g., "LKTAWFNPD1V05")
  * @param prismaClient - Prisma client instance (can be transaction client)
@@ -32,9 +32,9 @@ export async function mapVariationToProduct(
     where: { squareId: squareLocationId },
     select: { id: true },
   });
-  
+
   const internalLocationId = location?.id || null;
-  
+
   console.log('[DEBUG] [CATALOG_MAPPER] Location lookup:', {
     squareLocationId,
     internalLocationId,

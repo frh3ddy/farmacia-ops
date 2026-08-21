@@ -19,7 +19,7 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "npm run test --workspace=apps/api && npm run test --workspace=apps/web",
+    "test": "npm run test --workspace=apps/api && npm run test --workspace=apps/web && npm run test --workspace=apps/worker",
     "build": "npm run build --workspace=apps/worker && npm run build --workspace=apps/api && npm run build --workspace=apps/web",
     "build:worker": "npm run build --workspace=apps/worker",
     "build:api": "npm run build --workspace=apps/api",

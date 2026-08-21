@@ -10,6 +10,7 @@ import {
   UnmappedVariationError,
 } from './errors';
 import { mapVariationToProduct } from './catalog.mapper';
+import { consumeBatchesFifo, type ConsumedBatch, type FifoConsumptionResult } from './fifo';
 
 // Step-by-step tracing below runs on every checkout processed by this worker.
 // Unconditional console.log calls add synchronous I/O directly inside the
@@ -139,6 +140,7 @@ function getSquareClient(): SquareClient {
     squareClient = new SquareClient({
       token: squareAccessToken,
       environment: squareEnvironment,
+      version: '2025-01-23', // pinned so an SDK bump can't silently change behavior
     });
     debugLog('[DEBUG] [SQUARE_CLIENT] ✅ Square client initialized');
   }
@@ -149,17 +151,7 @@ function getSquareClient(): SquareClient {
 // Type Definitions
 // ============================================================================
 
-interface ConsumedBatch {
-  batchId: string;
-  quantityConsumed: number;
-  costContribution: Prisma.Decimal;
-}
-
-interface FIFOCostResult {
-  totalCost: Prisma.Decimal;
-  consumedBatches: ConsumedBatch[];
-  remainingQuantity: number;
-}
+type FIFOCostResult = FifoConsumptionResult;
 
 interface SaleItemInput {
   productId: string;
@@ -212,48 +204,22 @@ async function calculateFIFOCost(
     },
   });
 
-  // Step 2: Initialize accumulator
-  let remainingQty = quantitySold;
-  let totalCost = new Prisma.Decimal(0);
-  const consumedBatches: ConsumedBatch[] = [];
-
-  // Step 3: Consume batches sequentially
-  for (const batch of batches) {
-    if (remainingQty <= 0) {
-      break;
-    }
-
-    const qtyToConsume = Math.min(batch.quantity, remainingQty);
-    const costContribution = new Prisma.Decimal(batch.unitCost).mul(qtyToConsume);
-
-    totalCost = totalCost.add(costContribution);
-
-    consumedBatches.push({
-      batchId: batch.id,
-      quantityConsumed: qtyToConsume,
-      costContribution: costContribution,
-    });
-
-    remainingQty -= qtyToConsume;
-  }
+  // Step 2 & 3: Consume batches oldest-first (pure logic, see fifo.ts)
+  const result = consumeBatchesFifo(batches, quantitySold);
 
   // Step 4: Validate sufficient inventory
-  if (remainingQty > 0) {
-    const available = quantitySold - remainingQty;
+  if (result.remainingQuantity > 0) {
+    const available = quantitySold - result.remainingQuantity;
     throw new InsufficientInventoryError(
       productId,
       locationId,
       quantitySold,
       available,
-      remainingQty,
+      result.remainingQuantity,
     );
   }
 
-  return {
-    totalCost: totalCost,
-    consumedBatches: consumedBatches,
-    remainingQuantity: 0,
-  };
+  return result;
 }
 
 /**
@@ -306,7 +272,7 @@ async function deductInventory(
 /**
  * Process a single sale item: calculate FIFO cost, deduct inventory, create SaleItem record
  * All operations must be in a transaction (handled by caller)
- * 
+ *
  * FIFO AUDIT TRAIL: Records which inventory batches were consumed in InventoryConsumption table
  */
 async function processSaleItem(

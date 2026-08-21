@@ -24,6 +24,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "catalog-search", label: "Catalog Search", status: "ready" },
       { id: "products", label: "Products", status: "ready" },
       { id: "add-product", label: "Add Product", status: "ready" },
+      { id: "break-bulk", label: "Sueltos", status: "ready" },
       { id: "suppliers", label: "Suppliers", status: "ready" },
       { id: "catalog-mappings", label: "Catalog Mappings", status: "ready" },
       { id: "catalog-sync", label: "Catalog Sync", status: "ready" },

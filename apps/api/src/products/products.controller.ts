@@ -23,7 +23,7 @@ import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from '
 import { findOrCreateLaboratory } from './laboratory';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
+import { PharmaceuticalForm, AdministrationRoute, Empaque } from '@prisma/client';
 
 // DTOs
 interface CreateProductDto {
@@ -42,6 +42,15 @@ interface CreateProductDto {
   presentation?: string;
   requiresPrescription?: boolean;
   isControlled?: boolean;
+  // Derived naming/presentación inputs (see derived-naming.ts) — resolved
+  // name/presentation win over these when set.
+  empaquePrimario?: Empaque;
+  empaqueSecundario?: Empaque;
+  cantidad?: number;
+  nombreManual?: string;
+  presentacionManual?: string;
+  // Sueltos: links this (caja) product to its already-existing loose Product.
+  sueltoProductId?: string;
   // Either an existing definition id, or enough inline info to find-or-create one.
   medicationDefinitionId?: string;
   medication?: {
@@ -49,7 +58,7 @@ interface CreateProductDto {
     form: PharmaceuticalForm;
     route: AdministrationRoute;
     strength: string;
-    activeIngredientNames: string[];
+    activeIngredients: { name: string; concentracionValor?: number; concentracionUnidad?: string }[];
   };
 }
 
@@ -122,15 +131,19 @@ export class ProductsController {
     // gets resolved to an existing (or newly created) definition here.
     let medicationDefinitionId = body.medicationDefinitionId;
     if (!medicationDefinitionId && body.medication) {
-      const activeIngredientIds = await Promise.all(
-        body.medication.activeIngredientNames.map((n) => findOrCreateActiveIngredient(this.prisma, n)),
+      const ingredients = await Promise.all(
+        body.medication.activeIngredients.map(async (i) => ({
+          activeIngredientId: await findOrCreateActiveIngredient(this.prisma, i.name),
+          concentracionValor: i.concentracionValor,
+          concentracionUnidad: i.concentracionUnidad,
+        })),
       );
       medicationDefinitionId = await findOrCreateMedicationDefinition(this.prisma, {
         name: body.medication.name,
         form: body.medication.form,
         route: body.medication.route,
         strength: body.medication.strength,
-        activeIngredientIds,
+        ingredients,
       });
     }
 
@@ -150,6 +163,12 @@ export class ProductsController {
       presentation: body.presentation,
       requiresPrescription: body.requiresPrescription,
       isControlled: body.isControlled,
+      empaquePrimario: body.empaquePrimario,
+      empaqueSecundario: body.empaqueSecundario,
+      cantidad: body.cantidad,
+      nombreManual: body.nombreManual,
+      presentacionManual: body.presentacionManual,
+      sueltoProductId: body.sueltoProductId,
     };
 
     const result = await this.productsService.createProduct(input);
@@ -566,5 +585,23 @@ export class ProductsController {
         squareSynced: result.squareSynced,
       },
     };
+  }
+
+  /**
+   * Link an already-existing caja product to its already-existing loose
+   * counterpart, so break-bulk (POST /inventory/break-bulk) knows where
+   * converted stock goes. Pass sueltoProductId: null to remove the link.
+   * cantidad (base units per caja) is also settable here since break-bulk
+   * needs both — pass it if the product doesn't already have one set.
+   * Roles: OWNER, MANAGER
+   */
+  @Patch(':id/suelto-link')
+  @Roles('OWNER', 'MANAGER')
+  async setSueltoLink(
+    @Param('id') id: string,
+    @Body() body: { sueltoProductId: string | null; cantidad?: number },
+  ) {
+    const product = await this.productsService.setSueltoLink(id, body.sueltoProductId, body.cantidad);
+    return { success: true, data: { product } };
   }
 }

@@ -191,6 +191,23 @@ model Product {
   isControlled           Boolean          @default(false) // controlled/restricted substance
   searchAliases          String[]         @default([]) // extra search synonyms/misspellings
 
+  // Derived naming/presentación inputs — medicamento only. `name`/`presentation`
+  // above are the resolved display values (manual override, else derived from
+  // these + the MedicationDefinition's ingredients); see derived-naming.ts.
+  empaquePrimario   Empaque? // what touches the product: Frasco, Blíster, Ampolleta, ...
+  empaqueSecundario Empaque? // outer packaging, e.g. Caja — omitted if sold without one
+  cantidad          Int? // total base units in the outermost sellable package
+  nombreManual      String? // overrides the derived name when set
+  presentacionManual String? // overrides the derived presentación when set
+
+  // Sueltos: Caja and Suelto are two separate, already-existing Products
+  // (each its own Square item/inventory) — sueltoProductId links a caja
+  // product to its loose counterpart so break-bulk knows where converted
+  // stock goes. `cantidad` above doubles as the box->piece conversion factor.
+  sueltoProductId String?
+  sueltoProduct   Product?  @relation("BreakBulk", fields: [sueltoProductId], references: [id])
+  brokenFrom      Product[] @relation("BreakBulk")
+
   category             Category?             @relation(fields: [categoryId], references: [id])
   laboratory           Laboratory?           @relation(fields: [labId], references: [id])
   medicationDefinition  MedicationDefinition? @relation(fields: [medicationDefinitionId], references: [id])
@@ -280,12 +297,31 @@ model MedicationDefinition {
 model MedicationDefinitionIngredient {
   medicationDefinitionId String
   activeIngredientId     String
-  amount                 String? // e.g. "500 mg" when relevant per-ingredient (combination drugs)
+  // Per-ingredient concentration (combination drugs), split so deriveNombre
+  // can format "500mg/125mg" programmatically instead of parsing free text.
+  concentracionValor  Decimal?
+  concentracionUnidad String? // 'mg' | 'mg/ml' | '%' | 'mcg' | 'UI' | ...
+  // Explicit render order — medical convention (e.g. Amoxicilina always
+  // before Ácido Clavulánico), NOT alphabetical or insertion order.
+  orden Int @default(0)
 
   medicationDefinition MedicationDefinition @relation(fields: [medicationDefinitionId], references: [id], onDelete: Cascade)
   activeIngredient     ActiveIngredient     @relation(fields: [activeIngredientId], references: [id])
 
   @@id([medicationDefinitionId, activeIngredientId])
+}
+
+enum Empaque {
+  FRASCO
+  FRASCO_AMPULA
+  TUBO
+  BLISTER
+  SOBRE
+  AMPOLLETA
+  GOTERO
+  AEROSOL
+  PARCHE
+  CAJA
 }
 
 model Category {
@@ -495,6 +531,8 @@ enum AdjustmentType {
   RETURN          // Customer return (positive adjustment)
   TRANSFER_OUT    // Transferred to another location (negative)
   TRANSFER_IN     // Received from another location (positive)
+  BREAK_BULK_OUT  // Converted to loose units of a linked sueltoProduct (negative)
+  BREAK_BULK_IN   // Received as loose units broken from a linked caja product (positive)
   WRITE_OFF       // General write-off
   OTHER           // Other reason (requires notes)
 }

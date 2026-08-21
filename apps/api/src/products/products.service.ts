@@ -1,8 +1,9 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SquareClient, SquareEnvironment } from 'square';
-import { Prisma } from '@prisma/client';
+import { Prisma, Empaque } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { deriveNombre, derivePresentacion, type Sustancia } from './derived-naming';
 
 // Currency constant - must match Square merchant account currency
 // Square merchant is configured with USD
@@ -24,6 +25,14 @@ export interface CreateProductInput {
   presentation?: string;
   requiresPrescription?: boolean;
   isControlled?: boolean;
+  empaquePrimario?: Empaque;
+  empaqueSecundario?: Empaque;
+  cantidad?: number;
+  nombreManual?: string;
+  presentacionManual?: string;
+  // Sueltos: links this (caja) product to its already-existing loose
+  // counterpart Product, so break-bulk knows where converted stock goes.
+  sueltoProductId?: string;
 }
 
 export interface UpdatePriceInput {
@@ -100,6 +109,7 @@ export class ProductsService {
       this.squareClient = new SquareClient({
         token: squareAccessToken,
         environment: squareEnvironment,
+        version: '2025-01-23', // pinned so an SDK bump can't silently change behavior
       });
     }
     return this.squareClient;
@@ -140,6 +150,12 @@ export class ProductsService {
       presentation,
       requiresPrescription,
       isControlled,
+      empaquePrimario,
+      empaqueSecundario,
+      cantidad,
+      nombreManual,
+      presentacionManual,
+      sueltoProductId,
     } = input;
 
     this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} ${CURRENCY}`);
@@ -176,6 +192,30 @@ export class ProductsService {
       throw new NotFoundException(`Location ${locationId} not found`);
     }
 
+    // Derived naming/presentación: only for medicamento products
+    // (medicationDefinitionId set). 'otro' products keep the directly
+    // entered name/presentation untouched. Manual overrides always win.
+    let resolvedName = name.trim();
+    let resolvedPresentation = presentation?.trim() || null;
+    if (medicationDefinitionId) {
+      const definition = await this.prisma.medicationDefinition.findUnique({
+        where: { id: medicationDefinitionId },
+        include: { ingredients: { include: { activeIngredient: true } } },
+      });
+      if (definition) {
+        const sustancias: Sustancia[] = definition.ingredients.map((i) => ({
+          nombre: i.activeIngredient.name,
+          valor: i.concentracionValor !== null ? Number(i.concentracionValor) : null,
+          unidad: i.concentracionUnidad,
+          orden: i.orden,
+        }));
+        resolvedName = nombreManual?.trim() || deriveNombre(sustancias, definition.form);
+        resolvedPresentation =
+          presentacionManual?.trim() ||
+          derivePresentacion(definition.form, sustancias, cantidad ?? null, empaquePrimario ?? null, empaqueSecundario ?? null);
+      }
+    }
+
     let squareItemId: string | undefined;
     let squareVariationId: string | undefined;
     let squareSynced = false;
@@ -184,7 +224,7 @@ export class ProductsService {
     if (syncToSquare) {
       try {
         const squareResult = await this.createProductInSquare({
-          name,
+          name: resolvedName,
           sku,
           description,
           sellingPrice,
@@ -203,9 +243,9 @@ export class ProductsService {
     // Step 2: Create product in our database
     const product = await this.prisma.product.create({
       data: {
-        name: name.trim(),
+        name: resolvedName,
         sku: sku?.trim() || null,
-        squareProductName: name.trim(),
+        squareProductName: resolvedName,
         squareDescription: description || null,
         squareVariationName: 'Regular', // Simple product
         squareDataSyncedAt: squareSynced ? new Date() : null,
@@ -213,9 +253,15 @@ export class ProductsService {
         labId: labId || null,
         medicationType: medicationType || null,
         medicationDefinitionId: medicationDefinitionId || null,
-        presentation: presentation || null,
+        presentation: resolvedPresentation,
         requiresPrescription: requiresPrescription ?? false,
         isControlled: isControlled ?? false,
+        empaquePrimario: empaquePrimario || null,
+        empaqueSecundario: empaqueSecundario || null,
+        cantidad: cantidad ?? null,
+        nombreManual: nombreManual?.trim() || null,
+        presentacionManual: presentacionManual?.trim() || null,
+        sueltoProductId: sueltoProductId || null,
       },
     });
 
@@ -435,6 +481,7 @@ export class ProductsService {
 
     return { itemId, variationId };
   }
+
 
   /**
    * Update product selling price and sync to Square
@@ -1182,5 +1229,35 @@ export class ProductsService {
         hasSquareSync: mapping ? !mapping.squareVariationId.startsWith('local_') : false,
       },
     };
+  }
+
+  /**
+   * Link (or unlink) an already-existing caja product to its already-existing
+   * loose counterpart — the realistic entry point for sueltos, since Caja and
+   * Suelto are two separate products/Square items that already exist today.
+   */
+  async setSueltoLink(productId: string, sueltoProductId: string | null, cantidad?: number) {
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product) {
+      throw new NotFoundException(`Product ${productId} not found`);
+    }
+
+    if (sueltoProductId) {
+      if (sueltoProductId === productId) {
+        throw new BadRequestException('A product cannot be its own sueltoProduct');
+      }
+      const sueltoProduct = await this.prisma.product.findUnique({ where: { id: sueltoProductId } });
+      if (!sueltoProduct) {
+        throw new NotFoundException(`Product ${sueltoProductId} not found`);
+      }
+    }
+    if (cantidad !== undefined && cantidad <= 0) {
+      throw new BadRequestException('cantidad must be positive');
+    }
+
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { sueltoProductId, ...(cantidad !== undefined && { cantidad }) },
+    });
   }
 }
