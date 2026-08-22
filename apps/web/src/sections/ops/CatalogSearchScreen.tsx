@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "../../lib/apiFetch";
 
-type MedicationType = "GENERICO" | "DE_MARCA" | "SIMILAR" | null;
+type MedicationType = "GENERIC" | "BRAND" | "SIMILAR" | null;
 
 type EquivalentRef = {
   id: string;
@@ -35,8 +35,8 @@ type SearchResponse = {
 };
 
 const MEDICATION_TYPE_LABEL: Record<Exclude<MedicationType, null>, string> = {
-  GENERICO: "Genérico",
-  DE_MARCA: "Marca",
+  GENERIC: "Genérico",
+  BRAND: "Marca",
   SIMILAR: "Similar",
 };
 

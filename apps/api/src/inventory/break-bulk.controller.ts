@@ -3,9 +3,9 @@ import { BreakBulkService } from './break-bulk.service';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 
 interface BreakBulkDto {
-  cajaProductId: string;
+  boxProductId: string;
   locationId?: string;
-  cajaQuantity: number;
+  boxQuantity: number;
   reason?: string;
   notes?: string;
   syncToSquare?: boolean;
@@ -17,7 +17,7 @@ export class BreakBulkController {
   constructor(private readonly breakBulkService: BreakBulkService) {}
 
   /**
-   * Open N cajas of a product and add them as loose units of its linked
+   * Open N boxes of a product and add them as loose units of its linked
    * loose product. OWNER/MANAGER only — this moves real stock and cost basis.
    */
   @Post()
@@ -27,9 +27,9 @@ export class BreakBulkController {
     const currentEmployee = req.employee;
     const locationId = body.locationId || currentLocation?.locationId;
 
-    if (!body.cajaProductId || body.cajaQuantity === undefined) {
+    if (!body.boxProductId || body.boxQuantity === undefined) {
       throw new HttpException(
-        { success: false, message: 'Missing required fields: cajaProductId, cajaQuantity' },
+        { success: false, message: 'Missing required fields: boxProductId, boxQuantity' },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -38,9 +38,9 @@ export class BreakBulkController {
     }
 
     const result = await this.breakBulkService.breakBulk({
-      cajaProductId: body.cajaProductId,
+      boxProductId: body.boxProductId,
       locationId,
-      cajaQuantity: body.cajaQuantity,
+      boxQuantity: body.boxQuantity,
       reason: body.reason,
       notes: body.notes,
       syncToSquare: body.syncToSquare ?? true,
@@ -49,7 +49,7 @@ export class BreakBulkController {
 
     return {
       success: true,
-      message: `Broke ${body.cajaQuantity} caja(s) into ${result.looseUnitsCreated} loose units`,
+      message: `Broke ${body.boxQuantity} box(es) into ${result.looseUnitsCreated} loose units`,
       data: result,
     };
   }

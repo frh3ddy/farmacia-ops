@@ -11,6 +11,7 @@ import { CatalogSearchScreen } from "./sections/ops/CatalogSearchScreen";
 import { SuppliersScreen } from "./sections/ops/SuppliersScreen";
 import { CatalogMappingsScreen } from "./sections/ops/CatalogMappingsScreen";
 import { CatalogSyncScreen } from "./sections/ops/CatalogSyncScreen";
+import { CategoryKeywordsScreen } from "./sections/ops/CategoryKeywordsScreen";
 import { DevicesScreen } from "./sections/ops/DevicesScreen";
 import { WebhookTestScreen } from "./sections/dev-tools/WebhookTestScreen";
 import { SalesTestScreen } from "./sections/dev-tools/SalesTestScreen";
@@ -28,6 +29,7 @@ const SCREENS: Record<string, ComponentType> = {
   suppliers: SuppliersScreen,
   "catalog-mappings": CatalogMappingsScreen,
   "catalog-sync": CatalogSyncScreen,
+  "category-keywords": CategoryKeywordsScreen,
   devices: DevicesScreen,
   "webhook-test": WebhookTestScreen,
   "sales-test": SalesTestScreen,

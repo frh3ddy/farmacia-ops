@@ -1,9 +1,9 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SquareClient, SquareEnvironment } from 'square';
-import { Prisma, Empaque } from '@prisma/client';
+import { Prisma, PackagingType } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { deriveNombre, derivePresentacion, type Sustancia } from './derived-naming';
+import { deriveName, derivePresentation, type Substance } from './derived-naming';
 import { normalizeSearchAliases } from './catalog-search';
 
 // Currency constant - must match Square merchant account currency
@@ -21,19 +21,21 @@ export interface CreateProductInput {
   syncToSquare?: boolean; // Default true
   categoryId?: string;
   labId?: string;
-  medicationType?: 'GENERICO' | 'DE_MARCA' | 'SIMILAR';
+  medicationType?: 'GENERIC' | 'BRAND' | 'SIMILAR';
   medicationDefinitionId?: string;
   presentation?: string;
   requiresPrescription?: boolean;
   isControlled?: boolean;
-  empaquePrimario?: Empaque;
-  empaqueSecundario?: Empaque;
-  cantidad?: number;
-  nombreManual?: string;
-  presentacionManual?: string;
-  // Sueltos: links this (caja) product to its already-existing loose
+  primaryPackaging?: PackagingType;
+  secondaryPackaging?: PackagingType;
+  quantity?: number;
+  // Content of one primary package (e.g. ml per bottle) — see derived-naming.ts.
+  primaryContent?: number;
+  manualName?: string;
+  manualPresentation?: string;
+  // Sueltos: links this (box) product to its already-existing loose
   // counterpart Product, so break-bulk knows where converted stock goes.
-  sueltoProductId?: string;
+  looseProductId?: string;
   // Brand-name search tags (e.g. a generic's known brand names: "Tylenol",
   // "Panadol") — matched in catalog-search.service.ts, not a Product relation.
   searchAliases?: string[];
@@ -154,12 +156,13 @@ export class ProductsService {
       presentation,
       requiresPrescription,
       isControlled,
-      empaquePrimario,
-      empaqueSecundario,
-      cantidad,
-      nombreManual,
-      presentacionManual,
-      sueltoProductId,
+      primaryPackaging,
+      secondaryPackaging,
+      quantity,
+      primaryContent,
+      manualName,
+      manualPresentation,
+      looseProductId,
       searchAliases,
     } = input;
 
@@ -208,16 +211,23 @@ export class ProductsService {
         include: { ingredients: { include: { activeIngredient: true } } },
       });
       if (definition) {
-        const sustancias: Sustancia[] = definition.ingredients.map((i) => ({
-          nombre: i.activeIngredient.name,
-          valor: i.concentracionValor !== null ? Number(i.concentracionValor) : null,
-          unidad: i.concentracionUnidad,
-          orden: i.orden,
+        const substances: Substance[] = definition.ingredients.map((i) => ({
+          name: i.activeIngredient.name,
+          value: i.concentrationValue !== null ? Number(i.concentrationValue) : null,
+          unit: i.concentrationUnit,
+          order: i.order,
         }));
-        resolvedName = nombreManual?.trim() || deriveNombre(sustancias, definition.form);
+        resolvedName = manualName?.trim() || deriveName(substances, definition.form);
         resolvedPresentation =
-          presentacionManual?.trim() ||
-          derivePresentacion(definition.form, sustancias, cantidad ?? null, empaquePrimario ?? null, empaqueSecundario ?? null);
+          manualPresentation?.trim() ||
+          derivePresentation(
+            definition.form,
+            substances,
+            quantity ?? null,
+            primaryPackaging ?? null,
+            secondaryPackaging ?? null,
+            primaryContent ?? null,
+          );
       }
     }
 
@@ -261,12 +271,13 @@ export class ProductsService {
         presentation: resolvedPresentation,
         requiresPrescription: requiresPrescription ?? false,
         isControlled: isControlled ?? false,
-        empaquePrimario: empaquePrimario || null,
-        empaqueSecundario: empaqueSecundario || null,
-        cantidad: cantidad ?? null,
-        nombreManual: nombreManual?.trim() || null,
-        presentacionManual: presentacionManual?.trim() || null,
-        sueltoProductId: sueltoProductId || null,
+        primaryPackaging: primaryPackaging || null,
+        secondaryPackaging: secondaryPackaging || null,
+        quantity: quantity ?? null,
+        primaryContent: primaryContent ?? null,
+        manualName: manualName?.trim() || null,
+        manualPresentation: manualPresentation?.trim() || null,
+        looseProductId: looseProductId || null,
         searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
       },
     });
@@ -1238,32 +1249,32 @@ export class ProductsService {
   }
 
   /**
-   * Link (or unlink) an already-existing caja product to its already-existing
-   * loose counterpart — the realistic entry point for sueltos, since Caja and
-   * Suelto are two separate products/Square items that already exist today.
+   * Link (or unlink) an already-existing box product to its already-existing
+   * loose counterpart — the realistic entry point for sueltos, since Box and
+   * Loose are two separate products/Square items that already exist today.
    */
-  async setSueltoLink(productId: string, sueltoProductId: string | null, cantidad?: number) {
+  async setLooseProductLink(productId: string, looseProductId: string | null, quantity?: number) {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       throw new NotFoundException(`Product ${productId} not found`);
     }
 
-    if (sueltoProductId) {
-      if (sueltoProductId === productId) {
-        throw new BadRequestException('A product cannot be its own sueltoProduct');
+    if (looseProductId) {
+      if (looseProductId === productId) {
+        throw new BadRequestException('A product cannot be its own looseProduct');
       }
-      const sueltoProduct = await this.prisma.product.findUnique({ where: { id: sueltoProductId } });
-      if (!sueltoProduct) {
-        throw new NotFoundException(`Product ${sueltoProductId} not found`);
+      const looseProduct = await this.prisma.product.findUnique({ where: { id: looseProductId } });
+      if (!looseProduct) {
+        throw new NotFoundException(`Product ${looseProductId} not found`);
       }
     }
-    if (cantidad !== undefined && cantidad <= 0) {
-      throw new BadRequestException('cantidad must be positive');
+    if (quantity !== undefined && quantity <= 0) {
+      throw new BadRequestException('quantity must be positive');
     }
 
     return this.prisma.product.update({
       where: { id: productId },
-      data: { sueltoProductId, ...(cantidad !== undefined && { cantidad }) },
+      data: { looseProductId, ...(quantity !== undefined && { quantity }) },
     });
   }
 
@@ -1281,6 +1292,19 @@ export class ProductsService {
     return this.prisma.product.update({
       where: { id: productId },
       data: { searchAliases: normalizeSearchAliases(searchAliases) },
+    });
+  }
+
+  /** Set (replace) a category's symptom search keywords. */
+  async setCategorySymptomKeywords(categoryId: string, symptomKeywords: string[]) {
+    const category = await this.prisma.category.findUnique({ where: { id: categoryId } });
+    if (!category) {
+      throw new NotFoundException(`Category ${categoryId} not found`);
+    }
+
+    return this.prisma.category.update({
+      where: { id: categoryId },
+      data: { symptomKeywords: normalizeSearchAliases(symptomKeywords) },
     });
   }
 }

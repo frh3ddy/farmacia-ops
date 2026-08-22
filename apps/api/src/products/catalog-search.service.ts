@@ -2,7 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MedicationEquivalenceService } from './medication-equivalence.service';
 import { CATALOG_PRODUCT_INCLUDE, toProductView, type CatalogProductView } from './catalog-product-view';
-import { rankSearchCandidates, buildSearchResult, shouldShowAlternatives, matchSearchAlias, type MatchType } from './catalog-search';
+import {
+  rankSearchCandidates,
+  buildSearchResult,
+  shouldShowAlternatives,
+  matchSearchAlias,
+  matchSymptomKeyword,
+  type MatchType,
+} from './catalog-search';
 import { stripAccents } from '../inventory-migration/category-classifier';
 
 type SearchProductCandidate = CatalogProductView & { matchType: MatchType };
@@ -40,7 +47,7 @@ export class CatalogSearchService {
         )
     `;
 
-    const [skuMatches, nameMatches, aliasMatches, ingredientMatches, definitionMatches] = await Promise.all([
+    const [skuMatches, nameMatches, aliasMatches, ingredientMatches, definitionMatches, categoryMatches] = await Promise.all([
       this.prisma.product.findMany({
         where: { sku: { equals: q, mode: 'insensitive' }, isDiscontinued: false },
         include,
@@ -72,6 +79,12 @@ export class CatalogSearchService {
       this.prisma.medicationDefinition.findMany({
         where: { name: { contains: q, mode: 'insensitive' } },
         include: { products: { where: { isDiscontinued: false }, include } },
+      }),
+      this.prisma.category.findMany({
+        // Category count is small (~100 rows) — cheap to fetch every symptom-tagged
+        // category and substring-match in JS, same pattern as aliasMatches above.
+        where: { symptomKeywords: { isEmpty: false } },
+        include: { children: { select: { id: true } } },
       }),
     ]);
 
@@ -108,6 +121,31 @@ export class CatalogSearchService {
     for (const definition of definitionMatches) {
       for (const product of definition.products) {
         candidates.push({ ...toProductView(product, locationId), matchType: 'definition-contains' });
+      }
+    }
+
+    // Map each matched category (and its children, so a match on a parent
+    // category pulls in every subcategory's products too) to its match
+    // strength, so a product only inherits the exact tier from its own
+    // category — not from some other unrelated category that also matched.
+    const categoryIdToMatchType = new Map<string, 'category-keyword-exact' | 'category-keyword-contains'>();
+    for (const category of categoryMatches) {
+      const matchType = matchSymptomKeyword(category.symptomKeywords, normalizedQuery);
+      if (!matchType) continue;
+      for (const id of [category.id, ...category.children.map((c) => c.id)]) {
+        categoryIdToMatchType.set(id, matchType);
+      }
+    }
+    if (categoryIdToMatchType.size) {
+      const categoryProducts = await this.prisma.product.findMany({
+        where: { categoryId: { in: [...categoryIdToMatchType.keys()] }, isDiscontinued: false },
+        include,
+      });
+      for (const product of categoryProducts) {
+        candidates.push({
+          ...toProductView(product, locationId),
+          matchType: categoryIdToMatchType.get(product.categoryId!) ?? 'category-keyword-contains',
+        });
       }
     }
 

@@ -1,73 +1,103 @@
-import { deriveNombre, derivePresentacion, inferUnidadCantidad, type Sustancia } from './derived-naming';
+import { deriveName, derivePresentation, inferQuantityUnit, type Substance } from './derived-naming';
 
-const paracetamol: Sustancia = { nombre: 'Paracetamol', valor: 500, unidad: 'mg', orden: 1 };
-const amoxicilina: Sustancia = { nombre: 'Amoxicilina', valor: 500, unidad: 'mg', orden: 1 };
-const acidoClavulanico: Sustancia = { nombre: 'Ácido Clavulánico', valor: 125, unidad: 'mg', orden: 2 };
-const cafeina: Sustancia = { nombre: 'Cafeína', valor: 30, unidad: 'mg', orden: 3 };
+const paracetamol: Substance = { name: 'Paracetamol', value: 500, unit: 'mg', order: 1 };
+const amoxicillin: Substance = { name: 'Amoxicilina', value: 500, unit: 'mg', order: 1 };
+const clavulanicAcid: Substance = { name: 'Ácido Clavulánico', value: 125, unit: 'mg', order: 2 };
+const caffeine: Substance = { name: 'Cafeína', value: 30, unit: 'mg', order: 3 };
 
-describe('deriveNombre', () => {
+describe('deriveName', () => {
   it('single substance', () => {
-    expect(deriveNombre([paracetamol], 'TABLET')).toBe('Paracetamol 500mg Tableta');
+    expect(deriveName([paracetamol], 'TABLET')).toBe('Paracetamol 500mg Tableta');
   });
 
   it('2-substance combination', () => {
-    expect(deriveNombre([amoxicilina, acidoClavulanico], 'TABLET')).toBe(
+    expect(deriveName([amoxicillin, clavulanicAcid], 'TABLET')).toBe(
       'Amoxicilina/Ácido Clavulánico 500mg/125mg Tableta',
     );
   });
 
   it('3+-substance combination', () => {
-    expect(deriveNombre([amoxicilina, acidoClavulanico, cafeina], 'TABLET')).toBe(
+    expect(deriveName([amoxicillin, clavulanicAcid, caffeine], 'TABLET')).toBe(
       'Amoxicilina/Ácido Clavulánico/Cafeína 500mg/125mg/30mg Tableta',
     );
   });
 
-  it('respects orden regardless of array insertion order', () => {
-    expect(deriveNombre([acidoClavulanico, amoxicilina], 'TABLET')).toBe(
+  it('respects order regardless of array insertion order', () => {
+    expect(deriveName([clavulanicAcid, amoxicillin], 'TABLET')).toBe(
       'Amoxicilina/Ácido Clavulánico 500mg/125mg Tableta',
     );
   });
 });
 
-describe('derivePresentacion', () => {
-  it('sólido: forma category with empaqueSecundario present', () => {
-    expect(derivePresentacion('TABLET', [paracetamol], 20, 'BLISTER', 'CAJA')).toBe(
+describe('derivePresentation', () => {
+  it('sólido: form category with secondaryPackaging present', () => {
+    expect(derivePresentation('TABLET', [paracetamol], 20, 'BLISTER', 'BOX')).toBe(
       'Tableta 500mg — Caja c/20 tabletas',
     );
   });
 
-  it('líquido: forma category, empaquePrimario only (no secundario)', () => {
-    const solucion: Sustancia = { nombre: 'Paracetamol', valor: 120, unidad: 'mg/5ml', orden: 1 };
-    expect(derivePresentacion('SUSPENSION', [solucion], 60, 'FRASCO', null)).toBe(
+  it('líquido: form category, primaryPackaging only (no secondary)', () => {
+    const solution: Substance = { name: 'Paracetamol', value: 120, unit: 'mg/5ml', order: 1 };
+    expect(derivePresentation('SUSPENSION', [solution], 60, 'BOTTLE', null)).toBe(
       'Suspensión 120mg/5ml — Frasco 60ml',
     );
   });
 
-  it('semisólido: forma category (Crema/Ungüento/Gel)', () => {
-    const crema: Sustancia = { nombre: 'Hidrocortisona', valor: 1, unidad: '%', orden: 1 };
-    expect(derivePresentacion('CREAM', [crema], 30, 'TUBO', null)).toBe('Crema 1% — Tubo 30g');
+  it('semisólido: form category (Crema/Ungüento/Gel)', () => {
+    const cream: Substance = { name: 'Hidrocortisona', value: 1, unit: '%', order: 1 };
+    expect(derivePresentation('CREAM', [cream], 30, 'TUBE', null)).toBe('Crema 1% — Tubo 30g');
   });
 
-  it('empaqueSecundario omitted falls back to empaquePrimario-only phrasing', () => {
-    const result = derivePresentacion('TABLET', [paracetamol], 20, 'BLISTER', null);
+  it('secondaryPackaging omitted falls back to primaryPackaging-only phrasing', () => {
+    const result = derivePresentation('TABLET', [paracetamol], 20, 'BLISTER', null);
     expect(result).toBe('Tableta 500mg — Blíster 20piezas');
+  });
+
+  it('líquido nested packaging: bottle content and bottles-per-box are tracked separately', () => {
+    const solution: Substance = { name: 'Paracetamol', value: 120, unit: 'mg/5ml', order: 1 };
+    // 1 bottle of 10ml, 1 bottle per box — the exact "bottle inside a box" case.
+    const result = derivePresentation('SUSPENSION', [solution], 1, 'BOTTLE', 'BOX', 10);
+    expect(result).toBe('Suspensión 120mg/5ml — Frasco 10ml — Caja c/1 frascos');
+  });
+
+  it('líquido nested packaging: a case of several bottles', () => {
+    const solution: Substance = { name: 'Paracetamol', value: 120, unit: 'mg/5ml', order: 1 };
+    const result = derivePresentation('SUSPENSION', [solution], 12, 'BOTTLE', 'BOX', 10);
+    expect(result).toBe('Suspensión 120mg/5ml — Frasco 10ml — Caja c/12 frascos');
+  });
+
+  it('semisólido nested packaging: tubes in a box', () => {
+    const cream: Substance = { name: 'Hidrocortisona', value: 1, unit: '%', order: 1 };
+    const result = derivePresentation('CREAM', [cream], 6, 'TUBE', 'BOX', 30);
+    expect(result).toBe('Crema 1% — Tubo 30g — Caja c/6 tubos');
+  });
+
+  it('sólido nested packaging is unaffected — quantity stays the total piece count, not a blister count', () => {
+    // Regression: adding primaryContent must not change the existing sólido formula.
+    const result = derivePresentation('TABLET', [paracetamol], 20, 'BLISTER', 'BOX', 999);
+    expect(result).toBe('Tableta 500mg — Caja c/20 tabletas');
+  });
+
+  it('pluralizes a packaging label ending in a consonant correctly (Blíster -> blísteres, not "blísters")', () => {
+    const result = derivePresentation('SUSPENSION', [paracetamol], 3, 'BLISTER', 'BOX', 15);
+    expect(result).toContain('blísteres');
   });
 });
 
-describe('inferUnidadCantidad', () => {
+describe('inferQuantityUnit', () => {
   it('sólidos -> piezas', () => {
-    expect(inferUnidadCantidad('TABLET')).toBe('piezas');
-    expect(inferUnidadCantidad('CAPSULE')).toBe('piezas');
+    expect(inferQuantityUnit('TABLET')).toBe('piezas');
+    expect(inferQuantityUnit('CAPSULE')).toBe('piezas');
   });
 
   it('líquidos -> ml', () => {
-    expect(inferUnidadCantidad('SUSPENSION')).toBe('ml');
-    expect(inferUnidadCantidad('SYRUP')).toBe('ml');
+    expect(inferQuantityUnit('SUSPENSION')).toBe('ml');
+    expect(inferQuantityUnit('SYRUP')).toBe('ml');
   });
 
   it('semisólidos -> g', () => {
-    expect(inferUnidadCantidad('CREAM')).toBe('g');
-    expect(inferUnidadCantidad('OINTMENT')).toBe('g');
-    expect(inferUnidadCantidad('GEL')).toBe('g');
+    expect(inferQuantityUnit('CREAM')).toBe('g');
+    expect(inferQuantityUnit('OINTMENT')).toBe('g');
+    expect(inferQuantityUnit('GEL')).toBe('g');
   });
 });

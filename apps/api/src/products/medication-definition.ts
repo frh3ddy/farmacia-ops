@@ -13,8 +13,8 @@ export async function findOrCreateActiveIngredient(prisma: PrismaClient, name: s
 
 export type MedicationDefinitionIngredientInput = {
   activeIngredientId: string;
-  concentracionValor?: number;
-  concentracionUnidad?: string;
+  concentrationValue?: number;
+  concentrationUnit?: string;
 };
 
 export type MedicationDefinitionInput = {
@@ -62,9 +62,9 @@ export async function findOrCreateMedicationDefinition(
       ingredients: {
         create: input.ingredients.map((ingredient, index) => ({
           activeIngredientId: ingredient.activeIngredientId,
-          concentracionValor: ingredient.concentracionValor,
-          concentracionUnidad: ingredient.concentracionUnidad,
-          orden: index + 1,
+          concentrationValue: ingredient.concentrationValue,
+          concentrationUnit: ingredient.concentrationUnit,
+          order: index + 1,
         })),
       },
     },

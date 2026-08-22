@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { SupplierAutocompleteInput } from "./SupplierAutocompleteInput";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import type { CategoryOption, CostExtractionResult, ExtractedCostEntry, SupplierSuggestion } from "../../../lib/cutover/types";
@@ -62,6 +63,7 @@ export function ExtractionItemEditor({
   allCategories,
 }: ExtractionItemEditorProps) {
   const [showPriceDetails, setShowPriceDetails] = useState(false);
+  const [viewingImage, setViewingImage] = useState(false);
   // Raw text of whichever cost field is currently focused. A controlled
   // number input snaps back to its last committed value on every re-render,
   // so an in-progress edit (e.g. deleting down to "") needs to be tracked
@@ -119,7 +121,15 @@ export function ExtractionItemEditor({
     setNewEntrySupplierId(null);
     setNewEntryCost("");
     setNewEntryDate(cutoverDate);
+    setViewingImage(false);
   }, [result?.productId, cutoverDate]);
+
+  useEffect(() => {
+    if (!viewingImage) return;
+    const onKeyDown = (e: KeyboardEvent) => e.key === "Escape" && setViewingImage(false);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [viewingImage]);
 
   if (!result || !edited) {
     return <p className="py-8 text-center text-sm text-(--color-ink-tertiary)">No items need action</p>;
@@ -363,15 +373,47 @@ export function ExtractionItemEditor({
 
           {/* Right: product review */}
           <div className="space-y-4">
-            <div className="flex min-h-[200px] items-center justify-center rounded-lg bg-(--color-surface-inset) p-8">
+            <div className="flex h-48 w-48 items-center justify-center rounded-lg bg-(--color-surface-inset) mx-auto">
               {result.imageUrl && !hideProductImageForTransition ? (
-                <img src={result.imageUrl} alt={result.productName} className="max-h-48 max-w-full object-contain" />
+                <button
+                  type="button"
+                  onClick={() => setViewingImage(true)}
+                  className="h-full w-full cursor-zoom-in rounded-lg focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                  aria-label="View full-size image"
+                >
+                  <img src={result.imageUrl} alt={result.productName} className="h-full w-full object-contain p-4" />
+                </button>
               ) : (
-                <span className="text-sm text-(--color-ink-muted)">
+                <span className="px-4 text-center text-sm text-(--color-ink-muted)">
                   {hideProductImageForTransition ? "Loading next product…" : "No image available"}
                 </span>
               )}
             </div>
+
+            {viewingImage &&
+              result.imageUrl &&
+              createPortal(
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+                  onClick={() => setViewingImage(false)}
+                >
+                  <img
+                    src={result.imageUrl}
+                    alt={result.productName}
+                    onClick={e => e.stopPropagation()}
+                    className="max-h-full max-w-full rounded-lg object-contain"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setViewingImage(false)}
+                    aria-label="Close"
+                    className="absolute right-4 top-4 rounded-full bg-black/50 px-3 py-1.5 text-sm font-medium text-white hover:bg-black/70"
+                  >
+                    Close
+                  </button>
+                </div>,
+                document.body
+              )}
 
             {result.sellingPrice && (
               <div className="rounded-md border border-(--color-border-standard) bg-(--color-accent)/5 p-4">

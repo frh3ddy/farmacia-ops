@@ -5,8 +5,8 @@ type ProductOption = {
   id: string;
   name: string;
   sku: string | null;
-  cantidad: number | null;
-  sueltoProductId: string | null;
+  quantity: number | null;
+  looseProductId: string | null;
 };
 
 type ProductListResponse = { success: boolean; data: ProductOption[] };
@@ -64,7 +64,7 @@ function ProductPicker({
             <p className="text-(--color-ink)">{selected.name}</p>
             <p className="text-xs text-(--color-ink-tertiary)">
               {selected.sku ? `SKU ${selected.sku}` : "Sin SKU"}
-              {selected.cantidad != null && ` · cantidad ${selected.cantidad}`}
+              {selected.quantity != null && ` · cantidad ${selected.quantity}`}
             </p>
           </div>
           <button
@@ -103,8 +103,8 @@ function ProductPicker({
                   <p className="text-(--color-ink)">{p.name}</p>
                   <p className="text-xs text-(--color-ink-tertiary)">
                     {p.sku ? `SKU ${p.sku}` : "Sin SKU"}
-                    {p.cantidad != null && ` · cantidad ${p.cantidad}`}
-                    {p.sueltoProductId && " · ya vinculado"}
+                    {p.quantity != null && ` · cantidad ${p.quantity}`}
+                    {p.looseProductId && " · ya vinculado"}
                   </p>
                 </button>
               ))}
@@ -117,40 +117,40 @@ function ProductPicker({
 }
 
 function LinkProductsCard() {
-  const [caja, setCaja] = useState<ProductOption | null>(null);
-  const [suelto, setSuelto] = useState<ProductOption | null>(null);
-  const [cantidad, setCantidad] = useState("");
+  const [boxProduct, setBoxProduct] = useState<ProductOption | null>(null);
+  const [looseProduct, setLooseProduct] = useState<ProductOption | null>(null);
+  const [quantity, setQuantity] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (caja?.cantidad != null) setCantidad(String(caja.cantidad));
-  }, [caja]);
+    if (boxProduct?.quantity != null) setQuantity(String(boxProduct.quantity));
+  }, [boxProduct]);
 
   const handleSubmit = async () => {
     setError(null);
     setSuccessMessage(null);
-    if (!caja || !suelto) {
+    if (!boxProduct || !looseProduct) {
       setError("Elige el producto de caja y el producto suelto");
       return;
     }
-    const cantidadNum = cantidad.trim() ? parseInt(cantidad, 10) : undefined;
-    if (caja.cantidad == null && !cantidadNum) {
+    const quantityNum = quantity.trim() ? parseInt(quantity, 10) : undefined;
+    if (boxProduct.quantity == null && !quantityNum) {
       setError("Este producto no tiene cantidad (piezas por caja) — indícala");
       return;
     }
 
     setSubmitting(true);
     try {
-      await apiFetch(`/products/${caja.id}/suelto-link`, {
+      await apiFetch(`/products/${boxProduct.id}/loose-link`, {
         method: "PATCH",
-        body: JSON.stringify({ sueltoProductId: suelto.id, cantidad: cantidadNum }),
+        body: JSON.stringify({ looseProductId: looseProduct.id, quantity: quantityNum }),
       });
-      setSuccessMessage(`"${caja.name}" vinculado con "${suelto.name}".`);
-      setCaja(null);
-      setSuelto(null);
-      setCantidad("");
+      setSuccessMessage(`"${boxProduct.name}" vinculado con "${looseProduct.name}".`);
+      setBoxProduct(null);
+      setLooseProduct(null);
+      setQuantity("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo vincular");
     } finally {
@@ -178,14 +178,14 @@ function LinkProductsCard() {
         </div>
       )}
 
-      <ProductPicker label="Producto de caja" selected={caja} onSelect={setCaja} placeholder="Paracetamol 500mg Caja…" />
-      <ProductPicker label="Producto suelto" selected={suelto} onSelect={setSuelto} placeholder="Paracetamol 500mg Suelto…" />
+      <ProductPicker label="Producto de caja" selected={boxProduct} onSelect={setBoxProduct} placeholder="Paracetamol 500mg Caja…" />
+      <ProductPicker label="Producto suelto" selected={looseProduct} onSelect={setLooseProduct} placeholder="Paracetamol 500mg Suelto…" />
 
       <div>
         <label className={labelClass}>Cantidad (piezas por caja)</label>
         <input
-          value={cantidad}
-          onChange={e => setCantidad(e.target.value)}
+          value={quantity}
+          onChange={e => setQuantity(e.target.value)}
           type="number"
           min={1}
           placeholder="20"
@@ -205,8 +205,8 @@ function LinkProductsCard() {
 }
 
 function BreakBulkCard() {
-  const [caja, setCaja] = useState<ProductOption | null>(null);
-  const [cajaQuantity, setCajaQuantity] = useState("");
+  const [boxProduct, setBoxProduct] = useState<ProductOption | null>(null);
+  const [boxQuantity, setBoxQuantity] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ looseUnitsCreated: number; costPerLooseUnit: number } | null>(null);
@@ -214,15 +214,15 @@ function BreakBulkCard() {
   const handleSubmit = async () => {
     setError(null);
     setResult(null);
-    if (!caja) {
+    if (!boxProduct) {
       setError("Elige el producto de caja a abrir");
       return;
     }
-    if (!caja.sueltoProductId) {
+    if (!boxProduct.looseProductId) {
       setError("Este producto no está vinculado a un producto suelto — vincúlalo primero");
       return;
     }
-    const quantity = parseInt(cajaQuantity, 10);
+    const quantity = parseInt(boxQuantity, 10);
     if (isNaN(quantity) || quantity <= 0) {
       setError("Indica cuántas cajas vas a abrir");
       return;
@@ -234,11 +234,11 @@ function BreakBulkCard() {
         data: { looseUnitsCreated: number; costPerLooseUnit: number };
       }>("/inventory/break-bulk", {
         method: "POST",
-        body: JSON.stringify({ cajaProductId: caja.id, cajaQuantity: quantity }),
+        body: JSON.stringify({ boxProductId: boxProduct.id, boxQuantity: quantity }),
       });
       setResult(body.data);
-      setCaja(null);
-      setCajaQuantity("");
+      setBoxProduct(null);
+      setBoxQuantity("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo abrir la caja");
     } finally {
@@ -266,9 +266,9 @@ function BreakBulkCard() {
         </div>
       )}
 
-      <ProductPicker label="Producto de caja" selected={caja} onSelect={setCaja} placeholder="Paracetamol 500mg Caja…" />
+      <ProductPicker label="Producto de caja" selected={boxProduct} onSelect={setBoxProduct} placeholder="Paracetamol 500mg Caja…" />
 
-      {caja && !caja.sueltoProductId && (
+      {boxProduct && !boxProduct.looseProductId && (
         <p className="text-xs text-(--color-warning)">
           Este producto no tiene un producto suelto vinculado — vincúlalo arriba primero.
         </p>
@@ -277,8 +277,8 @@ function BreakBulkCard() {
       <div>
         <label className={labelClass}>Cajas a abrir</label>
         <input
-          value={cajaQuantity}
-          onChange={e => setCajaQuantity(e.target.value)}
+          value={boxQuantity}
+          onChange={e => setBoxQuantity(e.target.value)}
           type="number"
           min={1}
           placeholder="1"

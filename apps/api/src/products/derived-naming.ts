@@ -1,17 +1,17 @@
 /**
  * Pure name/presentación derivation for medicamento products. No DB access —
  * callers (products.service.ts) resolve a MedicationDefinition's ingredients
- * into Sustancia[] first, then call these. `name`/`presentation` on Product
- * are the resolved display values: nombreManual/presentacionManual wins when
+ * into Substance[] first, then call these. `name`/`presentation` on Product
+ * are the resolved display values: manualName/manualPresentation wins when
  * set, otherwise these derived strings are what gets stored.
  */
-import { Empaque, PharmaceuticalForm } from '@prisma/client';
+import { PackagingType, PharmaceuticalForm } from '@prisma/client';
 
-export type Sustancia = {
-  nombre: string;
-  valor: number | null;
-  unidad: string | null;
-  orden: number;
+export type Substance = {
+  name: string;
+  value: number | null;
+  unit: string | null;
+  order: number;
 };
 
 const FORM_LABELS: Record<PharmaceuticalForm, string> = {
@@ -31,79 +31,97 @@ const FORM_LABELS: Record<PharmaceuticalForm, string> = {
   OTHER: 'Otro',
 };
 
-const EMPAQUE_LABELS: Record<Empaque, string> = {
-  FRASCO: 'Frasco',
-  FRASCO_AMPULA: 'Frasco ámpula',
-  TUBO: 'Tubo',
+const PACKAGING_LABELS: Record<PackagingType, string> = {
+  BOTTLE: 'Frasco',
+  VIAL: 'Frasco ámpula',
+  TUBE: 'Tubo',
   BLISTER: 'Blíster',
-  SOBRE: 'Sobre',
-  AMPOLLETA: 'Ampolleta',
-  GOTERO: 'Gotero',
+  SACHET: 'Sobre',
+  AMPOULE: 'Ampolleta',
+  DROPPER_BOTTLE: 'Gotero',
   AEROSOL: 'Aerosol',
-  PARCHE: 'Parche',
-  CAJA: 'Caja',
+  PATCH: 'Parche',
+  BOX: 'Caja',
 };
 
-const SOLIDO_FORMS = new Set<PharmaceuticalForm>(['TABLET', 'CAPSULE', 'PATCH', 'SUPPOSITORY', 'INHALER', 'OTHER']);
-const LIQUIDO_FORMS = new Set<PharmaceuticalForm>(['SUSPENSION', 'SYRUP', 'DROPS', 'INJECTION', 'SPRAY']);
+const SOLID_FORMS = new Set<PharmaceuticalForm>(['TABLET', 'CAPSULE', 'PATCH', 'SUPPOSITORY', 'INHALER', 'OTHER']);
+const LIQUID_FORMS = new Set<PharmaceuticalForm>(['SUSPENSION', 'SYRUP', 'DROPS', 'INJECTION', 'SPRAY']);
 
 /** sólidos -> piezas, líquidos -> ml, semisólidos (Crema/Ungüento/Gel) -> g. */
-export function inferUnidadCantidad(forma: PharmaceuticalForm): 'piezas' | 'ml' | 'g' {
-  if (SOLIDO_FORMS.has(forma)) return 'piezas';
-  if (LIQUIDO_FORMS.has(forma)) return 'ml';
+export function inferQuantityUnit(form: PharmaceuticalForm): 'piezas' | 'ml' | 'g' {
+  if (SOLID_FORMS.has(form)) return 'piezas';
+  if (LIQUID_FORMS.has(form)) return 'ml';
   return 'g'; // CREAM, OINTMENT, GEL
 }
 
-function sortByOrden(sustancias: Sustancia[]): Sustancia[] {
-  return [...sustancias].sort((a, b) => a.orden - b.orden);
+function sortByOrder(substances: Substance[]): Substance[] {
+  return [...substances].sort((a, b) => a.order - b.order);
 }
 
-function concentracionResumen(sustancias: Sustancia[]): string {
-  return sortByOrden(sustancias)
-    .filter((s) => s.valor !== null && s.unidad !== null)
-    .map((s) => `${s.valor}${s.unidad}`)
+function concentrationSummary(substances: Substance[]): string {
+  return sortByOrder(substances)
+    .filter((s) => s.value !== null && s.unit !== null)
+    .map((s) => `${s.value}${s.unit}`)
     .join('/');
 }
 
 /** e.g. Amoxicilina/Ácido Clavulánico 500mg/125mg Tableta. Single-substance
  * products collapse naturally — no compound-vs-simple branch. */
-export function deriveNombre(sustancias: Sustancia[], forma: PharmaceuticalForm): string {
-  const names = sortByOrden(sustancias)
-    .map((s) => s.nombre)
+export function deriveName(substances: Substance[], form: PharmaceuticalForm): string {
+  const names = sortByOrder(substances)
+    .map((s) => s.name)
     .join('/');
-  const concentraciones = concentracionResumen(sustancias);
-  return [names, concentraciones, FORM_LABELS[forma]].filter(Boolean).join(' ');
+  const concentrations = concentrationSummary(substances);
+  return [names, concentrations, FORM_LABELS[form]].filter(Boolean).join(' ');
 }
 
-// ponytail: plain "-> lowercase + s" pluralization, not proper Spanish
-// morphology — every FORM_LABELS entry ends in a vowel so this holds; revisit
-// if a future forma label doesn't (e.g. ends in a consonant).
+// Spanish pluralization: -s after a vowel, -es after a consonant. Every
+// FORM_LABELS entry ends in a vowel; some PACKAGING_LABELS don't (Blíster,
+// Aerosol), so the consonant branch matters once packaging labels get
+// pluralized too (see derivePresentation's nested-packaging branch below).
 function pluralize(label: string): string {
-  return `${label.toLowerCase()}s`;
+  const lower = label.toLowerCase();
+  return /[aeiouáéíóúü]$/.test(lower) ? `${lower}s` : `${lower}es`;
 }
 
 /**
- * e.g. "Tableta 500mg — Caja c/20 tabletas" (empaqueSecundario present),
- * "Solución 120mg/5ml — Frasco 60ml" (primario only). Combo packs and
- * multi-frasco boxes won't reduce cleanly to this formula — presentacionManual
- * is the escape hatch for those, not a case this function tries to cover.
+ * e.g. "Tableta 500mg — Caja c/20 tabletas" (sólido, secondaryPackaging
+ * present — quantity is the total piece count; a blister's own count isn't
+ * tracked separately), "Solución 120mg/5ml — Frasco 60ml" (primary only).
+ *
+ * Líquidos/semisólidos with BOTH primaryPackaging and secondaryPackaging are
+ * different: the primary package (frasco/tubo) has its own meaningful
+ * content distinct from how many of them fit in the secondary package —
+ * e.g. "Solución 120mg/5ml — Frasco 10ml — Caja c/12 frascos". That content
+ * is `primaryContent`; `quantity` there means frascos/tubos per caja, not
+ * total ml. Sólidos don't need this split (see above), so primaryContent
+ * is only consulted for non-piezas forms with both packaging levels set.
+ *
+ * Combo packs and multi-frasco boxes of unusual shapes won't reduce cleanly
+ * to this formula — manualPresentation is the escape hatch for those.
  */
-export function derivePresentacion(
-  forma: PharmaceuticalForm,
-  sustancias: Sustancia[],
-  cantidad: number | null,
-  empaquePrimario: Empaque | null,
-  empaqueSecundario: Empaque | null,
+export function derivePresentation(
+  form: PharmaceuticalForm,
+  substances: Substance[],
+  quantity: number | null,
+  primaryPackaging: PackagingType | null,
+  secondaryPackaging: PackagingType | null,
+  primaryContent: number | null = null,
 ): string {
-  const basePart = [FORM_LABELS[forma], concentracionResumen(sustancias)].filter(Boolean).join(' ');
+  const basePart = [FORM_LABELS[form], concentrationSummary(substances)].filter(Boolean).join(' ');
+  const unit = inferQuantityUnit(form);
 
-  let empaquePart = '';
-  if (empaqueSecundario) {
-    empaquePart = `${EMPAQUE_LABELS[empaqueSecundario]} c/${cantidad ?? '?'} ${pluralize(FORM_LABELS[forma])}`;
-  } else if (empaquePrimario) {
-    const unidad = inferUnidadCantidad(forma);
-    empaquePart = `${EMPAQUE_LABELS[empaquePrimario]} ${cantidad ?? '?'}${unidad}`;
+  let packagingPart = '';
+  if (secondaryPackaging && primaryPackaging && unit !== 'piezas') {
+    const primaryLabel = PACKAGING_LABELS[primaryPackaging];
+    const primaryPart = `${primaryLabel} ${primaryContent ?? '?'}${unit}`;
+    const secondaryPart = `${PACKAGING_LABELS[secondaryPackaging]} c/${quantity ?? '?'} ${pluralize(primaryLabel)}`;
+    packagingPart = `${primaryPart} — ${secondaryPart}`;
+  } else if (secondaryPackaging) {
+    packagingPart = `${PACKAGING_LABELS[secondaryPackaging]} c/${quantity ?? '?'} ${pluralize(FORM_LABELS[form])}`;
+  } else if (primaryPackaging) {
+    packagingPart = `${PACKAGING_LABELS[primaryPackaging]} ${quantity ?? '?'}${unit}`;
   }
 
-  return empaquePart ? `${basePart} — ${empaquePart}` : basePart;
+  return packagingPart ? `${basePart} — ${packagingPart}` : basePart;
 }

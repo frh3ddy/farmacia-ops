@@ -12,10 +12,12 @@ export type MatchType =
   | 'name-exact'
   | 'alias-exact'
   | 'ingredient-exact'
+  | 'category-keyword-exact'
   | 'definition-contains'
   | 'alias-contains'
   | 'ingredient-contains'
-  | 'name-contains';
+  | 'name-contains'
+  | 'category-keyword-contains';
 
 export type SearchCandidate = EquivalenceCandidate & {
   matchType: MatchType;
@@ -29,10 +31,12 @@ const MATCH_SCORE: Record<MatchType, number> = {
   'name-exact': 90,
   'alias-exact': 88,
   'ingredient-exact': 80,
+  'category-keyword-exact': 70,
   'definition-contains': 65,
   'alias-contains': 63,
   'ingredient-contains': 60,
   'name-contains': 55,
+  'category-keyword-contains': 50,
 };
 
 /**
@@ -60,6 +64,16 @@ export function normalizeSearchAliases(tags: string[]): string[] {
 export function matchSearchAlias(aliases: string[], normalizedQuery: string): 'alias-exact' | 'alias-contains' | null {
   if (aliases.includes(normalizedQuery)) return 'alias-exact';
   if (aliases.some((a) => a.includes(normalizedQuery))) return 'alias-contains';
+  return null;
+}
+
+/** Same shape as matchSearchAlias, for Category.symptomKeywords (e.g. "fiebre" -> Analgésicos y antipiréticos). */
+export function matchSymptomKeyword(
+  keywords: string[],
+  normalizedQuery: string,
+): 'category-keyword-exact' | 'category-keyword-contains' | null {
+  if (keywords.includes(normalizedQuery)) return 'category-keyword-exact';
+  if (keywords.some((k) => k.includes(normalizedQuery))) return 'category-keyword-contains';
   return null;
 }
 

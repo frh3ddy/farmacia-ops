@@ -1,0 +1,132 @@
+{
+  "Analgésicos y antipiréticos": {
+    "sintomas": ["dolor", "dolor de cabeza", "fiebre", "cefalea", "migraña", "dolor muscular", "dolor de muelas", "calentura", "dolor de cuerpo"],
+    "marcas": ["Tempra", "Tylenol", "Advil", "Motrin", "Bayer", "Aspirina", "Mejoral", "Flanax", "Dolac", "Syndol", "Tabcin"],
+    "principios_activos": ["paracetamol", "ibuprofeno", "ácido acetilsalicílico", "naproxeno", "ketorolaco", "metamizol", "dipirona"]
+  },
+  "Antiinflamatorios": {
+    "sintomas": ["inflamación", "hinchazón", "dolor articular", "artritis", "golpe", "torcedura", "esguince", "tendinitis", "dolor de rodilla", "dolor de espalda"],
+    "marcas": ["Flanax", "Cataflam", "Voltaren", "Advil", "Motrin", "Arcoxia", "Celebrex", "Dolac", "Dolo-Neurobión", "Naxen", "Profenid", "Piroxicam"],
+    "principios_activos": ["naproxeno", "diclofenaco", "ibuprofeno", "ketorolaco", "meloxicam", "piroxicam", "celecoxib", "etoricoxib", "ketoprofeno", "indometacina"]
+  },
+  "Antibióticos": {
+    "sintomas": ["infección", "infección de garganta", "infección urinaria", "infección de oído", "amigdalitis", "sinusitis", "bronquitis", "pus", "infección de piel", "infección dental"],
+    "marcas": ["Amoxil", "Augmentin", "Bactrim", "Ampicilina", "Azitromicina", "Ciprofloxacino", "Cefalexina", "Keflex", "Zitromax", "Levofloxacino", "Pentrexyl"],
+    "principios_activos": ["amoxicilina", "amoxicilina/ácido clavulánico", "azitromicina", "ciprofloxacino", "levofloxacino", "cefalexina", "trimetoprima/sulfametoxazol", "ampicilina", "claritromicina", "metronidazol", "clindamicina", "penicilina"]
+  },
+  "Antigripales": {
+    "sintomas": ["gripe", "gripa", "resfriado", "catarro", "congestión nasal", "escurrimiento nasal", "malestar general", "cuerpo cortado", "nariz tapada", "estornudos"],
+    "marcas": ["Theraflu", "XL-3", "Desenfriol-D", "Tabcin", "Vick Pyrena", "Neogripal", "NyQuil", "DayQuil", "Dristan", "Antigripal", "Sensibit D"],
+    "principios_activos": ["paracetamol/fenilefrina/clorfenamina", "paracetamol/pseudoefedrina", "fenilefrina", "pseudoefedrina", "clorfenamina", "dextrometorfano"]
+  },
+  "Antitusivos y expectorantes": {
+    "sintomas": ["tos", "tos seca", "tos con flema", "flemas", "garganta irritada", "carraspera", "tos nocturna", "pecho congestionado"],
+    "marcas": ["Bisolvon", "Mucosolvan", "Dextrometorfano", "Robitussin", "Vick 44", "Tesalón Perlas", "Ambroxol", "Flutox", "Clenbunal", "Histiacil"],
+    "principios_activos": ["ambroxol", "bromhexina", "dextrometorfano", "guaifenesina", "benzonatato", "codeína", "acetilcisteína", "clenbuterol"]
+  },
+  "Antialérgicos": {
+    "sintomas": ["alergia", "comezón", "ronchas", "estornudos", "ojos llorosos", "urticaria", "rinitis", "picazón", "alergia en la piel", "ojos hinchados"],
+    "marcas": ["Allegra", "Claritin", "Zyrtec", "Benadryl", "Avapena", "Loratadina", "Polaramine", "Xyzal", "Celestamine", "Zaditen"],
+    "principios_activos": ["loratadina", "cetirizina", "fexofenadina", "desloratadina", "levocetirizina", "difenhidramina", "clorfenamina", "dexclorfeniramina", "betametasona/dexclorfeniramina"]
+  },
+  "Antiácidos y medicamentos gastrointestinales": {
+    "sintomas": ["agruras", "acidez", "reflujo", "gastritis", "indigestión", "dolor de estómago", "ardor estomacal", "eructos", "boca del estómago"],
+    "marcas": ["Pepcid", "Nexium", "Omeprazol", "Tums", "Melox", "Sal de Uvas Picot", "Peptobismol", "Mylanta", "Pantozol", "Esomeprazol"],
+    "principios_activos": ["omeprazol", "pantoprazol", "esomeprazol", "ranitidina", "famotidina", "hidróxido de aluminio/magnesio", "bicarbonato de sodio", "sucralfato", "lansoprazol"]
+  },
+  "Antidiarreicos": {
+    "sintomas": ["diarrea", "evacuaciones líquidas", "colitis", "dolor abdominal", "deshidratación", "infección estomacal", "heces sueltas"],
+    "marcas": ["Imodium", "Lomotil", "Kaopectate", "Vida Suero Oral", "Electrolit", "Pepto-Bismol", "Treda", "Hidrasec", "Smecta"],
+    "principios_activos": ["loperamida", "subsalicilato de bismuto", "difenoxilato/atropina", "racecadotrilo", "diosmectita", "sales de rehidratación oral", "caolín/pectina"]
+  },
+  "Laxantes": {
+    "sintomas": ["estreñimiento", "constipación", "no puedo ir al baño", "evacuación difícil", "heces duras", "inflamación abdominal"],
+    "marcas": ["Dulcolax", "Miralax", "Ciruelax", "Metamucil", "Senokot", "Phillips", "Fibercon", "Benefiber", "Senosilin"],
+    "principios_activos": ["bisacodilo", "polietilenglicol", "lactulosa", "psyllium", "senósidos", "hidróxido de magnesio", "docusato de sodio", "glicerina"]
+  },
+  "Antiespasmódicos": {
+    "sintomas": ["cólico", "espasmo", "retortijón", "dolor menstrual", "cólico menstrual", "calambres abdominales", "cólico biliar", "cólico renal"],
+    "marcas": ["Buscapina", "Espasmo Canulase", "Librax", "Spasmomen", "Duspatalin", "Buscapina Fem", "Ibufen Fem"],
+    "principios_activos": ["butilhioscina", "hioscina", "mebeverina", "pinaverio", "trimebutina", "pargeverina", "otilonio"]
+  },
+  "Antieméticos": {
+    "sintomas": ["vómito", "náusea", "mareo", "asco", "ganas de vomitar", "revuelto del estómago", "mareo por viaje", "vértigo"],
+    "marcas": ["Dramamine", "Bonadoxina", "Plasil", "Vonau", "Zofran", "Vomisin", "Primperan"],
+    "principios_activos": ["dimenhidrinato", "metoclopramida", "ondansetrón", "meclizina", "piridoxina/doxilamina", "domperidona", "clorpromazina"]
+  },
+  "Medicamentos para diabetes": {
+    "sintomas": ["diabetes", "azúcar alta", "glucosa alta", "insulina", "azúcar en la sangre", "mucha sed", "orinar mucho", "diabetes tipo 2"],
+    "marcas": ["Glucophage", "Januvia", "Amaryl", "Janumet", "Jardiance", "Victoza", "Lantus", "Humalog", "Forxiga", "Galvus", "Tresiba"],
+    "principios_activos": ["metformina", "glibenclamida", "glimepirida", "sitagliptina", "empagliflozina", "dapagliflozina", "liraglutida", "insulina glargina", "insulina lispro", "pioglitazona", "vildagliptina"]
+  },
+  "Medicamentos para hipertensión": {
+    "sintomas": ["presión alta", "hipertensión", "presión arterial", "dolor de cabeza por presión", "mareo por presión"],
+    "marcas": ["Losartán", "Enalapril", "Amlodipino", "Adalat", "Micardis", "Aprovel", "Concor", "Norvasc", "Atacand", "Co-Diován"],
+    "principios_activos": ["losartán", "enalapril", "amlodipino", "telmisartán", "irbesartán", "valsartán", "metoprolol", "nifedipino", "captopril", "hidroclorotiazida", "candesartán"]
+  },
+  "Medicamentos cardiovasculares": {
+    "sintomas": ["corazón", "arritmia", "palpitaciones", "circulación", "insuficiencia cardíaca", "angina de pecho", "dolor en el pecho", "piernas hinchadas"],
+    "marcas": ["Concor", "Isosorbida", "Lanoxin", "Plavix", "Eliquis", "Xarelto", "Aspirina Protect", "Cordarone"],
+    "principios_activos": ["metoprolol", "bisoprolol", "atenolol", "digoxina", "isosorbida", "clopidogrel", "apixabán", "rivaroxabán", "warfarina", "amiodarona", "furosemida", "espironolactona"]
+  },
+  "Medicamentos para colesterol": {
+    "sintomas": ["colesterol", "colesterol alto", "triglicéridos", "triglicéridos altos", "grasa en la sangre", "colesterol malo alto"],
+    "marcas": ["Lipitor", "Crestor", "Zocor", "Lopid", "Vytorin", "Ezetrol", "Bezafibrato"],
+    "principios_activos": ["atorvastatina", "rosuvastatina", "simvastatina", "pravastatina", "ezetimiba", "gemfibrozilo", "bezafibrato", "fenofibrato"]
+  },
+  "Vitaminas y minerales": {
+    "sintomas": ["vitaminas", "cansancio", "debilidad", "anemia", "falta de energía", "defensas bajas", "calcio", "hierro", "uñas débiles", "caída de cabello"],
+    "marcas": ["Centrum", "Supradyn", "Bedoyecta", "Neurobión", "Redoxon", "Ensure", "Ferranina", "Cal-C-Tose", "Pharmaton", "One-A-Day"],
+    "principios_activos": ["multivitamínico", "complejo B", "vitamina C", "ácido fólico", "hierro (sulfato ferroso)", "calcio", "vitamina D", "zinc", "magnesio", "vitamina B12", "vitamina E", "omega 3"]
+  },
+  "Medicamentos dermatológicos": {
+    "sintomas": ["acné", "sarpullido", "dermatitis", "eczema", "quemadura de sol", "piel seca", "rozadura", "manchas en la piel", "piel irritada", "psoriasis"],
+    "marcas": ["Bactroban", "Vitacilina", "Bepanthen", "Hidrocortisona", "Betametasona", "Fucidin", "Isdin", "Epiduo", "Peroxiben"],
+    "principios_activos": ["betametasona", "hidrocortisona", "mupirocina", "ácido fusídico", "retinoides", "peróxido de benzoílo", "adapaleno", "clindamicina tópica", "dexpantenol", "urea", "calamina"]
+  },
+  "Antifúngicos": {
+    "sintomas": ["hongos", "pie de atleta", "hongos en las uñas", "candidiasis", "tiña", "comezón entre los dedos", "uñas amarillas"],
+    "marcas": ["Lamisil", "Lotrimin", "Canesten", "Fluconazol", "Diflucan", "Nizoral", "Mykosert", "Onicolaquer"],
+    "principios_activos": ["terbinafina", "clotrimazol", "fluconazol", "ketoconazol", "itraconazol", "nistatina", "miconazol", "ciclopirox"]
+  },
+  "Antivirales": {
+    "sintomas": ["herpes", "herpes labial", "fuego labial", "varicela", "herpes zóster", "ampolla en el labio"],
+    "marcas": ["Zovirax", "Valtrex", "Famvir", "Tamiflu", "Aciclovir"],
+    "principios_activos": ["aciclovir", "valaciclovir", "famciclovir", "oseltamivir"]
+  },
+  "Antisépticos": {
+    "sintomas": ["herida", "cortada", "raspón", "desinfectar", "curación", "quemadura leve", "herida abierta"],
+    "marcas": ["Isodine", "Microdacyn", "Benzal", "Merthiolate", "Curitas", "Gasa estéril", "Bactroban"],
+    "principios_activos": ["yodopovidona", "ácido hipocloroso", "cloruro de benzalconio", "peróxido de hidrógeno", "alcohol isopropílico", "mupirocina", "sulfadiazina de plata"]
+  },
+  "Medicamentos oftálmicos": {
+    "sintomas": ["ojos rojos", "conjuntivitis", "ojo seco", "irritación ocular", "ojos irritados", "lagrimeo", "ojos cansados", "ardor en los ojos"],
+    "marcas": ["Sophixin", "Systane", "Lagricel", "Refresh", "Oftálmica", "Ciprofloxacino oftálmico", "Tobradex", "Visine"],
+    "principios_activos": ["ciprofloxacino oftálmico", "tobramicina", "tobramicina/dexametasona", "nafazolina", "carboximetilcelulosa", "hialuronato de sodio", "cloranfenicol oftálmico"]
+  },
+  "Medicamentos óticos": {
+    "sintomas": ["dolor de oído", "infección de oído", "otitis", "oído tapado", "zumbido", "comezón en el oído"],
+    "marcas": ["Otocerum", "Ciprodex", "Otomicina", "Synalar Ótico", "Sofradex"],
+    "principios_activos": ["ciprofloxacino/dexametasona ótico", "neomicina/polimixina", "hidrocortisona ótica", "fluocinolona ótica", "benzocaína ótica"]
+  },
+  "Medicamentos ginecológicos": {
+    "sintomas": ["infección vaginal", "flujo vaginal", "cólicos menstruales", "irregularidad menstrual", "menopausia", "comezón vaginal", "resequedad vaginal"],
+    "marcas": ["Canesten V", "Ginkan", "Premarin", "Metronidazol vaginal", "Clindamicina vaginal", "Gyno-Daktarin"],
+    "principios_activos": ["clotrimazol vaginal", "metronidazol vaginal", "clindamicina vaginal", "miconazol vaginal", "nistatina vaginal", "estrógenos conjugados", "progesterona"]
+  },
+  "Medicamentos urológicos": {
+    "sintomas": ["infección urinaria", "ardor al orinar", "dolor al orinar", "cistitis", "próstata", "incontinencia", "próstata inflamada"],
+    "marcas": ["Pyridium", "Macrodantina", "Urocit-K", "Flomax", "Finasteride", "Urixin"],
+    "principios_activos": ["fenazopiridina", "nitrofurantoína", "fosfomicina", "tamsulosina", "finasterida", "dutasterida", "ciprofloxacino", "trimetoprima/sulfametoxazol"]
+  },
+  "Medicamentos pediátricos": {
+    "sintomas": ["fiebre en niños", "cólico del bebé", "tos en niños", "gripa en niños", "diarrea en niños", "dolor de oído en niños", "parásitos en niños"],
+    "marcas": ["Tempra Infantil", "Motrin Infantil", "Pedialyte", "Dimetapp", "Ambroxol pediátrico", "Vermox", "Calpol", "Tylenol Infantil"],
+    "principios_activos": ["paracetamol pediátrico", "ibuprofeno pediátrico", "ambroxol pediátrico", "sales de rehidratación oral", "albendazol", "mebendazol", "trimetoprima/sulfametoxazol pediátrico"]
+  },
+  "Medicamentos para enfermedades respiratorias": {
+    "sintomas": ["asma", "falta de aire", "bronquitis", "sibilancias", "dificultad para respirar", "neumonía", "silbido al respirar", "opresión en el pecho"],
+    "marcas": ["Ventolin", "Salbutamol", "Seretide", "Symbicort", "Combivent", "Singulair", "Pulmicort", "Spiriva"],
+    "principios_activos": ["salbutamol", "fluticasona/salmeterol", "budesonida/formoterol", "ipratropio/salbutamol", "montelukast", "budesonida", "tiotropio", "beclometasona", "teofilina"]
+  }
+}

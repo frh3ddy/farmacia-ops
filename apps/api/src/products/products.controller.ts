@@ -19,11 +19,12 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ProductsService, CreateProductInput, UpdatePriceInput } from './products.service';
 import { CatalogSearchService } from './catalog-search.service';
+import { ReferenceDataService } from './reference-data.service';
 import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from './medication-definition';
 import { findOrCreateLaboratory } from './laboratory';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { PharmaceuticalForm, AdministrationRoute, Empaque } from '@prisma/client';
+import { PharmaceuticalForm, AdministrationRoute, PackagingType } from '@prisma/client';
 
 // DTOs
 interface CreateProductDto {
@@ -38,19 +39,20 @@ interface CreateProductDto {
   categoryId?: string;
   labId?: string;
   labName?: string; // find-or-create by name when labId isn't already known
-  medicationType?: 'GENERICO' | 'DE_MARCA' | 'SIMILAR';
+  medicationType?: 'GENERIC' | 'BRAND' | 'SIMILAR';
   presentation?: string;
   requiresPrescription?: boolean;
   isControlled?: boolean;
   // Derived naming/presentación inputs (see derived-naming.ts) — resolved
   // name/presentation win over these when set.
-  empaquePrimario?: Empaque;
-  empaqueSecundario?: Empaque;
-  cantidad?: number;
-  nombreManual?: string;
-  presentacionManual?: string;
-  // Sueltos: links this (caja) product to its already-existing loose Product.
-  sueltoProductId?: string;
+  primaryPackaging?: PackagingType;
+  secondaryPackaging?: PackagingType;
+  quantity?: number;
+  primaryContent?: number;
+  manualName?: string;
+  manualPresentation?: string;
+  // Sueltos: links this (box) product to its already-existing loose Product.
+  looseProductId?: string;
   // Brand-name search tags, e.g. a generic's known brand names.
   searchAliases?: string[];
   // Either an existing definition id, or enough inline info to find-or-create one.
@@ -60,7 +62,7 @@ interface CreateProductDto {
     form: PharmaceuticalForm;
     route: AdministrationRoute;
     strength: string;
-    activeIngredients: { name: string; concentracionValor?: number; concentracionUnidad?: string }[];
+    activeIngredients: { name: string; concentrationValue?: number; concentrationUnit?: string }[];
   };
 }
 
@@ -90,6 +92,7 @@ export class ProductsController {
     private readonly productsService: ProductsService,
     private readonly prisma: PrismaService,
     private readonly catalogSearchService: CatalogSearchService,
+    private readonly referenceDataService: ReferenceDataService,
   ) {}
 
   /**
@@ -136,8 +139,8 @@ export class ProductsController {
       const ingredients = await Promise.all(
         body.medication.activeIngredients.map(async (i) => ({
           activeIngredientId: await findOrCreateActiveIngredient(this.prisma, i.name),
-          concentracionValor: i.concentracionValor,
-          concentracionUnidad: i.concentracionUnidad,
+          concentrationValue: i.concentrationValue,
+          concentrationUnit: i.concentrationUnit,
         })),
       );
       medicationDefinitionId = await findOrCreateMedicationDefinition(this.prisma, {
@@ -165,12 +168,13 @@ export class ProductsController {
       presentation: body.presentation,
       requiresPrescription: body.requiresPrescription,
       isControlled: body.isControlled,
-      empaquePrimario: body.empaquePrimario,
-      empaqueSecundario: body.empaqueSecundario,
-      cantidad: body.cantidad,
-      nombreManual: body.nombreManual,
-      presentacionManual: body.presentacionManual,
-      sueltoProductId: body.sueltoProductId,
+      primaryPackaging: body.primaryPackaging,
+      secondaryPackaging: body.secondaryPackaging,
+      quantity: body.quantity,
+      primaryContent: body.primaryContent,
+      manualName: body.manualName,
+      manualPresentation: body.manualPresentation,
+      looseProductId: body.looseProductId,
       searchAliases: body.searchAliases,
     };
 
@@ -240,6 +244,24 @@ export class ProductsController {
   }
 
   /**
+   * Suggest brand names / active ingredients from the static Mexican-pharmacy
+   * reference dataset, for Add Product autocomplete — e.g. typing "Tempra"
+   * suggests paracetamol + Analgésicos y antipiréticos; typing "paracetamol"
+   * suggests known brand names to add as search-alias tags.
+   * GET /products/reference-suggestions?brandName=&ingredient=
+   * NOTE: Must be BEFORE @Get(':id') so "reference-suggestions" is not captured as an id param.
+   */
+  @Get('reference-suggestions')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async getReferenceSuggestions(@Query('brandName') brandName?: string, @Query('ingredient') ingredient?: string) {
+    return {
+      success: true,
+      brandMatches: brandName ? this.referenceDataService.suggestByBrandName(brandName) : [],
+      ingredientMatches: ingredient ? this.referenceDataService.suggestByIngredient(ingredient) : [],
+    };
+  }
+
+  /**
    * List categories (flat, with parentId for building the category/subcategory cascade)
    * GET /products/categories
    * NOTE: Must be BEFORE @Get(':id') so "categories" is not captured as an id param.
@@ -248,10 +270,22 @@ export class ProductsController {
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async listCategories() {
     const categories = await this.prisma.category.findMany({
-      select: { id: true, name: true, parentId: true },
+      select: { id: true, name: true, parentId: true, symptomKeywords: true },
       orderBy: { name: 'asc' },
     });
     return { success: true, categories };
+  }
+
+  /**
+   * Set (replace) a category's symptom search keywords (e.g. "fiebre",
+   * "gripa" -> Analgésicos y antipiréticos), so typing a symptom in catalog
+   * search surfaces products in that category. Roles: OWNER, MANAGER
+   */
+  @Patch('categories/:id/symptom-keywords')
+  @Roles('OWNER', 'MANAGER')
+  async setCategorySymptomKeywords(@Param('id') id: string, @Body() body: { symptomKeywords: string[] }) {
+    const category = await this.productsService.setCategorySymptomKeywords(id, body.symptomKeywords ?? []);
+    return { success: true, data: { category } };
   }
 
   /**
@@ -591,20 +625,20 @@ export class ProductsController {
   }
 
   /**
-   * Link an already-existing caja product to its already-existing loose
+   * Link an already-existing box product to its already-existing loose
    * counterpart, so break-bulk (POST /inventory/break-bulk) knows where
-   * converted stock goes. Pass sueltoProductId: null to remove the link.
-   * cantidad (base units per caja) is also settable here since break-bulk
+   * converted stock goes. Pass looseProductId: null to remove the link.
+   * quantity (base units per box) is also settable here since break-bulk
    * needs both — pass it if the product doesn't already have one set.
    * Roles: OWNER, MANAGER
    */
-  @Patch(':id/suelto-link')
+  @Patch(':id/loose-link')
   @Roles('OWNER', 'MANAGER')
-  async setSueltoLink(
+  async setLooseProductLink(
     @Param('id') id: string,
-    @Body() body: { sueltoProductId: string | null; cantidad?: number },
+    @Body() body: { looseProductId: string | null; quantity?: number },
   ) {
-    const product = await this.productsService.setSueltoLink(id, body.sueltoProductId, body.cantidad);
+    const product = await this.productsService.setLooseProductLink(id, body.looseProductId, body.quantity);
     return { success: true, data: { product } };
   }
 

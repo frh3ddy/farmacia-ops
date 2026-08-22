@@ -1,24 +1,26 @@
 import { useEffect, useState } from "react";
 import { apiFetch, ApiError } from "../../lib/apiFetch";
+import { CategoryPicker, type CategoryOption } from "./components/CategoryPicker";
 
-type CategoryOption = { id: string; name: string; parentId: string | null };
 type LaboratoryOption = { id: string; name: string };
 type ActiveIngredientOption = { id: string; name: string };
-type MedicationType = "GENERICO" | "DE_MARCA" | "SIMILAR";
+type MedicationType = "GENERIC" | "BRAND" | "SIMILAR";
 type PharmaceuticalForm =
   | "TABLET" | "CAPSULE" | "SUSPENSION" | "SYRUP" | "CREAM" | "OINTMENT" | "GEL"
   | "INJECTION" | "DROPS" | "SPRAY" | "PATCH" | "SUPPOSITORY" | "INHALER" | "OTHER";
 type AdministrationRoute =
   | "ORAL" | "TOPICAL" | "INJECTABLE" | "OPHTHALMIC" | "OTIC" | "NASAL" | "RECTAL"
   | "VAGINAL" | "INHALED" | "SUBLINGUAL" | "OTHER";
-type Empaque =
-  | "FRASCO" | "FRASCO_AMPULA" | "TUBO" | "BLISTER" | "SOBRE" | "AMPOLLETA"
-  | "GOTERO" | "AEROSOL" | "PARCHE" | "CAJA";
-type IngredientEntry = { name: string; valor: string; unidad: string };
+type PackagingType =
+  | "BOTTLE" | "VIAL" | "TUBE" | "BLISTER" | "SACHET" | "AMPOULE"
+  | "DROPPER_BOTTLE" | "AEROSOL" | "PATCH" | "BOX";
+type IngredientEntry = { name: string; value: string; unit: string };
+type BrandSuggestion = { brand: string; category: string; ingredients: string[] };
+type IngredientSuggestion = { ingredient: string; brands: string[] };
 
 const MEDICATION_TYPES: { value: MedicationType; label: string }[] = [
-  { value: "GENERICO", label: "Genérico" },
-  { value: "DE_MARCA", label: "De marca" },
+  { value: "GENERIC", label: "Genérico" },
+  { value: "BRAND", label: "De marca" },
   { value: "SIMILAR", label: "Similar" },
 ];
 
@@ -53,20 +55,20 @@ const ROUTES: { value: AdministrationRoute; label: string }[] = [
   { value: "OTHER", label: "Otra" },
 ];
 
-const EMPAQUES: { value: Empaque; label: string }[] = [
-  { value: "FRASCO", label: "Frasco" },
-  { value: "FRASCO_AMPULA", label: "Frasco ámpula" },
-  { value: "TUBO", label: "Tubo" },
+const PACKAGING_OPTIONS: { value: PackagingType; label: string }[] = [
+  { value: "BOTTLE", label: "Frasco" },
+  { value: "VIAL", label: "Frasco ámpula" },
+  { value: "TUBE", label: "Tubo" },
   { value: "BLISTER", label: "Blíster" },
-  { value: "SOBRE", label: "Sobre" },
-  { value: "AMPOLLETA", label: "Ampolleta" },
-  { value: "GOTERO", label: "Gotero" },
+  { value: "SACHET", label: "Sobre" },
+  { value: "AMPOULE", label: "Ampolleta" },
+  { value: "DROPPER_BOTTLE", label: "Gotero" },
   { value: "AEROSOL", label: "Aerosol" },
-  { value: "PARCHE", label: "Parche" },
-  { value: "CAJA", label: "Caja" },
+  { value: "PATCH", label: "Parche" },
+  { value: "BOX", label: "Caja" },
 ];
 
-const CONCENTRACION_UNIDADES = ["mg", "mg/ml", "%", "mcg", "UI"];
+const CONCENTRATION_UNITS = ["mg", "mg/ml", "%", "mcg", "UI"];
 
 const inputClass =
   "w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-3 py-2 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none";
@@ -89,17 +91,20 @@ export function AddProductScreen() {
   const [medicationType, setMedicationType] = useState<MedicationType | "">("");
   const [ingredients, setIngredients] = useState<IngredientEntry[]>([]);
   const [ingredientInput, setIngredientInput] = useState("");
-  const [ingredientValorInput, setIngredientValorInput] = useState("");
-  const [ingredientUnidadInput, setIngredientUnidadInput] = useState("");
+  const [ingredientValueInput, setIngredientValueInput] = useState("");
+  const [ingredientUnitInput, setIngredientUnitInput] = useState("");
   const [strength, setStrength] = useState("");
   const [form, setForm] = useState<PharmaceuticalForm | "">("");
   const [route, setRoute] = useState<AdministrationRoute | "">("");
   const [requiresPrescription, setRequiresPrescription] = useState(false);
   const [isControlled, setIsControlled] = useState(false);
-  const [empaquePrimario, setEmpaquePrimario] = useState<Empaque | "">("");
-  const [empaqueSecundario, setEmpaqueSecundario] = useState<Empaque | "">("");
-  const [cantidad, setCantidad] = useState("");
+  const [primaryPackaging, setPrimaryPackaging] = useState<PackagingType | "">("");
+  const [secondaryPackaging, setSecondaryPackaging] = useState<PackagingType | "">("");
+  const [quantity, setQuantity] = useState("");
+  const [primaryContent, setPrimaryContent] = useState("");
   const [searchAliases, setSearchAliases] = useState("");
+  const [brandSuggestions, setBrandSuggestions] = useState<BrandSuggestion[]>([]);
+  const [ingredientSuggestions, setIngredientSuggestions] = useState<IngredientSuggestion[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,19 +125,69 @@ export function AddProductScreen() {
       .finally(() => setLoadingOptions(false));
   }, []);
 
-  const topCategories = categories.filter(c => c.parentId === null);
-  const subcategories = categories.filter(c => c.parentId === topCategoryId);
-  const topCategoryName = topCategories.find(c => c.id === topCategoryId)?.name ?? "";
+  // Suggestions from the static Mexican-pharmacy reference dataset (brand
+  // names <-> active ingredients <-> category) — helps fill the form when the
+  // employee only knows the commercial name, not the generic/category.
+  useEffect(() => {
+    const trimmed = name.trim();
+    if (trimmed.length < 2) {
+      setBrandSuggestions([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      apiFetch<{ brandMatches: BrandSuggestion[] }>(`/products/reference-suggestions?brandName=${encodeURIComponent(trimmed)}`)
+        .then(body => setBrandSuggestions(body.brandMatches))
+        .catch(() => setBrandSuggestions([]));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [name]);
+
+  useEffect(() => {
+    const trimmed = ingredientInput.trim();
+    if (trimmed.length < 2) {
+      setIngredientSuggestions([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      apiFetch<{ ingredientMatches: IngredientSuggestion[] }>(`/products/reference-suggestions?ingredient=${encodeURIComponent(trimmed)}`)
+        .then(body => setIngredientSuggestions(body.ingredientMatches))
+        .catch(() => setIngredientSuggestions([]));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [ingredientInput]);
+
+  const topCategoryName = categories.find(c => c.id === topCategoryId && c.parentId === null)?.name ?? "";
   const isMedicine = topCategoryName === "Medicamentos";
+
+  const applyBrandSuggestion = (s: BrandSuggestion) => {
+    const subcategory = categories.find(c => c.name === s.category && c.parentId !== null);
+    if (subcategory) {
+      setTopCategoryId(subcategory.parentId!);
+      setSubcategoryId(subcategory.id);
+    }
+    setMedicationType("BRAND");
+    setBrandSuggestions([]);
+  };
+
+  const addSuggestedIngredient = (ingredientName: string) => {
+    if (!ingredients.some(i => i.name === ingredientName)) {
+      setIngredients(prev => [...prev, { name: ingredientName, value: "", unit: "" }]);
+    }
+  };
+
+  const addSuggestedAliasBrand = (brand: string) => {
+    const current = searchAliases.split(",").map(t => t.trim()).filter(Boolean);
+    if (!current.includes(brand)) setSearchAliases([...current, brand].join(", "));
+  };
 
   const addIngredient = () => {
     const trimmed = ingredientInput.trim();
     if (trimmed && !ingredients.some(i => i.name === trimmed)) {
-      setIngredients(prev => [...prev, { name: trimmed, valor: ingredientValorInput.trim(), unidad: ingredientUnidadInput }]);
+      setIngredients(prev => [...prev, { name: trimmed, value: ingredientValueInput.trim(), unit: ingredientUnitInput }]);
     }
     setIngredientInput("");
-    setIngredientValorInput("");
-    setIngredientUnidadInput("");
+    setIngredientValueInput("");
+    setIngredientUnitInput("");
   };
 
   const resetForm = () => {
@@ -147,16 +202,17 @@ export function AddProductScreen() {
     setMedicationType("");
     setIngredients([]);
     setIngredientInput("");
-    setIngredientValorInput("");
-    setIngredientUnidadInput("");
+    setIngredientValueInput("");
+    setIngredientUnitInput("");
     setStrength("");
     setForm("");
     setRoute("");
     setRequiresPrescription(false);
     setIsControlled(false);
-    setEmpaquePrimario("");
-    setEmpaqueSecundario("");
-    setCantidad("");
+    setPrimaryPackaging("");
+    setSecondaryPackaging("");
+    setQuantity("");
+    setPrimaryContent("");
     setSearchAliases("");
   };
 
@@ -164,12 +220,27 @@ export function AddProductScreen() {
     setError(null);
     setSuccessMessage(null);
 
-    const hasMedicationInfo = isMedicine && ingredients.length > 0 && strength.trim() && form && route;
+    // deriveName/derivePresentation (backend) build concentración straight
+    // from each ingredient's own value/unit — the separate "Concentración"
+    // field isn't used by either formula, it only exists to satisfy the DB's
+    // required MedicationDefinition.strength column. So compose it from the
+    // ingredients instead of forcing a redundant manual entry.
+    const composedStrength = ingredients
+      .filter(i => i.value.trim())
+      .map(i => `${i.value.trim()}${i.unit}`)
+      .join("/");
+    const resolvedStrength = strength.trim() || composedStrength;
+
+    const hasMedicationInfo = isMedicine && ingredients.length > 0 && form && route;
 
     // For medicamento products the name can be derived from the ingredients —
     // only require a typed name when there isn't enough medication info yet.
     if (!hasMedicationInfo && !name.trim()) {
-      setError("Product name is required");
+      setError(
+        isMedicine
+          ? "Escribe un nombre, o completa principio activo, forma y vía para generarlo automáticamente."
+          : "Product name is required",
+      );
       return;
     }
     const price = parseFloat(sellingPrice);
@@ -178,7 +249,7 @@ export function AddProductScreen() {
       return;
     }
 
-    const medicationDisplayName = `${ingredients.map(i => i.name).join(" + ")} ${strength.trim()} ${FORMS.find(f => f.value === form)?.label ?? ""}`.trim();
+    const medicationDisplayName = `${ingredients.map(i => i.name).join(" + ")} ${resolvedStrength} ${FORMS.find(f => f.value === form)?.label ?? ""}`.trim();
 
     setSubmitting(true);
     try {
@@ -186,20 +257,22 @@ export function AddProductScreen() {
         method: "POST",
         body: JSON.stringify({
           name: name.trim() || (hasMedicationInfo ? medicationDisplayName : ""),
-          nombreManual: isMedicine && name.trim() ? name.trim() : undefined,
+          manualName: isMedicine && name.trim() ? name.trim() : undefined,
           sku: sku.trim() || undefined,
           sellingPrice: price,
           costPrice: costPrice.trim() ? parseFloat(costPrice) : undefined,
           categoryId: subcategoryId || topCategoryId || undefined,
           labName: labName.trim() || undefined,
           presentation: !isMedicine ? presentation.trim() || undefined : undefined,
-          presentacionManual: isMedicine && presentation.trim() ? presentation.trim() : undefined,
+          manualPresentation: isMedicine && presentation.trim() ? presentation.trim() : undefined,
           medicationType: isMedicine && medicationType ? medicationType : undefined,
           requiresPrescription: isMedicine ? requiresPrescription : undefined,
           isControlled: isMedicine ? isControlled : undefined,
-          empaquePrimario: isMedicine && empaquePrimario ? empaquePrimario : undefined,
-          empaqueSecundario: isMedicine && empaqueSecundario ? empaqueSecundario : undefined,
-          cantidad: isMedicine && cantidad.trim() ? parseInt(cantidad, 10) : undefined,
+          primaryPackaging: isMedicine && primaryPackaging ? primaryPackaging : undefined,
+          secondaryPackaging: isMedicine && secondaryPackaging ? secondaryPackaging : undefined,
+          quantity: isMedicine && quantity.trim() ? parseInt(quantity, 10) : undefined,
+          primaryContent:
+            isMedicine && primaryContent.trim() ? parseInt(primaryContent, 10) : undefined,
           searchAliases:
             isMedicine && searchAliases.trim()
               ? searchAliases.split(",").map(t => t.trim()).filter(Boolean)
@@ -209,11 +282,11 @@ export function AddProductScreen() {
                 name: medicationDisplayName,
                 form,
                 route,
-                strength: strength.trim(),
+                strength: resolvedStrength,
                 activeIngredients: ingredients.map(i => ({
                   name: i.name,
-                  concentracionValor: i.valor.trim() ? parseFloat(i.valor) : undefined,
-                  concentracionUnidad: i.unidad || undefined,
+                  concentrationValue: i.value.trim() ? parseFloat(i.value) : undefined,
+                  concentrationUnit: i.unit || undefined,
                 })),
               }
             : undefined,
@@ -257,6 +330,33 @@ export function AddProductScreen() {
             placeholder={isMedicine ? "Se genera automáticamente si se deja vacío" : undefined}
             className={inputClass}
           />
+          {brandSuggestions.length > 0 && (
+            <div className="mt-1.5 space-y-1.5">
+              {brandSuggestions.map((s, i) => (
+                <div key={i} className="rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2.5 py-1.5">
+                  <button
+                    type="button"
+                    onClick={() => applyBrandSuggestion(s)}
+                    className="text-left text-xs text-(--color-ink-secondary) hover:text-(--color-ink)"
+                  >
+                    <span className="font-medium text-(--color-ink)">{s.brand}</span> — usar categoría "{s.category}"
+                  </button>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {s.ingredients.map(ing => (
+                      <button
+                        key={ing}
+                        type="button"
+                        onClick={() => addSuggestedIngredient(ing)}
+                        className="rounded-full bg-(--color-accent)/10 px-2 py-0.5 text-xs text-(--color-accent) hover:bg-(--color-accent)/20"
+                      >
+                        + {ing}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -291,42 +391,13 @@ export function AddProductScreen() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>Categoría</label>
-            <select
-              value={topCategoryId}
-              onChange={e => {
-                setTopCategoryId(e.target.value);
-                setSubcategoryId("");
-              }}
-              className={inputClass}
-            >
-              <option value="">Sin categoría</option>
-              {topCategories.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Subcategoría</label>
-            <select
-              value={subcategoryId}
-              onChange={e => setSubcategoryId(e.target.value)}
-              disabled={!topCategoryId || subcategories.length === 0}
-              className={`${inputClass} disabled:opacity-50`}
-            >
-              <option value="">{topCategoryId ? "Sin subcategoría" : "Elige una categoría primero"}</option>
-              {subcategories.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <CategoryPicker
+          categories={categories}
+          topCategoryId={topCategoryId}
+          subcategoryId={subcategoryId}
+          onTopCategoryChange={setTopCategoryId}
+          onSubcategoryChange={setSubcategoryId}
+        />
 
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -375,22 +446,22 @@ export function AddProductScreen() {
                     }
                   }}
                   placeholder="Paracetamol"
-                  className={`${inputClass} flex-1`}
+                  className={`${inputClass}`}
                 />
                 <input
-                  value={ingredientValorInput}
-                  onChange={e => setIngredientValorInput(e.target.value)}
+                  value={ingredientValueInput}
+                  onChange={e => setIngredientValueInput(e.target.value)}
                   placeholder="500"
                   type="number"
-                  className={`${inputClass} w-20`}
+                  className={`${inputClass}`}
                 />
                 <select
-                  value={ingredientUnidadInput}
-                  onChange={e => setIngredientUnidadInput(e.target.value)}
-                  className={`${inputClass} w-24`}
+                  value={ingredientUnitInput}
+                  onChange={e => setIngredientUnitInput(e.target.value)}
+                  className={`${inputClass}`}
                 >
                   <option value="">–</option>
-                  {CONCENTRACION_UNIDADES.map(u => (
+                  {CONCENTRATION_UNITS.map(u => (
                     <option key={u} value={u}>
                       {u}
                     </option>
@@ -417,7 +488,7 @@ export function AddProductScreen() {
                       className="flex items-center gap-1 rounded-full bg-(--color-accent)/10 px-2.5 py-0.5 text-xs font-medium text-(--color-accent)"
                     >
                       {i.name}
-                      {i.valor && ` ${i.valor}${i.unidad}`}
+                      {i.value && ` ${i.value}${i.unit}`}
                       <button
                         type="button"
                         onClick={() => setIngredients(prev => prev.filter(x => x.name !== i.name))}
@@ -438,7 +509,7 @@ export function AddProductScreen() {
                 <input
                   value={strength}
                   onChange={e => setStrength(e.target.value)}
-                  placeholder="500 mg"
+                  placeholder="Se genera de los principios activos si se deja vacío"
                   className={inputClass}
                 />
               </div>
@@ -466,47 +537,74 @@ export function AddProductScreen() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Empaque primario</label>
                 <select
-                  value={empaquePrimario}
-                  onChange={e => setEmpaquePrimario(e.target.value as Empaque | "")}
+                  value={primaryPackaging}
+                  onChange={e => setPrimaryPackaging(e.target.value as PackagingType | "")}
                   className={inputClass}
                 >
                   <option value="">Sin especificar</option>
-                  {EMPAQUES.map(e => (
+                  {PACKAGING_OPTIONS.map(e => (
                     <option key={e.value} value={e.value}>
                       {e.label}
                     </option>
                   ))}
                 </select>
+                <p className="mt-1 text-xs text-(--color-ink-tertiary)">
+                  Lo que toca el producto directamente (ej. frasco, tubo, blíster) — nunca una caja.
+                </p>
               </div>
+              <div>
+                <label className={labelClass}>Contenido del envase primario</label>
+                <input
+                  value={primaryContent}
+                  onChange={e => setPrimaryContent(e.target.value)}
+                  type="number"
+                  min={0}
+                  placeholder="10"
+                  className={inputClass}
+                />
+                <p className="mt-1 text-xs text-(--color-ink-tertiary)">
+                  Ej. ml en un frasco o g en un tubo — solo aplica si hay empaque secundario y la forma no es sólida.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Empaque secundario</label>
                 <select
-                  value={empaqueSecundario}
-                  onChange={e => setEmpaqueSecundario(e.target.value as Empaque | "")}
+                  value={secondaryPackaging}
+                  onChange={e => setSecondaryPackaging(e.target.value as PackagingType | "")}
                   className={inputClass}
                 >
                   <option value="">Sin empaque exterior</option>
-                  {EMPAQUES.map(e => (
+                  {PACKAGING_OPTIONS.map(e => (
                     <option key={e.value} value={e.value}>
                       {e.label}
                     </option>
                   ))}
                 </select>
+                <p className="mt-1 text-xs text-(--color-ink-tertiary)">
+                  El empaque exterior que lo contiene, si aplica (ej. una caja que envuelve el frasco).
+                </p>
               </div>
               <div>
                 <label className={labelClass}>Cantidad</label>
                 <input
-                  value={cantidad}
-                  onChange={e => setCantidad(e.target.value)}
+                  value={quantity}
+                  onChange={e => setQuantity(e.target.value)}
                   type="number"
                   min={0}
                   placeholder="20"
                   className={inputClass}
                 />
+                <p className="mt-1 text-xs text-(--color-ink-tertiary)">
+                  Sólidos: total de piezas en el empaque secundario. Líquidos/semisólidos con ambos empaques:
+                  envases primarios por empaque secundario (ej. frascos por caja).
+                </p>
               </div>
             </div>
 
@@ -538,6 +636,20 @@ export function AddProductScreen() {
                 Separadas por comas. Para que este genérico aparezca al buscar una marca aunque no exista un
                 producto de esa marca.
               </p>
+              {ingredientSuggestions.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {[...new Set(ingredientSuggestions.flatMap(s => s.brands))].map(brand => (
+                    <button
+                      key={brand}
+                      type="button"
+                      onClick={() => addSuggestedAliasBrand(brand)}
+                      className="rounded-full bg-(--color-accent)/10 px-2 py-0.5 text-xs text-(--color-accent) hover:bg-(--color-accent)/20"
+                    >
+                      + {brand}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex gap-6">
