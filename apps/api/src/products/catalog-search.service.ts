@@ -28,21 +28,26 @@ export class CatalogSearchService {
 
     const include = CATALOG_PRODUCT_INCLUDE(locationId);
 
+    // Prisma's `contains` can't ignore accents, so "Suspension" would miss a
+    // product named "Suspensión" — translate() strips accents at the DB level
+    // (native to Postgres, no unaccent extension needed) before comparing.
+    const nameMatchIds = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "Product"
+      WHERE "isDiscontinued" = false
+        AND (
+          POSITION(${normalizedQuery} IN translate(lower(name), 'áéíóúñü', 'aeiounu')) > 0
+          OR POSITION(${normalizedQuery} IN translate(lower(COALESCE("squareProductName", '')), 'áéíóúñü', 'aeiounu')) > 0
+        )
+    `;
+
     const [skuMatches, nameMatches, aliasMatches, ingredientMatches, definitionMatches] = await Promise.all([
       this.prisma.product.findMany({
         where: { sku: { equals: q, mode: 'insensitive' }, isDiscontinued: false },
         include,
       }),
-      this.prisma.product.findMany({
-        where: {
-          isDiscontinued: false,
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { squareProductName: { contains: q, mode: 'insensitive' } },
-          ],
-        },
-        include,
-      }),
+      nameMatchIds.length
+        ? this.prisma.product.findMany({ where: { id: { in: nameMatchIds.map((r) => r.id) } }, include })
+        : Promise.resolve([]),
       this.prisma.product.findMany({
         // Prisma's array `has` is exact-membership only, so this can't filter
         // by substring at the DB level — fetch every tagged product (cheap;
