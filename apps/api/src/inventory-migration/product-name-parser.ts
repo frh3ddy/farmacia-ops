@@ -490,3 +490,37 @@ export function parseProductName(rawName: string): ParsedProductName {
     confidence,
   };
 }
+
+const CONFIDENCE_RANK: Record<ParsedProductName['confidence'], number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+/**
+ * Combines an OCR-text parse and a name-text parse into one suggestion,
+ * instead of one source unconditionally winning whenever it found anything.
+ * `ingredients`/`confidence` aren't blended — they anchor the whole match,
+ * so whichever parse actually has ingredients wins outright there (a
+ * higher-confidence tier breaks a tie when both do). But every other field
+ * a reviewer sees falls back to the *other* parse when the winner left it
+ * null — a brand only the Square name's «» marker carries, or a route only
+ * OCR text stated, is no longer thrown away just because the other source
+ * won on ingredients.
+ */
+export function mergeParsedProductNames(a: ParsedProductName, b: ParsedProductName): ParsedProductName {
+  const aHas = a.ingredients.length > 0;
+  const bHas = b.ingredients.length > 0;
+  const primary =
+    aHas && !bHas ? a : bHas && !aHas ? b : CONFIDENCE_RANK[b.confidence] > CONFIDENCE_RANK[a.confidence] ? b : a;
+  const secondary = primary === a ? b : a;
+
+  return {
+    ingredients: primary.ingredients,
+    confidence: primary.confidence,
+    category: primary.category ?? secondary.category,
+    form: primary.form ?? secondary.form,
+    route: primary.route ?? secondary.route,
+    presentation: primary.presentation ?? secondary.presentation,
+    brand: primary.brand ?? secondary.brand,
+    routeOptions: primary.routeOptions.length > 0 ? primary.routeOptions : secondary.routeOptions,
+    formOptions: primary.formOptions.length > 0 ? primary.formOptions : secondary.formOptions,
+    concentrationOptions: primary.concentrationOptions.length > 0 ? primary.concentrationOptions : secondary.concentrationOptions,
+  };
+}

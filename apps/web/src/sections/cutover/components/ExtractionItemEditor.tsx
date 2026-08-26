@@ -389,215 +389,254 @@ export function ExtractionItemEditor({
               Right: detected info, spanning the full height of both —
               matches the reference mockup's 2-column relationship rather
               than a 3-across row. */}
-          <div className="grid grid-cols-3 items-start gap-4">
-            <div className="order-2 col-span-2 space-y-4">
+          <div className="grid grid-cols-6 items-start gap-4">
+            <div className="order-2 col-span-4 space-y-4">
               <div className="grid grid-cols-[10rem_1fr] gap-4">
                 <div className="flex flex-col items-center justify-center rounded-md border border-(--color-border-standard) bg-(--color-surface-inset) p-3">
-              {result.imageUrl && !hideProductImageForTransition ? (
-                <button
-                  type="button"
-                  onClick={() => setViewingImage(true)}
-                  className="h-28 w-28 cursor-zoom-in rounded-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                  aria-label="View full-size image"
-                >
-                  <img src={result.imageUrl} alt={result.productName} className="h-full w-full object-contain" />
-                </button>
-              ) : (
-                <span className="px-2 text-center text-xs text-(--color-ink-muted)">
-                  {hideProductImageForTransition ? "Loading…" : "No image"}
-                </span>
-              )}
-            </div>
-
-            {viewingImage &&
-              result.imageUrl &&
-              createPortal(
-                <div
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-                  onClick={() => setViewingImage(false)}
-                >
-                  <img
-                    src={result.imageUrl}
-                    alt={result.productName}
-                    onClick={e => e.stopPropagation()}
-                    className="max-h-full max-w-full rounded-lg object-contain"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setViewingImage(false)}
-                    aria-label="Close"
-                    className="absolute right-4 top-4 rounded-full bg-black/50 px-3 py-1.5 text-sm font-medium text-white hover:bg-black/70"
-                  >
-                    Close
-                  </button>
-                </div>,
-                document.body
-              )}
-
-            <div className="rounded-md border border-(--color-border-standard) bg-(--color-surface) p-4">
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <p className="text-xs text-(--color-ink-tertiary)">Selling price</p>
-                  {result.sellingPrice ? (
-                    <p className="tabular text-xl font-semibold text-(--color-ink)">
-                      {result.sellingPriceRange && result.sellingPriceRange.minCents !== result.sellingPriceRange.maxCents
-                        ? `$${(result.sellingPrice.priceCents / 100).toFixed(2)}–$${(result.sellingPriceRange.maxCents / 100).toFixed(2)}`
-                        : `$${(result.sellingPrice.priceCents / 100).toFixed(2)}`}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-(--color-ink-muted)">Not set</p>
-                  )}
-                  {result.sellingPrices && result.sellingPrices.length > 1 && (
+                  {result.imageUrl && !hideProductImageForTransition ? (
                     <button
-                      onClick={() => setShowPriceDetails(v => !v)}
-                      className="mt-0.5 text-xs font-medium text-(--color-accent) hover:text-(--color-accent-hover)"
+                      type="button"
+                      onClick={() => setViewingImage(true)}
+                      className="h-28 w-28 cursor-zoom-in rounded-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                      aria-label="View full-size image"
                     >
-                      {showPriceDetails ? "Hide" : "Show"} variations
+                      <img src={result.imageUrl} alt={result.productName} className="h-full w-full object-contain" />
                     </button>
+                  ) : (
+                    <span className="px-2 text-center text-xs text-(--color-ink-muted)">
+                      {hideProductImageForTransition ? "Loading…" : "No image"}
+                    </span>
                   )}
                 </div>
-                {/* The two fields this approval actually writes — accent-colored
+
+                {viewingImage &&
+                  result.imageUrl &&
+                  createPortal(
+                    <div
+                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+                      onClick={() => setViewingImage(false)}
+                    >
+                      <img
+                        src={result.imageUrl}
+                        alt={result.productName}
+                        onClick={e => e.stopPropagation()}
+                        className="max-h-full max-w-full rounded-lg object-contain"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setViewingImage(false)}
+                        aria-label="Close"
+                        className="absolute right-4 top-4 rounded-full bg-black/50 px-3 py-1.5 text-sm font-medium text-white hover:bg-black/70"
+                      >
+                        Close
+                      </button>
+                    </div>,
+                    document.body
+                  )}
+
+                <div className="rounded-md border border-(--color-border-standard) bg-(--color-surface) p-4">
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-xs text-(--color-ink-tertiary)">Selling price</p>
+                      {result.sellingPrice ? (
+                        <p className="tabular text-xl font-semibold text-(--color-ink)">
+                          {result.sellingPriceRange && result.sellingPriceRange.minCents !== result.sellingPriceRange.maxCents
+                            ? `$${(result.sellingPrice.priceCents / 100).toFixed(2)}–$${(result.sellingPriceRange.maxCents / 100).toFixed(2)}`
+                            : `$${(result.sellingPrice.priceCents / 100).toFixed(2)}`}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-(--color-ink-muted)">Not set</p>
+                      )}
+                      {result.sellingPrices && result.sellingPrices.length > 1 && (
+                        <button
+                          onClick={() => setShowPriceDetails(v => !v)}
+                          className="mt-0.5 text-xs font-medium text-(--color-accent) hover:text-(--color-accent-hover)"
+                        >
+                          {showPriceDetails ? "Hide" : "Show"} variations
+                        </button>
+                      )}
+                    </div>
+                    {/* The two fields this approval actually writes — accent-colored
                     labels (and, for cost, the value too) so they read as the
                     operative numbers at a glance, not just more page text next
                     to the informational selling price. */}
-                <div>
-                  <p className="text-xs font-medium text-(--color-accent)">Base cost</p>
-                  <p className="tabular text-xl font-bold text-(--color-accent)">
-                    ${displayCost != null ? displayCost.toFixed(2) : "0.00"}
-                  </p>
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-(--color-accent)">Current supplier</p>
-                  <p className="truncate text-xl font-bold text-(--color-ink)">{displaySupplier || "Not selected"}</p>
-                </div>
-              </div>
-
-              {priceGuardWarning && (
-                <div className="mt-3 rounded-sm border border-(--color-destructive) bg-(--color-destructive-bg) px-3 py-2 text-xs text-(--color-destructive)">
-                  {priceGuardWarning}
-                </div>
-              )}
-
-              <div className="mt-4 grid grid-cols-2 gap-4 border-t border-(--color-border-subtle) pt-4">
-                <div>
-                  <label className="mb-0.5 block text-xs text-(--color-ink-tertiary)">Category</label>
-                  <select
-                    value={categoryTopId}
-                    onChange={e => {
-                      const topId = e.target.value;
-                      updateManualField({
-                        categoryId: topId || null,
-                        categoryName: allCategories.find(c => c.id === topId)?.name ?? null,
-                      });
-                    }}
-                    className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-xs text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
-                  >
-                    <option value="">Uncategorized</option>
-                    {topCategories.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-xs text-(--color-ink-tertiary)">Subcategory</label>
-                  <select
-                    value={categorySubId}
-                    onChange={e => {
-                      const targetId = e.target.value || categoryTopId;
-                      updateManualField({
-                        categoryId: targetId || null,
-                        categoryName: allCategories.find(c => c.id === targetId)?.name ?? null,
-                      });
-                    }}
-                    disabled={!categoryTopId || subcategories.length === 0}
-                    className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-xs text-(--color-ink) focus:border-(--color-accent) focus:outline-none disabled:opacity-50"
-                  >
-                    <option value="">{categoryTopId ? "None" : "—"}</option>
-                    {subcategories.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {showPriceDetails && result.sellingPrices && result.sellingPrices.length > 1 && (
-                <div className="mt-3 space-y-1 border-t border-(--color-border-subtle) pt-3">
-                  {result.sellingPrices.map((price, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between rounded-sm border border-(--color-border-subtle) bg-(--color-surface-inset) px-2 py-1 text-sm"
-                    >
-                      <span className="font-medium">{price.variationName || `Variation ${idx + 1}`}</span>
-                      <span className="tabular">${(price.priceCents / 100).toFixed(2)}</span>
+                    <div>
+                      <p className="text-xs font-medium text-(--color-accent)">Base cost</p>
+                      <p className="tabular text-xl font-bold text-(--color-accent)">
+                        ${displayCost != null ? displayCost.toFixed(2) : "0.00"}
+                      </p>
                     </div>
-                  ))}
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-(--color-accent)">Current supplier</p>
+                      <p className="truncate text-xl font-bold text-(--color-ink)">{displaySupplier || "Not selected"}</p>
+                    </div>
+                  </div>
+
+                  {priceGuardWarning && (
+                    <div className="mt-3 rounded-sm border border-(--color-destructive) bg-(--color-destructive-bg) px-3 py-2 text-xs text-(--color-destructive)">
+                      {priceGuardWarning}
+                    </div>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-2 gap-4 border-t border-(--color-border-subtle) pt-4">
+                    <div>
+                      <label className="mb-0.5 block text-xs text-(--color-ink-tertiary)">Category</label>
+                      <select
+                        value={categoryTopId}
+                        onChange={e => {
+                          const topId = e.target.value;
+                          updateManualField({
+                            categoryId: topId || null,
+                            categoryName: allCategories.find(c => c.id === topId)?.name ?? null,
+                          });
+                        }}
+                        className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-xs text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
+                      >
+                        <option value="">Uncategorized</option>
+                        {topCategories.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-0.5 block text-xs text-(--color-ink-tertiary)">Subcategory</label>
+                      <select
+                        value={categorySubId}
+                        onChange={e => {
+                          const targetId = e.target.value || categoryTopId;
+                          updateManualField({
+                            categoryId: targetId || null,
+                            categoryName: allCategories.find(c => c.id === targetId)?.name ?? null,
+                          });
+                        }}
+                        disabled={!categoryTopId || subcategories.length === 0}
+                        className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-xs text-(--color-ink) focus:border-(--color-accent) focus:outline-none disabled:opacity-50"
+                      >
+                        <option value="">{categoryTopId ? "None" : "—"}</option>
+                        {subcategories.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {showPriceDetails && result.sellingPrices && result.sellingPrices.length > 1 && (
+                    <div className="mt-3 space-y-1 border-t border-(--color-border-subtle) pt-3">
+                      {result.sellingPrices.map((price, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between rounded-sm border border-(--color-border-subtle) bg-(--color-surface-inset) px-2 py-1 text-sm"
+                        >
+                          <span className="font-medium">{price.variationName || `Variation ${idx + 1}`}</span>
+                          <span className="tabular">${(price.priceCents / 100).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              </div>
+
+              {!hasExtraction && (
+                <p className="text-sm font-medium text-(--color-destructive)">No cost extracted — add one manually below</p>
               )}
-            </div>
-          </div>
 
-          {!hasExtraction && (
-            <p className="text-sm font-medium text-(--color-destructive)">No cost extracted — add one manually below</p>
-          )}
-
-          <div className="overflow-hidden rounded-md border border-(--color-border-standard)">
-            <div className="flex items-center justify-between bg-(--color-surface) px-4 py-2.5">
-              <h4 className="text-sm font-semibold text-(--color-ink)">Supplier history &amp; costs</h4>
-              <button
-                type="button"
-                onClick={() => setSourceModalOpen(true)}
-                className="flex items-center gap-1 text-xs font-medium text-(--color-accent) hover:text-(--color-accent-hover)"
-              >
-                <DocumentIcon className="h-3.5 w-3.5" />
-                Source info
-              </button>
-            </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-t border-(--color-border-standard) bg-(--color-surface) text-xs uppercase text-(--color-ink-tertiary)">
-                  <th className="px-2 py-2 text-center">Use</th>
-                  <th className="px-4 py-2 text-left">Supplier</th>
-                  <th className="px-4 py-2 text-left">Cost</th>
-                  <th className="px-4 py-2 text-left">Date</th>
-                  <th className="px-4 py-2 text-left">Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(edited.extractedEntries ?? []).map((entry, idx) => {
-                  const entries = edited.extractedEntries ?? [];
-                  const selIdx = entries.findIndex(e => e.isSelected);
-                  const isSelectedRow = idx === (selIdx === -1 ? entries.length - 1 : selIdx);
-                  const displayDate =
-                    entry.editedEffectiveDate ||
-                    computeExtractedDate(entry, cutoverDate) ||
-                    cutoverDate ||
-                    new Date().toISOString().split("T")[0];
-                  return (
-                    <tr key={idx} className={isSelectedRow ? "bg-(--color-accent)/5" : "border-t border-(--color-border-subtle)"}>
-                      <td className="p-0 text-center">
-                        <label className="flex h-full w-full cursor-pointer items-center justify-center px-2 py-4">
-                          <input
-                            type="radio"
-                            name={`selected-entry-${result.productId}`}
-                            checked={isSelectedRow}
-                            onChange={() => selectEntry(idx)}
-                            aria-label="Use this entry as the cost"
-                            className="h-4 w-4 accent-(--color-accent)"
-                          />
-                        </label>
-                      </td>
+              <div className="overflow-hidden rounded-md border border-(--color-border-standard)">
+                <div className="flex items-center justify-between bg-(--color-surface) px-4 py-2.5">
+                  <h4 className="text-sm font-semibold text-(--color-ink)">Supplier history &amp; costs</h4>
+                  <button
+                    type="button"
+                    onClick={() => setSourceModalOpen(true)}
+                    className="flex items-center gap-1 text-xs font-medium text-(--color-accent) hover:text-(--color-accent-hover)"
+                  >
+                    <DocumentIcon className="h-3.5 w-3.5" />
+                    Source info
+                  </button>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-t border-(--color-border-standard) bg-(--color-surface) text-xs uppercase text-(--color-ink-tertiary)">
+                      <th className="px-2 py-2 text-center">Use</th>
+                      <th className="min-w-40 px-4 py-2 text-left">Supplier</th>
+                      <th className="w-40 px-4 py-2 text-left">Cost</th>
+                      <th className="w-40 py-2 text-left">Date</th>
+                      <th className="px-4 py-2 text-left">Source</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(edited.extractedEntries ?? []).map((entry, idx) => {
+                      const entries = edited.extractedEntries ?? [];
+                      const selIdx = entries.findIndex(e => e.isSelected);
+                      const isSelectedRow = idx === (selIdx === -1 ? entries.length - 1 : selIdx);
+                      const displayDate =
+                        entry.editedEffectiveDate ||
+                        computeExtractedDate(entry, cutoverDate) ||
+                        cutoverDate ||
+                        new Date().toISOString().split("T")[0];
+                      return (
+                        <tr key={idx} className={isSelectedRow ? "bg-(--color-accent)/5" : "border-t border-(--color-border-subtle)"}>
+                          <td className="p-0 text-center">
+                            <label className="flex h-full w-full cursor-pointer items-center justify-center px-2 py-4">
+                              <input
+                                type="radio"
+                                name={`selected-entry-${result.productId}`}
+                                checked={isSelectedRow}
+                                onChange={() => selectEntry(idx)}
+                                aria-label="Use this entry as the cost"
+                                className="h-4 w-4 accent-(--color-accent)"
+                              />
+                            </label>
+                          </td>
+                          <td className="px-4 py-2">
+                            <SupplierAutocompleteInput
+                              value={entry.editedSupplierName ?? entry.supplier ?? ""}
+                              onChange={v => updateEntry(idx, { editedSupplierName: v })}
+                              onSelectSuggestion={s => updateEntry(idx, { editedSupplierName: s.name, supplierId: s.id ?? undefined })}
+                              getLocalSuggestions={getSupplierSuggestions}
+                              highlighted={isSelectedRow}
+                              matchedByInitialLabel={entry.matchedByInitial ? entry.supplier : null}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={costDraft?.idx === idx ? costDraft.raw : (entry.editedCost ?? entry.amount)}
+                              onChange={e => handleCostChange(idx, e.target.value)}
+                              onBlur={e => handleCostBlur(idx, e)}
+                              className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${isSelectedRow ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
+                                }`}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <input
+                              type="date"
+                              value={displayDate}
+                              onChange={e => updateEntry(idx, { editedEffectiveDate: e.target.value })}
+                              className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${isSelectedRow ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
+                                }`}
+                            />
+                          </td>
+                          <td className="px-4 py-2 text-(--color-ink-tertiary)">{entry.originalLine || `$${entry.amount.toFixed(2)}`}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="border-t border-(--color-border-subtle)">
+                      <td className="px-2 py-2" />
                       <td className="px-4 py-2">
                         <SupplierAutocompleteInput
-                          value={entry.editedSupplierName ?? entry.supplier ?? ""}
-                          onChange={v => updateEntry(idx, { editedSupplierName: v })}
-                          onSelectSuggestion={s => updateEntry(idx, { editedSupplierName: s.name, supplierId: s.id ?? undefined })}
+                          value={newEntrySupplier}
+                          onChange={setNewEntrySupplier}
+                          onSelectSuggestion={s => {
+                            setNewEntrySupplier(s.name);
+                            setNewEntrySupplierId(s.id ?? null);
+                          }}
                           getLocalSuggestions={getSupplierSuggestions}
-                          highlighted={isSelectedRow}
-                          matchedByInitialLabel={entry.matchedByInitial ? entry.supplier : null}
+                          placeholder="Add supplier"
                         />
                       </td>
                       <td className="px-4 py-2">
@@ -605,77 +644,36 @@ export function ExtractionItemEditor({
                           type="number"
                           step="0.01"
                           min="0"
-                          value={costDraft?.idx === idx ? costDraft.raw : (entry.editedCost ?? entry.amount)}
-                          onChange={e => handleCostChange(idx, e.target.value)}
-                          onBlur={e => handleCostBlur(idx, e)}
-                          className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
-                            isSelectedRow ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
-                          }`}
+                          value={newEntryCost}
+                          onChange={e => setNewEntryCost(e.target.value)}
+                          placeholder="Cost"
+                          className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
                         />
                       </td>
                       <td className="px-4 py-2">
                         <input
                           type="date"
-                          value={displayDate}
-                          onChange={e => updateEntry(idx, { editedEffectiveDate: e.target.value })}
-                          className={`w-full rounded-sm border px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
-                            isSelectedRow ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
-                          }`}
+                          value={newEntryDate}
+                          onChange={e => setNewEntryDate(e.target.value)}
+                          className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
                         />
                       </td>
-                      <td className="px-4 py-2 text-(--color-ink-tertiary)">{entry.originalLine || `$${entry.amount.toFixed(2)}`}</td>
+                      <td className="px-4 py-2">
+                        <button
+                          onClick={addManualEntry}
+                          className="rounded-sm border border-(--color-border-standard) px-3 py-1 text-sm font-medium text-(--color-ink-secondary) hover:bg-(--color-surface)"
+                        >
+                          + Add entry
+                        </button>
+                      </td>
                     </tr>
-                  );
-                })}
-                <tr className="border-t border-(--color-border-subtle)">
-                  <td className="px-2 py-2" />
-                  <td className="px-4 py-2">
-                    <SupplierAutocompleteInput
-                      value={newEntrySupplier}
-                      onChange={setNewEntrySupplier}
-                      onSelectSuggestion={s => {
-                        setNewEntrySupplier(s.name);
-                        setNewEntrySupplierId(s.id ?? null);
-                      }}
-                      getLocalSuggestions={getSupplierSuggestions}
-                      placeholder="Add supplier"
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={newEntryCost}
-                      onChange={e => setNewEntryCost(e.target.value)}
-                      placeholder="Cost"
-                      className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="date"
-                      value={newEntryDate}
-                      onChange={e => setNewEntryDate(e.target.value)}
-                      className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <button
-                      onClick={addManualEntry}
-                      className="rounded-sm border border-(--color-border-standard) px-3 py-1 text-sm font-medium text-(--color-ink-secondary) hover:bg-(--color-surface)"
-                    >
-                      + Add entry
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {isMedicine && !edited.isCatalogedMedication && (
-              <div className="order-1 space-y-3 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4">
+              <div className="order-1 col-span-2 space-y-3 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <SparkleIcon className="h-3.5 w-3.5 text-(--color-accent)" />

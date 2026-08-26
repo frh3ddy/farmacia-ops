@@ -1,4 +1,4 @@
-import { parseProductName } from './product-name-parser';
+import { parseProductName, mergeParsedProductNames, type ParsedProductName } from './product-name-parser';
 
 describe('parseProductName', () => {
   it('parses a «»-separated single-ingredient name to HIGH confidence with a canonical concentration match', () => {
@@ -161,5 +161,68 @@ describe('parseProductName', () => {
     const result = parseProductName('Algo Raro\nCaja con 10\nTableta');
     expect(result.confidence).toBe('LOW');
     expect(result.ingredients).toEqual([]);
+  });
+});
+
+describe('mergeParsedProductNames', () => {
+  const empty = (overrides: Partial<ParsedProductName> = {}): ParsedProductName => ({
+    ingredients: [],
+    form: null,
+    route: null,
+    routeOptions: [],
+    formOptions: [],
+    concentrationOptions: [],
+    presentation: null,
+    brand: null,
+    category: null,
+    confidence: 'LOW',
+    ...overrides,
+  });
+
+  it('lets whichever side has ingredients win outright there, ignoring the other side entirely for ingredients/confidence', () => {
+    const withIngredients = empty({
+      ingredients: [{ name: 'paracetamol', concentrationValue: 500, concentrationUnit: 'mg', order: 0 }],
+      confidence: 'HIGH',
+    });
+    const withoutIngredients = empty({ confidence: 'LOW' });
+    expect(mergeParsedProductNames(withIngredients, withoutIngredients).ingredients).toEqual(withIngredients.ingredients);
+    expect(mergeParsedProductNames(withoutIngredients, withIngredients).ingredients).toEqual(withIngredients.ingredients);
+    expect(mergeParsedProductNames(withoutIngredients, withIngredients).confidence).toBe('HIGH');
+  });
+
+  it('falls back to the other side for any field the winner left blank, instead of discarding it', () => {
+    const ocrParse = empty({
+      ingredients: [{ name: 'amoxicilina', concentrationValue: 500, concentrationUnit: 'mg', order: 0 }],
+      form: 'TABLET',
+      confidence: 'MEDIUM',
+      // no brand — OCR text had no «» marker
+    });
+    const nameParse = empty({
+      // no ingredients at all — Square name alone didn't resolve
+      brand: 'CLAVULIN',
+      route: 'ORAL',
+    });
+    const merged = mergeParsedProductNames(ocrParse, nameParse);
+    expect(merged.ingredients).toEqual(ocrParse.ingredients);
+    expect(merged.form).toBe('TABLET');
+    expect(merged.brand).toBe('CLAVULIN');
+    expect(merged.route).toBe('ORAL');
+  });
+
+  it('breaks a tie (both sides have ingredients) with the higher confidence tier, still filling gaps from the loser', () => {
+    const lowConfidence = empty({
+      ingredients: [{ name: 'ibuprofeno', concentrationValue: null, concentrationUnit: null, order: 0 }],
+      confidence: 'LOW',
+      presentation: 'Caja con 10 tabletas',
+    });
+    const highConfidence = empty({
+      ingredients: [{ name: 'ibuprofeno', concentrationValue: 400, concentrationUnit: 'mg', order: 0 }],
+      confidence: 'HIGH',
+      // no presentation
+    });
+    const merged = mergeParsedProductNames(lowConfidence, highConfidence);
+    expect(merged.ingredients).toEqual(highConfidence.ingredients);
+    expect(merged.confidence).toBe('HIGH');
+    expect(merged.presentation).toBe('Caja con 10 tabletas');
   });
 });

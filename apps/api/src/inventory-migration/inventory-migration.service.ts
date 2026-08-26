@@ -29,7 +29,7 @@ import { SupplierService } from './supplier.service';
 import { OcrService } from './ocr.service';
 import { ProductsService } from '../products/products.service';
 import { classifyProductName, classifySubcategory, ensureCategoryIds, type CategoryRow } from './category-classifier';
-import { parseProductName } from './product-name-parser';
+import { parseProductName, mergeParsedProductNames } from './product-name-parser';
 import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from '../products/medication-definition';
 import { findIngredientInText, addLearnedIngredient } from '../products/reference-data.service';
 
@@ -1975,17 +1975,15 @@ export class InventoryMigrationService {
       ? classifySubcategory(productName, subcategoriesByParent.get(suggestedCategoryId) ?? [])
       : null;
 
-    // Same OCR-first, name-fallback preference as suggestedCategoryName
-    // above: OCR text often carries the active ingredient a brand-only
-    // Square name doesn't, but an empty ingredient match (blurry photo, OCR
-    // text with no recognizable drug name) falls back to the name parse
-    // rather than surfacing a worse suggestion.
+    // Combine both sources rather than one winning outright: OCR text often
+    // carries the active ingredient a brand-only Square name doesn't, but
+    // the name can carry things OCR misses too (e.g. a «»-marked brand OCR
+    // text never states). mergeParsedProductNames lets whichever parse
+    // actually found ingredients anchor the match, while still falling back
+    // to the other source for any field the winner left blank.
     const ocrParse = !isCatalogedMedication && ocrText ? parseProductName(ocrText) : null;
-    const nameParse = isCatalogedMedication
-      ? null
-      : ocrParse && ocrParse.ingredients.length > 0
-        ? ocrParse
-        : parseProductName(productName);
+    const nameParseRaw = isCatalogedMedication ? null : parseProductName(productName);
+    const nameParse = ocrParse && nameParseRaw ? mergeParsedProductNames(ocrParse, nameParseRaw) : (ocrParse ?? nameParseRaw);
 
     // A name-parse ingredient match can also fill in the subcategory guess
     // when the regex-rule classifier above came up empty — fold it into the
