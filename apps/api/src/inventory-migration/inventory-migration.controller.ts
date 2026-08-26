@@ -15,7 +15,7 @@ import {
 import { InventoryMigrationService } from './inventory-migration.service';
 import { SupplierService } from './supplier.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 import {
   CutoverInput,
@@ -606,6 +606,19 @@ export class InventoryMigrationController {
     }
   }
 
+  @Post('reparse-ocr-text')
+  async reparseOcrText(@Body() body: { productId: string; ocrText: string }) {
+    try {
+      const result = await this.migrationService.reparseProductSuggestions(body.productId, body.ocrText);
+      return result;
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to reparse OCR text: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Post('mark-discontinued')
   async markDiscontinued(
     @Body()
@@ -694,6 +707,14 @@ export class InventoryMigrationController {
       sellingPrice?: { priceCents: number; currency: string } | null;
       sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
       categoryId?: string | null;
+      medicationInfo?: {
+        ingredients: Array<{ name: string; concentrationValue?: number | null; concentrationUnit?: string | null }>;
+        form: PharmaceuticalForm;
+        route: AdministrationRoute;
+        presentation?: string | null;
+        brandSearchTerms?: string[] | null;
+      } | null;
+      ocrText?: string | null;
     },
     @Req() req: any,
   ) {
@@ -711,6 +732,8 @@ export class InventoryMigrationController {
         body.sellingPriceRange || null,
         body.categoryId || null,
         req.employee.id,
+        body.medicationInfo || null,
+        body.ocrText,
       );
       return result;
     } catch (error) {

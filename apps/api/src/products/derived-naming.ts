@@ -28,6 +28,7 @@ const FORM_LABELS: Record<PharmaceuticalForm, string> = {
   PATCH: 'Parche',
   SUPPOSITORY: 'Supositorio',
   INHALER: 'Inhalador',
+  SOLUTION: 'Solución',
   OTHER: 'Otro',
 };
 
@@ -45,7 +46,7 @@ const PACKAGING_LABELS: Record<PackagingType, string> = {
 };
 
 const SOLID_FORMS = new Set<PharmaceuticalForm>(['TABLET', 'CAPSULE', 'PATCH', 'SUPPOSITORY', 'INHALER', 'OTHER']);
-const LIQUID_FORMS = new Set<PharmaceuticalForm>(['SUSPENSION', 'SYRUP', 'DROPS', 'INJECTION', 'SPRAY']);
+const LIQUID_FORMS = new Set<PharmaceuticalForm>(['SUSPENSION', 'SYRUP', 'DROPS', 'INJECTION', 'SPRAY', 'SOLUTION']);
 
 /** sólidos -> piezas, líquidos -> ml, semisólidos (Crema/Ungüento/Gel) -> g. */
 export function inferQuantityUnit(form: PharmaceuticalForm): 'piezas' | 'ml' | 'g' {

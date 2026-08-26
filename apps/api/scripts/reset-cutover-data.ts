@@ -1,7 +1,7 @@
 /**
  * Wipes all cutover/migration test data (Product, Supplier, Inventory,
- * CatalogMapping, CostApproval, Cutover, CutoverLock, ExtractionSession,
- * ExtractionBatch, SupplierProduct, SupplierCostHistory) so a fresh
+ * Transfer, TransferLine, CatalogMapping, CostApproval, Cutover, CutoverLock,
+ * ExtractionSession, ExtractionBatch, SupplierProduct, SupplierCostHistory) so a fresh
  * migration can be run from a clean slate. Leaves Location, Employee/User,
  * auth tables untouched.
  *
@@ -33,6 +33,8 @@ const MODELS_IN_DELETE_ORDER = [
   'saleItem',
   'sale',
   'placement',
+  'transferLine',
+  'transfer',
   'inventory',
   'supplierCostHistory',
   'supplierProduct',

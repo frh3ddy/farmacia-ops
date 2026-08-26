@@ -1,4 +1,3 @@
-import { createPortal } from "react-dom";
 import type { ExtractionSessionSummary } from "../../../lib/cutover/types";
 
 type SessionSelectorModalProps = {
@@ -23,10 +22,11 @@ function projectBatches(session: ExtractionSessionSummary, newBatchSize: number)
   };
 }
 
+// Deliberately not portaled to document.body — see Modal.tsx's comment on why.
 export function SessionSelectorModal({ show, sessions, currentBatchSize, onResume, onStartNew, onClose }: SessionSelectorModalProps) {
   if (!show) return null;
 
-  return createPortal(
+  return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="max-h-[80vh] w-full max-w-lg overflow-auto rounded-lg border border-(--color-border-emphasis) bg-(--color-surface-raised) p-6">
         <h3 className="mb-4 text-lg font-semibold text-(--color-ink)">Resume existing session or start new?</h3>
@@ -76,7 +76,6 @@ export function SessionSelectorModal({ show, sessions, currentBatchSize, onResum
           </button>
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
 }

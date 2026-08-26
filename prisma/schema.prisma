@@ -184,6 +184,10 @@ model Product {
   squareVariationName String? // Variation name from Square
   squareDataSyncedAt  DateTime? // When Square data was last synced
 
+  // OCR text from squareImageUrl, cached to avoid re-running OCR on every
+  // classify/extraction pass — see scripts/ocr-classify-products.ts
+  ocrText String?
+
   // Pharmacy catalog attributes
   labId                  String?
   medicationType         MedicationType?
@@ -269,6 +273,7 @@ enum PharmaceuticalForm {
   PATCH
   SUPPOSITORY
   INHALER
+  SOLUTION
   OTHER
 }
 
@@ -318,6 +323,18 @@ model MedicationDefinitionIngredient {
   activeIngredient     ActiveIngredient     @relation(fields: [activeIngredientId], references: [id])
 
   @@id([medicationDefinitionId, activeIngredientId])
+}
+
+// Ingredient names a reviewer confirmed/typed during cutover that weren't in
+// the static pharmacy-reference-data.json dataset — grown by
+// InventoryMigrationService.approveItem(), loaded into
+// ReferenceDataService's in-memory ingredient index on boot so
+// findIngredientInText/parseProductName recognize them on future cutovers.
+// See reference-data.service.ts's addLearnedIngredient.
+model LearnedIngredient {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
 }
 
 enum PackagingType {

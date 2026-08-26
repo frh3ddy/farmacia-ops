@@ -1,5 +1,3 @@
-import { createPortal } from "react-dom";
-
 type BatchCompleteModalProps = {
   show: boolean;
   loading: boolean;
@@ -8,10 +6,11 @@ type BatchCompleteModalProps = {
   onPause: () => void;
 };
 
+// Deliberately not portaled to document.body — see Modal.tsx's comment on why.
 export function BatchCompleteModal({ show, loading, onContinue, onReview, onPause }: BatchCompleteModalProps) {
   if (!show) return null;
 
-  return createPortal(
+  return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-lg border border-(--color-border-emphasis) bg-(--color-surface-raised) p-6">
         <h3 className="mb-2 text-lg font-semibold text-(--color-ink)">Batch complete</h3>
@@ -39,7 +38,6 @@ export function BatchCompleteModal({ show, loading, onContinue, onReview, onPaus
           </button>
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
 }

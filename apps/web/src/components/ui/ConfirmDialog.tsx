@@ -67,7 +67,7 @@ export function ConfirmDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-lg border border-(--color-border-emphasis) bg-(--color-surface-raised) p-5 shadow-none">
+      <div className="w-full max-w-md rounded-lg border border-(--color-border-emphasis) bg-(--color-surface-raised) p-5">
         <h2 className="text-base font-semibold text-(--color-ink)">{title}</h2>
         <div className="mt-2 text-sm text-(--color-ink-secondary)">{description}</div>
         <label htmlFor="confirm-dialog-phrase" className="mt-4 block text-xs font-medium text-(--color-ink-tertiary)">

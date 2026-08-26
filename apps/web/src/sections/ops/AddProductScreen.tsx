@@ -7,7 +7,7 @@ type ActiveIngredientOption = { id: string; name: string };
 type MedicationType = "GENERIC" | "BRAND" | "SIMILAR";
 type PharmaceuticalForm =
   | "TABLET" | "CAPSULE" | "SUSPENSION" | "SYRUP" | "CREAM" | "OINTMENT" | "GEL"
-  | "INJECTION" | "DROPS" | "SPRAY" | "PATCH" | "SUPPOSITORY" | "INHALER" | "OTHER";
+  | "INJECTION" | "DROPS" | "SPRAY" | "PATCH" | "SUPPOSITORY" | "INHALER" | "SOLUTION" | "OTHER";
 type AdministrationRoute =
   | "ORAL" | "TOPICAL" | "INJECTABLE" | "OPHTHALMIC" | "OTIC" | "NASAL" | "RECTAL"
   | "VAGINAL" | "INHALED" | "SUBLINGUAL" | "OTHER";
@@ -38,6 +38,7 @@ const FORMS: { value: PharmaceuticalForm; label: string }[] = [
   { value: "PATCH", label: "Parche" },
   { value: "SUPPOSITORY", label: "Supositorio" },
   { value: "INHALER", label: "Inhalador" },
+  { value: "SOLUTION", label: "Solución" },
   { value: "OTHER", label: "Otro" },
 ];
 

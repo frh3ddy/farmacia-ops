@@ -335,6 +335,27 @@ export function useCutoverWizard() {
     [extractionResults, editedResults, cutoverDate, allSuppliers, supplierNameMappings]
   );
 
+  /** Re-runs category/ingredient suggestion against whatever's currently in
+   * the "Text read from package photo" field (which may have been hand-
+   * corrected) — mirrors handleRegenerateExtraction's shape but replaces the
+   * suggestion fields wholesale rather than merging entries, since this is
+   * an explicit reviewer-triggered redo, not an incremental append. */
+  const handleReparseOcrText = useCallback(
+    async (productId: string, ocrText: string) => {
+      const result = extractionResults.find(r => r.productId === productId);
+      if (!result) return;
+      const edited = editedResults[productId] ?? result;
+
+      try {
+        const res = await api.reparseOcrText({ productId, ocrText });
+        setEditedResults(prev => ({ ...prev, [productId]: { ...edited, ...res } }));
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Failed to re-run suggestions");
+      }
+    },
+    [extractionResults, editedResults]
+  );
+
   const handleReusePreviousApprovals = useCallback(async () => {
     if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
     const itemsToReuse = extractionResults.filter(
@@ -443,6 +464,17 @@ export function useCutoverWizard() {
           sellingPrice: result.sellingPrice ?? null,
           sellingPriceRange: result.sellingPriceRange ?? null,
           categoryId: edited.categoryId ?? edited.suggestedCategoryId ?? null,
+          medicationInfo:
+            !edited.isCatalogedMedication && edited.ingredients?.length && edited.form && edited.route
+              ? {
+                  ingredients: edited.ingredients,
+                  form: edited.form,
+                  route: edited.route,
+                  presentation: edited.presentation ?? null,
+                  brandSearchTerms: edited.brandSearchTerms ?? null,
+                }
+              : null,
+          ocrText: edited.ocrText ?? null,
         });
 
         if (initialsToAdd.length > 0) {
@@ -623,6 +655,7 @@ export function useCutoverWizard() {
     handleRestoreItem,
     handleMarkDiscontinued,
     handleRegenerateExtraction,
+    handleReparseOcrText,
     handleReusePreviousApprovals,
     handleApproveItem,
     requestStartMigration,

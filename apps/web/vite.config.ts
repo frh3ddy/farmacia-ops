@@ -26,6 +26,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    host: true, // bind all interfaces, not just localhost — lets another device on the same LAN load the dev server
     proxy: Object.fromEntries(
       apiPrefixes.map(prefix => [prefix, "http://localhost:3000"])
     ),

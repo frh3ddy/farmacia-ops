@@ -1,49 +1,69 @@
 @import "tailwindcss";
 
 /*
- * Ledger direction: back-office/paper world, not a consumer dashboard.
- * See ../../.interface-design/system.md at the repo root for the full rationale.
+ * Direction: precise operations tool, dense, structured — corporate blue,
+ * soft shadows. Replaced the original warm-paper/borders-only ledger
+ * direction area by area (see git history / .interface-design/system.md
+ * for that rationale) once it covered the whole app.
  * Every color below is a primitive — components should never reach for a raw hex.
  */
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* Surfaces: warm paper, not gray. Elevation is a whisper, not a jump. */
-  --color-canvas: #f3efe6;
-  --color-surface: #f8f5ee;
-  --color-surface-inset: #ece7d9;
-  --color-surface-raised: #fffdf8;
+  /* Surfaces: cool, a shade apart per layer — canvas (page/sidebar) one
+     step back from surface (cards/content), inset for things that receive
+     input, raised for modals/dropdowns. */
+  --color-canvas: #eef2f8;
+  --color-surface: #f7fafc;
+  --color-surface-inset: #e8eef9;
+  --color-surface-raised: #ffffff;
 
-  /* Text hierarchy: warm ink, four levels. */
-  --color-ink: #2b2620;
-  --color-ink-secondary: #5b544a;
-  --color-ink-tertiary: #857c6e;
-  --color-ink-muted: #b3a996;
+  /* Text hierarchy, four levels. */
+  --color-ink: #2d3748;
+  --color-ink-secondary: #4a5568;
+  --color-ink-tertiary: #718096;
+  --color-ink-muted: #a0aec0;
 
   /* Borders: low-opacity, found on purpose not seen by accident. */
-  --color-border-subtle: rgb(43 38 32 / 8%);
-  --color-border-standard: rgb(43 38 32 / 14%);
-  --color-border-emphasis: rgb(43 38 32 / 24%);
+  --color-border-subtle: rgb(45 55 72 / 8%);
+  --color-border-standard: rgb(45 55 72 / 14%);
+  --color-border-emphasis: rgb(45 55 72 / 24%);
 
-  /* Stamp-ink navy: primary actions, focus, audit/approval chrome. */
-  --color-accent: #1f3a5f;
-  --color-accent-hover: #16293f;
-  --color-accent-contrast: #f7f4ec;
+  /* Primary blue: primary actions, focus, audit/approval chrome. */
+  --color-accent: #1b3f8b;
+  --color-accent-hover: #15316d;
+  --color-accent-contrast: #ffffff;
 
   /* Semantic — used with intention, not decoration. */
   --color-success: #2f6b4f;
   --color-success-bg: #e3ede7;
   --color-warning: #9c6a0f;
   --color-warning-bg: #f6e9cf;
-  --color-destructive: #a3271f;
-  --color-destructive-bg: #f6e0dd;
+  --color-destructive: #e8291c;
+  --color-destructive-bg: #fce8e6;
 }
 
 body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
+}
+
+/*
+ * Soft shadow, riding the app's own established radius convention
+ * (rounded-sm inputs/buttons, rounded-md cards/tables, rounded-lg modals —
+ * see system.md) instead of a shadow class on every card: anything that's
+ * already rounded-md/rounded-lg + border IS a card/table/modal by that
+ * convention, so it gets the shadow without a matching class added
+ * anywhere. :not([class*="shadow-"]) skips anything that already declares
+ * its own Tailwind shadow utility (e.g. a floating dropdown menu), so a
+ * deliberate existing shadow is never overridden.
+ */
+:is(.rounded-md, .rounded-lg).border:not([class*="shadow-"]) {
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 6%),
+    0 4px 12px rgb(15 23 42 / 6%);
 }
 
 /* Money, quantities, IDs — always tabular so columns of numbers align. */

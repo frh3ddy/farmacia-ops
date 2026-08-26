@@ -41,6 +41,18 @@ export type CostExtractionResult = {
   categoryName?: string | null;
   suggestedCategoryId?: string | null;
   suggestedCategoryName?: string | null;
+  isCatalogedMedication?: boolean;
+  ocrText?: string | null;
+  parseConfidence?: "HIGH" | "MEDIUM" | "LOW" | null;
+  suggestedBrand?: string | null;
+  ingredients?: Array<{ name: string; concentrationValue: number | null; concentrationUnit: string | null }> | null;
+  form?: string | null;
+  route?: string | null;
+  presentation?: string | null;
+  brandSearchTerms?: string[] | null;
+  formOptions?: string[] | null;
+  concentrationOptions?: string[] | null;
+  routeOptions?: string[] | null;
   imageUrl?: string | null;
   sellingPrices?: SellingPriceVariation[] | null;
   sellingPrice?: SellingPrice | null;

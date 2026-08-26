@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import {
   CutoverInput,
@@ -26,8 +26,12 @@ import { SquareInventoryService } from './square-inventory.service';
 import { CostExtractionService } from './cost-extraction.service';
 import { CatalogMapperService } from './catalog-mapper.service';
 import { SupplierService } from './supplier.service';
+import { OcrService } from './ocr.service';
 import { ProductsService } from '../products/products.service';
 import { classifyProductName, classifySubcategory, ensureCategoryIds, type CategoryRow } from './category-classifier';
+import { parseProductName } from './product-name-parser';
+import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from '../products/medication-definition';
+import { findIngredientInText, addLearnedIngredient } from '../products/reference-data.service';
 
 @Injectable()
 export class InventoryMigrationService {
@@ -40,6 +44,7 @@ export class InventoryMigrationService {
     private readonly catalogMapper: CatalogMapperService,
     private readonly supplierService: SupplierService,
     private readonly productsService: ProductsService,
+    private readonly ocrService: OcrService,
   ) {}
 
   /**
@@ -665,7 +670,9 @@ export class InventoryMigrationService {
           squareDescription: true,
           squareImageUrl: true,
           squareVariationName: true,
+          ocrText: true,
           categoryId: true,
+          medicationDefinitionId: true,
           category: { select: { id: true, name: true } },
         },
       }),
@@ -929,6 +936,31 @@ export class InventoryMigrationService {
           .catch((e) => this.logger.warn(`Failed to update product ${productId}: ${e}`));
       }
 
+      // Nothing to suggest once a product is already linked to a real
+      // MedicationDefinition (this cutover, an earlier one, or manual
+      // AddProductScreen entry) — medicationDefinitionId is global across
+      // every location, so a second location's cutover on the same catalog
+      // simply skips this rather than re-parsing/re-suggesting. Computed here
+      // (rather than closer to where it's used below) so the OCR trigger
+      // right after can use it to skip products with nothing left to gain.
+      const isCatalogedMedication = !!product.medicationDefinitionId;
+
+      // Lazily OCR the product image, same "resolve now, cache in background"
+      // pattern as imageUrl above — only when there's actually something to
+      // gain (no category yet, or not linked to a real medication) and only
+      // if this image hasn't already been OCR'd. This is what actually
+      // populates Product.ocrText in normal use; scripts/ocr-classify-products.ts
+      // is only for a one-off bulk backfill/audit, not a prerequisite.
+      let ocrText = product.ocrText;
+      if (!ocrText && imageUrl && (!product.categoryId || !isCatalogedMedication)) {
+        ocrText = await this.ocrService.recognizeImageUrl(imageUrl);
+        if (ocrText) {
+          this.prisma.product
+            .update({ where: { id: productId }, data: { ocrText } })
+            .catch((e) => this.logger.warn(`Failed to cache OCR text for product ${productId}: ${e}`));
+        }
+      }
+
       const sellingPrices = sellingPricesByProduct.get(productId) || [];
       let sellingPrice: { priceCents: number; currency: string } | null = null;
       let sellingPriceRange: { minCents: number; maxCents: number; currency: string } | null = null;
@@ -942,16 +974,13 @@ export class InventoryMigrationService {
         if (minCents !== maxCents) sellingPriceRange = { minCents, maxCents, currency };
       }
 
-      const suggestedCategoryName = classifyProductName(productName);
-      const suggestedCategoryId = categoryIdByName.get(suggestedCategoryName) ?? null;
-
-      // Confidence-gated subcategory guess, scoped to the already-suggested
-      // top category's children — classifySubcategory returns null on no
-      // match or an ambiguous one, so this only ever narrows the suggestion,
-      // never overrides a real answer with a bad guess.
-      const subcategoryMatch = suggestedCategoryId
-        ? classifySubcategory(productName, subcategoriesByParent.get(suggestedCategoryId) ?? [])
-        : null;
+      const { suggestedCategoryId, suggestedCategoryName, subcategoryMatch, nameParseFields } = this.buildSuggestionFields(
+        ocrText ?? null,
+        productName,
+        isCatalogedMedication,
+        categoryIdByName,
+        subcategoriesByParent,
+      );
 
       // Only auto-fill when nothing has been classified yet (fresh sync or
       // never run through classify-product-categories.ts) — never override
@@ -997,6 +1026,7 @@ export class InventoryMigrationService {
           categoryName: effectiveCategoryName,
           suggestedCategoryId,
           suggestedCategoryName,
+          ...nameParseFields,
         });
       } else {
         const extraction = this.costExtraction.extractCostFromDescription(productName, productDescription);
@@ -1028,6 +1058,7 @@ export class InventoryMigrationService {
           categoryName: effectiveCategoryName,
           suggestedCategoryId,
           suggestedCategoryName,
+          ...nameParseFields,
         });
 
         if (extraction.extractedEntries.length > 0) productsWithExtraction++;
@@ -1915,6 +1946,133 @@ export class InventoryMigrationService {
     }
   }
 
+  // Shared by the main extraction loop and reparseProductSuggestions below —
+  // same OCR-first/name-fallback category+ingredient suggestion logic either
+  // way, just called once per batch item there vs. once per manual re-run
+  // click here.
+  private buildSuggestionFields(
+    ocrText: string | null,
+    productName: string,
+    isCatalogedMedication: boolean,
+    categoryIdByName: Map<string, string>,
+    subcategoriesByParent: Map<string, CategoryRow[]>,
+  ) {
+    // Prefer OCR text over the Square item name — box text often states the
+    // category/ingredient a brand-only name omits — but only when it
+    // actually resolves to something; a blurry photo's OCR text falls back
+    // to the name, never overriding a real name-based match with "Sin
+    // clasificar".
+    const ocrCategoryName = ocrText ? classifyProductName(ocrText) : null;
+    const suggestedCategoryName =
+      ocrCategoryName && ocrCategoryName !== 'Sin clasificar' ? ocrCategoryName : classifyProductName(productName);
+    const suggestedCategoryId = categoryIdByName.get(suggestedCategoryName) ?? null;
+
+    // Confidence-gated subcategory guess, scoped to the already-suggested
+    // top category's children — classifySubcategory returns null on no
+    // match or an ambiguous one, so this only ever narrows the suggestion,
+    // never overrides a real answer with a bad guess.
+    let subcategoryMatch = suggestedCategoryId
+      ? classifySubcategory(productName, subcategoriesByParent.get(suggestedCategoryId) ?? [])
+      : null;
+
+    // Same OCR-first, name-fallback preference as suggestedCategoryName
+    // above: OCR text often carries the active ingredient a brand-only
+    // Square name doesn't, but an empty ingredient match (blurry photo, OCR
+    // text with no recognizable drug name) falls back to the name parse
+    // rather than surfacing a worse suggestion.
+    const ocrParse = !isCatalogedMedication && ocrText ? parseProductName(ocrText) : null;
+    const nameParse = isCatalogedMedication
+      ? null
+      : ocrParse && ocrParse.ingredients.length > 0
+        ? ocrParse
+        : parseProductName(productName);
+
+    // A name-parse ingredient match can also fill in the subcategory guess
+    // when the regex-rule classifier above came up empty — fold it into the
+    // same fallback chain, never overriding a real classifier match.
+    if (!subcategoryMatch && nameParse?.category) {
+      const parentId = suggestedCategoryId ?? categoryIdByName.get('Medicina') ?? null;
+      const candidates = parentId ? (subcategoriesByParent.get(parentId) ?? []) : [];
+      subcategoryMatch = candidates.find((c) => c.name === nameParse.category) ?? null;
+    }
+
+    return {
+      suggestedCategoryId,
+      suggestedCategoryName,
+      subcategoryMatch,
+      nameParseFields: {
+        isCatalogedMedication,
+        ocrText: ocrText ?? null,
+        parseConfidence: nameParse?.confidence ?? null,
+        suggestedBrand: nameParse?.brand ?? null,
+        ingredients: nameParse?.ingredients.length ? nameParse.ingredients : null,
+        form: nameParse?.form ?? null,
+        route: nameParse?.route ?? null,
+        presentation: nameParse?.presentation ?? null,
+        brandSearchTerms: nameParse?.brand ? [nameParse.brand] : null,
+        formOptions: nameParse?.formOptions.length ? nameParse.formOptions : null,
+        concentrationOptions: nameParse?.concentrationOptions.length ? nameParse.concentrationOptions : null,
+        routeOptions: nameParse?.routeOptions.length ? nameParse.routeOptions : null,
+      },
+    };
+  }
+
+  /** Re-runs category/ingredient suggestion against a reviewer-edited OCR
+   * text (the "Text read from package photo" panel's Try again button) —
+   * same suggestion logic the batch extraction loop runs once per product,
+   * just triggered on demand against whatever text is currently in that
+   * field instead of the cached Product.ocrText. Does not persist anything;
+   * the reviewer still approves (or not) via approveItem as usual. */
+  async reparseProductSuggestions(productId: string, ocrText: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: {
+        name: true,
+        squareProductName: true,
+        categoryId: true,
+        medicationDefinitionId: true,
+        category: { select: { name: true } },
+      },
+    });
+    if (!product) throw new Error(`Product ${productId} not found`);
+
+    const productName = product.squareProductName || product.name;
+    const isCatalogedMedication = !!product.medicationDefinitionId;
+
+    const categoryIdByName = await ensureCategoryIds(this.prisma);
+    const allSubcategories = await this.prisma.category.findMany({
+      where: { parentId: { not: null } },
+      select: { id: true, name: true, parentId: true },
+    });
+    const subcategoriesByParent = new Map<string, CategoryRow[]>();
+    for (const sub of allSubcategories) {
+      const list = subcategoriesByParent.get(sub.parentId!) ?? [];
+      list.push(sub);
+      subcategoriesByParent.set(sub.parentId!, list);
+    }
+
+    const { suggestedCategoryId, suggestedCategoryName, subcategoryMatch, nameParseFields } = this.buildSuggestionFields(
+      ocrText || null,
+      productName,
+      isCatalogedMedication,
+      categoryIdByName,
+      subcategoriesByParent,
+    );
+
+    const effectiveCategoryId = product.categoryId ?? subcategoryMatch?.id ?? suggestedCategoryId;
+    const effectiveCategoryName = product.categoryId
+      ? (product.category?.name ?? null)
+      : (subcategoryMatch?.name ?? suggestedCategoryName ?? null);
+
+    return {
+      categoryId: effectiveCategoryId,
+      categoryName: effectiveCategoryName,
+      suggestedCategoryId,
+      suggestedCategoryName,
+      ...nameParseFields,
+    };
+  }
+
   async approveItem(
     cutoverId: string,
     productId: string,
@@ -1936,9 +2094,64 @@ export class InventoryMigrationService {
     sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null,
     categoryId?: string | null,
     approvedBy?: string | null,
+    medicationInfo?: {
+      ingredients: Array<{ name: string; concentrationValue?: number | null; concentrationUnit?: string | null }>;
+      form: PharmaceuticalForm;
+      route: AdministrationRoute;
+      presentation?: string | null;
+      brandSearchTerms?: string[] | null;
+    } | null,
+    ocrText?: string | null,
   ): Promise<{ success: boolean }> {
     this.logger.log(`[APPROVE_ITEM] cutoverId: ${cutoverId}, productId: ${productId}, cost: ${cost}`);
     try {
+      // Resolved outside the $transaction below, same as findOrCreateSupplier
+      // elsewhere in this method — find-or-create helpers here use this.prisma
+      // directly rather than the transaction client. Reviewer-confirmed data
+      // (not raw parser output) going through the same exact-match
+      // find-or-create AddProductScreen already trusts, so this carries no
+      // more duplicate-record risk than manual entry does.
+      let medicationDefinitionId: string | null = null;
+      if (medicationInfo && medicationInfo.ingredients.length > 0) {
+        // Reviewer-confirmed ingredient names not already recognized (static
+        // dataset or previously learned) get remembered here so the next
+        // cutover's OCR/name parse resolves them directly instead of only
+        // via the structural guess — see LearnedIngredient in schema.prisma.
+        for (const ingredient of medicationInfo.ingredients) {
+          if (findIngredientInText(ingredient.name)) continue;
+          await this.prisma.learnedIngredient
+            .upsert({ where: { name: ingredient.name }, update: {}, create: { name: ingredient.name } })
+            .catch((e) => this.logger.warn(`Failed to persist learned ingredient "${ingredient.name}": ${e}`));
+          addLearnedIngredient(ingredient.name);
+        }
+
+        const existingProduct = await this.prisma.product.findUnique({
+          where: { id: productId },
+          select: { medicationDefinitionId: true },
+        });
+        if (!existingProduct?.medicationDefinitionId) {
+          const ingredientIds = await Promise.all(
+            medicationInfo.ingredients.map((i) => findOrCreateActiveIngredient(this.prisma, i.name)),
+          );
+          const strength =
+            medicationInfo.ingredients
+              .filter((i) => i.concentrationValue != null)
+              .map((i) => `${i.concentrationValue}${i.concentrationUnit ?? ''}`)
+              .join('/') || 'N/A';
+          medicationDefinitionId = await findOrCreateMedicationDefinition(this.prisma, {
+            name: medicationInfo.ingredients.map((i) => i.name).join('/'),
+            form: medicationInfo.form,
+            route: medicationInfo.route,
+            strength,
+            ingredients: medicationInfo.ingredients.map((ingredient, index) => ({
+              activeIngredientId: ingredientIds[index],
+              concentrationValue: ingredient.concentrationValue ?? undefined,
+              concentrationUnit: ingredient.concentrationUnit ?? undefined,
+            })),
+          });
+        }
+      }
+
       await this.prisma.$transaction(async (tx) => {
         const existingApproval = await tx.costApproval.findUnique({
           where: {
@@ -1987,6 +2200,27 @@ export class InventoryMigrationService {
 
         if (categoryId) {
           await tx.product.update({ where: { id: productId }, data: { categoryId } });
+        }
+
+        // Reviewer-corrected OCR text overwrites the cached value so a
+        // misread doesn't keep resurfacing on future extractions/cutovers
+        // for this product. undefined (old callers that don't send this
+        // field) leaves the cache untouched; "" is a deliberate clear.
+        if (ocrText !== undefined) {
+          await tx.product.update({ where: { id: productId }, data: { ocrText: ocrText || null } });
+        }
+
+        if (medicationDefinitionId) {
+          await tx.product.update({
+            where: { id: productId },
+            data: {
+              medicationDefinitionId,
+              manualPresentation: medicationInfo?.presentation || undefined,
+              searchAliases: medicationInfo?.brandSearchTerms?.length
+                ? { push: medicationInfo.brandSearchTerms }
+                : undefined,
+            },
+          });
         }
 
         if (wasPending && !wasAlreadyProcessed) {

@@ -1,6 +1,5 @@
 import { useState, type ComponentType } from "react";
 import { Sidebar } from "./components/Sidebar";
-import { UserHeader } from "./components/UserHeader";
 import { NAV_SECTIONS } from "./lib/navigation";
 import { LocationsScreen } from "./sections/ops/LocationsScreen";
 import { ProductsScreen } from "./sections/ops/ProductsScreen";
@@ -60,12 +59,9 @@ export function App() {
   return (
     <div className="flex min-h-screen">
       <Sidebar activeItem={activeItem} onSelect={setActiveItem} />
-      <div className="flex flex-1 flex-col">
-        <UserHeader />
-        <main className="flex-1 bg-(--color-surface) px-8 py-4 ">
-          {Screen ? <Screen /> : <ComingSoon label={item.label} sectionDescription={section.description} />}
-        </main>
-      </div>
+      <main className="h-screen flex-1 overflow-y-auto bg-(--color-surface) px-8 py-4">
+        {Screen ? <Screen /> : <ComingSoon label={item.label} sectionDescription={section.description} />}
+      </main>
     </div>
   );
 }

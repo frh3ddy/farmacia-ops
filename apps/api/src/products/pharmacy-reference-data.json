@@ -1,132 +1,1403 @@
 {
   "Analgésicos y antipiréticos": {
     "sintomas": ["dolor", "dolor de cabeza", "fiebre", "cefalea", "migraña", "dolor muscular", "dolor de muelas", "calentura", "dolor de cuerpo"],
-    "marcas": ["Tempra", "Tylenol", "Advil", "Motrin", "Bayer", "Aspirina", "Mejoral", "Flanax", "Dolac", "Syndol", "Tabcin"],
-    "principios_activos": ["paracetamol", "ibuprofeno", "ácido acetilsalicílico", "naproxeno", "ketorolaco", "metamizol", "dipirona"]
+    "productos": [
+      {
+        "principio_activo": "paracetamol",
+        "marcas": ["Tempra", "Tylenol", "Mejoral"],
+        "vias_administracion": ["oral", "rectal"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["500 mg", "750 mg", "1 g"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["120 mg/5 ml", "250 mg/5 ml"] },
+          { "forma": "gotas", "envase": "frasco gotero", "concentraciones": ["100 mg/ml"] },
+          { "forma": "supositorio", "envase": "caja", "concentraciones": ["100 mg", "300 mg"] },
+          { "forma": "tableta efervescente", "envase": "tubo", "concentraciones": ["500 mg", "1 g"] }
+        ]
+      },
+      {
+        "principio_activo": "ibuprofeno",
+        "marcas": ["Advil", "Motrin"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["200 mg", "400 mg", "600 mg", "800 mg"] },
+          { "forma": "cápsula de gel", "envase": "caja", "concentraciones": ["200 mg", "400 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["100 mg/5 ml", "200 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "ácido acetilsalicílico",
+        "marcas": ["Aspirina", "Bayer"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["100 mg", "300 mg", "500 mg"] },
+          { "forma": "tableta efervescente", "envase": "tubo", "concentraciones": ["500 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "naproxeno",
+        "marcas": ["Flanax", "Naxen"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["250 mg", "500 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["125 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "ketorolaco",
+        "marcas": ["Dolac", "Syndol"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["30 mg/ml", "60 mg/2 ml"] },
+          { "forma": "tableta sublingual", "envase": "caja", "concentraciones": ["30 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "metamizol (dipirona)",
+        "marcas": ["Neo-Melubrina", "Novalgina"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["500 mg", "1 g"] },
+          { "forma": "solución oral (gotas)", "envase": "frasco gotero", "concentraciones": ["500 mg/ml"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["1 g/2 ml", "2.5 g/5 ml"] }
+        ]
+      }
+    ]
   },
   "Antiinflamatorios": {
     "sintomas": ["inflamación", "hinchazón", "dolor articular", "artritis", "golpe", "torcedura", "esguince", "tendinitis", "dolor de rodilla", "dolor de espalda"],
-    "marcas": ["Flanax", "Cataflam", "Voltaren", "Advil", "Motrin", "Arcoxia", "Celebrex", "Dolac", "Dolo-Neurobión", "Naxen", "Profenid", "Piroxicam"],
-    "principios_activos": ["naproxeno", "diclofenaco", "ibuprofeno", "ketorolaco", "meloxicam", "piroxicam", "celecoxib", "etoricoxib", "ketoprofeno", "indometacina"]
+    "productos": [
+      {
+        "principio_activo": "diclofenaco",
+        "marcas": ["Voltaren", "Cataflam"],
+        "vias_administracion": ["oral", "intramuscular", "tópica", "rectal"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["50 mg", "100 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["75 mg/3 ml"] },
+          { "forma": "gel tópico", "envase": "tubo", "concentraciones": ["1%", "2.32%"] },
+          { "forma": "supositorio", "envase": "caja", "concentraciones": ["100 mg"] },
+          { "forma": "parche transdérmico", "envase": "sobre", "concentraciones": ["140 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "meloxicam",
+        "marcas": ["Piroxicam", "Mobic"],
+        "vias_administracion": ["oral", "intramuscular"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["7.5 mg", "15 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["15 mg/1.5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "celecoxib",
+        "marcas": ["Celebrex"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["100 mg", "200 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "piroxicam",
+        "marcas": ["Feldene"],
+        "vias_administracion": ["oral", "intramuscular", "tópica"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["10 mg", "20 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["20 mg/ml", "40 mg/2 ml"] },
+          { "forma": "gel", "envase": "tubo", "concentraciones": ["0.5%"] }
+        ]
+      },
+      {
+        "principio_activo": "ketoprofeno",
+        "marcas": ["Profenid", "Bi Profenid"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa", "tópica"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["50 mg", "100 mg"] },
+          { "forma": "tableta de liberación prolongada", "envase": "caja", "concentraciones": ["200 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["100 mg/2 ml"] },
+          { "forma": "gel", "envase": "tubo", "concentraciones": ["2.5%"] }
+        ]
+      },
+      {
+        "principio_activo": "indometacina",
+        "marcas": ["Indocin"],
+        "vias_administracion": ["oral", "rectal"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["25 mg", "50 mg"] },
+          { "forma": "supositorio", "envase": "caja", "concentraciones": ["100 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "etoricoxib",
+        "marcas": ["Arcoxia"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["60 mg", "90 mg", "120 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "dexametasona",
+        "marcas": ["Alin"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["0.5 mg", "4 mg", "8 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["4 mg/ml", "8 mg/2 ml"] },
+          { "forma": "elixir", "envase": "frasco", "concentraciones": ["0.5 mg/5 ml"] }
+        ]
+      }
+    ]
   },
   "Antibióticos": {
     "sintomas": ["infección", "infección de garganta", "infección urinaria", "infección de oído", "amigdalitis", "sinusitis", "bronquitis", "pus", "infección de piel", "infección dental"],
-    "marcas": ["Amoxil", "Augmentin", "Bactrim", "Ampicilina", "Azitromicina", "Ciprofloxacino", "Cefalexina", "Keflex", "Zitromax", "Levofloxacino", "Pentrexyl"],
-    "principios_activos": ["amoxicilina", "amoxicilina/ácido clavulánico", "azitromicina", "ciprofloxacino", "levofloxacino", "cefalexina", "trimetoprima/sulfametoxazol", "ampicilina", "claritromicina", "metronidazol", "clindamicina", "penicilina"]
+    "productos": [
+      {
+        "principio_activo": "amoxicilina",
+        "marcas": ["Amoxil", "Pentrexyl"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["250 mg", "500 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["125 mg/5 ml", "250 mg/5 ml", "500 mg/5 ml"] },
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["875 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "amoxicilina/ácido clavulánico",
+        "marcas": ["Augmentin", "Clavulin"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["500/125 mg", "875/125 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["125/31.25 mg/5 ml", "250/62.5 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "azitromicina",
+        "marcas": ["Zitromax", "Azitrocin"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["250 mg", "500 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["200 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "ciprofloxacino",
+        "marcas": ["Cipro", "Ciproflox"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["250 mg", "500 mg", "750 mg"] },
+          { "forma": "solución inyectable", "envase": "frasco ámpula", "concentraciones": ["200 mg/100 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "cefalexina",
+        "marcas": ["Keflex"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["250 mg", "500 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["125 mg/5 ml", "250 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "trimetoprima/sulfametoxazol",
+        "marcas": ["Bactrim"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["80/400 mg", "160/800 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["40/200 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "metronidazol",
+        "marcas": ["Flagyl"],
+        "vias_administracion": ["oral", "intravenosa", "vaginal"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["250 mg", "500 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["250 mg/5 ml"] },
+          { "forma": "óvulo vaginal", "envase": "caja", "concentraciones": ["500 mg"] },
+          { "forma": "solución inyectable", "envase": "bolsa", "concentraciones": ["500 mg/100 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "clindamicina",
+        "marcas": ["Dalacin"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa", "vaginal", "tópica"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["150 mg", "300 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["300 mg/2 ml", "600 mg/4 ml"] },
+          { "forma": "crema vaginal", "envase": "tubo con aplicadores", "concentraciones": ["2%"] },
+          { "forma": "gel tópico", "envase": "tubo", "concentraciones": ["1%"] }
+        ]
+      },
+      {
+        "principio_activo": "levofloxacino",
+        "marcas": ["Tavanic", "Elequine"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["500 mg", "750 mg"] },
+          { "forma": "solución inyectable", "envase": "frasco ámpula", "concentraciones": ["500 mg/100 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "penicilina benzatínica",
+        "marcas": ["Benzetacil"],
+        "vias_administracion": ["intramuscular"],
+        "presentaciones": [
+          { "forma": "polvo para solución inyectable", "envase": "caja con frasco ámpula y diluyente", "concentraciones": ["600,000 UI", "1,200,000 UI"] }
+        ]
+      }
+    ]
   },
   "Antigripales": {
     "sintomas": ["gripe", "gripa", "resfriado", "catarro", "congestión nasal", "escurrimiento nasal", "malestar general", "cuerpo cortado", "nariz tapada", "estornudos"],
-    "marcas": ["Theraflu", "XL-3", "Desenfriol-D", "Tabcin", "Vick Pyrena", "Neogripal", "NyQuil", "DayQuil", "Dristan", "Antigripal", "Sensibit D"],
-    "principios_activos": ["paracetamol/fenilefrina/clorfenamina", "paracetamol/pseudoefedrina", "fenilefrina", "pseudoefedrina", "clorfenamina", "dextrometorfano"]
+    "productos": [
+      {
+        "principio_activo": "paracetamol/fenilefrina/clorfenamina",
+        "marcas": ["Desenfriol-D", "XL-3", "Tabcin"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["500/5/2 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["160/2.5/1 mg/5 ml"] },
+          { "forma": "polvo para solución oral", "envase": "caja con sobres", "concentraciones": ["650/10/4 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "paracetamol/pseudoefedrina/dextrometorfano",
+        "marcas": ["NyQuil", "DayQuil", "Theraflu"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula de gel", "envase": "caja", "concentraciones": ["325/30/15 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["650/60/30 mg/30 ml"] },
+          { "forma": "polvo para solución", "envase": "caja con sobres", "concentraciones": ["650/60/20 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "fenilefrina",
+        "marcas": ["Dristan", "Sensibit D"],
+        "vias_administracion": ["oral", "nasal"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["5 mg", "10 mg"] },
+          { "forma": "spray nasal", "envase": "frasco spray", "concentraciones": ["0.25%", "0.5%"] }
+        ]
+      }
+    ]
   },
   "Antitusivos y expectorantes": {
     "sintomas": ["tos", "tos seca", "tos con flema", "flemas", "garganta irritada", "carraspera", "tos nocturna", "pecho congestionado"],
-    "marcas": ["Bisolvon", "Mucosolvan", "Dextrometorfano", "Robitussin", "Vick 44", "Tesalón Perlas", "Ambroxol", "Flutox", "Clenbunal", "Histiacil"],
-    "principios_activos": ["ambroxol", "bromhexina", "dextrometorfano", "guaifenesina", "benzonatato", "codeína", "acetilcisteína", "clenbuterol"]
+    "productos": [
+      {
+        "principio_activo": "ambroxol",
+        "marcas": ["Mucosolvan", "Axol"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["15 mg/5 ml", "30 mg/5 ml"] },
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["30 mg"] },
+          { "forma": "gotas", "envase": "frasco gotero", "concentraciones": ["7.5 mg/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "bromhexina",
+        "marcas": ["Bisolvon"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["4 mg/5 ml", "8 mg/5 ml"] },
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["8 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "dextrometorfano",
+        "marcas": ["Robitussin", "Vick 44"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["15 mg/5 ml"] },
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["15 mg", "30 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "benzonatato",
+        "marcas": ["Tesalón Perlas"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "perla (cápsula blanda)", "envase": "caja", "concentraciones": ["100 mg", "200 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "guaifenesina",
+        "marcas": ["Robitussin", "Mucinex"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["100 mg/5 ml"] },
+          { "forma": "tableta de liberación prolongada", "envase": "caja", "concentraciones": ["600 mg", "1200 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "acetilcisteína",
+        "marcas": ["Mucomyst", "Fluimucil"],
+        "vias_administracion": ["oral", "inhalatoria"],
+        "presentaciones": [
+          { "forma": "polvo para solución oral", "envase": "caja con sobres", "concentraciones": ["200 mg", "600 mg"] },
+          { "forma": "tableta efervescente", "envase": "tubo", "concentraciones": ["600 mg"] },
+          { "forma": "solución para nebulizar", "envase": "caja con ampolletas", "concentraciones": ["300 mg/3 ml"] }
+        ]
+      }
+    ]
   },
   "Antialérgicos": {
     "sintomas": ["alergia", "comezón", "ronchas", "estornudos", "ojos llorosos", "urticaria", "rinitis", "picazón", "alergia en la piel", "ojos hinchados"],
-    "marcas": ["Allegra", "Claritin", "Zyrtec", "Benadryl", "Avapena", "Loratadina", "Polaramine", "Xyzal", "Celestamine", "Zaditen"],
-    "principios_activos": ["loratadina", "cetirizina", "fexofenadina", "desloratadina", "levocetirizina", "difenhidramina", "clorfenamina", "dexclorfeniramina", "betametasona/dexclorfeniramina"]
+    "productos": [
+      {
+        "principio_activo": "loratadina",
+        "marcas": ["Claritin", "Sensibit"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["5 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "cetirizina",
+        "marcas": ["Zyrtec", "Virlix"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg"] },
+          { "forma": "gotas", "envase": "frasco gotero", "concentraciones": ["10 mg/ml"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["5 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "fexofenadina",
+        "marcas": ["Allegra"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["60 mg", "120 mg", "180 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["30 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "desloratadina",
+        "marcas": ["Aerius", "Aviant"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["5 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["2.5 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "difenhidramina",
+        "marcas": ["Benadryl"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["25 mg", "50 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["12.5 mg/5 ml"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["50 mg/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "clorfenamina",
+        "marcas": ["Avapena", "Clorotrimetrón"],
+        "vias_administracion": ["oral", "intramuscular"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["4 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["2 mg/5 ml"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["10 mg/ml"] }
+        ]
+      }
+    ]
   },
   "Antiácidos y medicamentos gastrointestinales": {
     "sintomas": ["agruras", "acidez", "reflujo", "gastritis", "indigestión", "dolor de estómago", "ardor estomacal", "eructos", "boca del estómago"],
-    "marcas": ["Pepcid", "Nexium", "Omeprazol", "Tums", "Melox", "Sal de Uvas Picot", "Peptobismol", "Mylanta", "Pantozol", "Esomeprazol"],
-    "principios_activos": ["omeprazol", "pantoprazol", "esomeprazol", "ranitidina", "famotidina", "hidróxido de aluminio/magnesio", "bicarbonato de sodio", "sucralfato", "lansoprazol"]
+    "productos": [
+      {
+        "principio_activo": "omeprazol",
+        "marcas": ["Losec", "Omeprazol genérico"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["20 mg", "40 mg"] },
+          { "forma": "polvo para solución inyectable", "envase": "caja con frasco ámpula", "concentraciones": ["40 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "pantoprazol",
+        "marcas": ["Pantozol", "Pantecta"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["20 mg", "40 mg"] },
+          { "forma": "polvo para solución inyectable", "envase": "caja con frasco ámpula", "concentraciones": ["40 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "esomeprazol",
+        "marcas": ["Nexium"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "cápsula/tableta", "envase": "caja", "concentraciones": ["20 mg", "40 mg"] },
+          { "forma": "polvo para suspensión oral", "envase": "caja con sobres", "concentraciones": ["10 mg", "20 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "ranitidina",
+        "marcas": ["Zantac"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["150 mg", "300 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["150 mg/10 ml"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["50 mg/2 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "hidróxido de aluminio y magnesio",
+        "marcas": ["Melox", "Mylanta"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["200/200 mg/5 ml"] },
+          { "forma": "tableta masticable", "envase": "caja", "concentraciones": ["200/200 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "bicarbonato de sodio",
+        "marcas": ["Sal de Uvas Picot"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "polvo efervescente", "envase": "caja con sobres", "concentraciones": ["2.14 g por sobre"] }
+        ]
+      },
+      {
+        "principio_activo": "sucralfato",
+        "marcas": ["Carafate"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["1 g"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["1 g/10 ml"] }
+        ]
+      }
+    ]
   },
   "Antidiarreicos": {
     "sintomas": ["diarrea", "evacuaciones líquidas", "colitis", "dolor abdominal", "deshidratación", "infección estomacal", "heces sueltas"],
-    "marcas": ["Imodium", "Lomotil", "Kaopectate", "Vida Suero Oral", "Electrolit", "Pepto-Bismol", "Treda", "Hidrasec", "Smecta"],
-    "principios_activos": ["loperamida", "subsalicilato de bismuto", "difenoxilato/atropina", "racecadotrilo", "diosmectita", "sales de rehidratación oral", "caolín/pectina"]
+    "productos": [
+      {
+        "principio_activo": "loperamida",
+        "marcas": ["Imodium"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta/cápsula", "envase": "caja", "concentraciones": ["2 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "subsalicilato de bismuto",
+        "marcas": ["Pepto-Bismol"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["262 mg/15 ml"] },
+          { "forma": "tableta masticable", "envase": "caja", "concentraciones": ["262 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "racecadotrilo",
+        "marcas": ["Hidrasec"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["100 mg"] },
+          { "forma": "polvo para suspensión oral", "envase": "caja con sobres", "concentraciones": ["10 mg", "30 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "sales de rehidratación oral",
+        "marcas": ["Vida Suero Oral", "Electrolit", "Pedialyte"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "solución", "envase": "botella", "concentraciones": ["625 ml", "500 ml"] },
+          { "forma": "polvo para solución", "envase": "caja con sobres", "concentraciones": ["27.9 g por sobre"] }
+        ]
+      }
+    ]
   },
   "Laxantes": {
     "sintomas": ["estreñimiento", "constipación", "no puedo ir al baño", "evacuación difícil", "heces duras", "inflamación abdominal"],
-    "marcas": ["Dulcolax", "Miralax", "Ciruelax", "Metamucil", "Senokot", "Phillips", "Fibercon", "Benefiber", "Senosilin"],
-    "principios_activos": ["bisacodilo", "polietilenglicol", "lactulosa", "psyllium", "senósidos", "hidróxido de magnesio", "docusato de sodio", "glicerina"]
+    "productos": [
+      {
+        "principio_activo": "bisacodilo",
+        "marcas": ["Dulcolax"],
+        "vias_administracion": ["oral", "rectal"],
+        "presentaciones": [
+          { "forma": "tableta con recubrimiento entérico", "envase": "caja", "concentraciones": ["5 mg"] },
+          { "forma": "supositorio", "envase": "caja", "concentraciones": ["10 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "polietilenglicol (PEG 3350)",
+        "marcas": ["Miralax", "Nulytely"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "polvo para solución oral", "envase": "frasco/sobre", "concentraciones": ["17 g por dosis"] }
+        ]
+      },
+      {
+        "principio_activo": "lactulosa",
+        "marcas": ["Duphalac"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "jarabe/solución", "envase": "frasco", "concentraciones": ["3.33 g/5 ml", "66.7%"] }
+        ]
+      },
+      {
+        "principio_activo": "senósidos A y B",
+        "marcas": ["Senokot", "Ciruelax"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["8.6 mg", "17.2 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["8.8 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "psyllium (plantago)",
+        "marcas": ["Metamucil"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "polvo para suspensión", "envase": "bote", "concentraciones": ["3.4 g por dosis"] }
+        ]
+      },
+      {
+        "principio_activo": "glicerina",
+        "marcas": ["Glycerin genérico"],
+        "vias_administracion": ["rectal"],
+        "presentaciones": [
+          { "forma": "supositorio", "envase": "caja", "concentraciones": ["1.36 g adulto", "0.67 g infantil"] }
+        ]
+      }
+    ]
   },
   "Antiespasmódicos": {
     "sintomas": ["cólico", "espasmo", "retortijón", "dolor menstrual", "cólico menstrual", "calambres abdominales", "cólico biliar", "cólico renal"],
-    "marcas": ["Buscapina", "Espasmo Canulase", "Librax", "Spasmomen", "Duspatalin", "Buscapina Fem", "Ibufen Fem"],
-    "principios_activos": ["butilhioscina", "hioscina", "mebeverina", "pinaverio", "trimebutina", "pargeverina", "otilonio"]
+    "productos": [
+      {
+        "principio_activo": "butilhioscina (hioscina)",
+        "marcas": ["Buscapina"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa", "rectal"],
+        "presentaciones": [
+          { "forma": "gragea", "envase": "caja", "concentraciones": ["10 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["20 mg/ml"] },
+          { "forma": "supositorio", "envase": "caja", "concentraciones": ["10 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "trimebutina",
+        "marcas": ["Debridat"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["200 mg", "300 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["24 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "pinaverio",
+        "marcas": ["Dicetel"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["50 mg", "100 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "mebeverina",
+        "marcas": ["Duspatalin"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula de liberación prolongada", "envase": "caja", "concentraciones": ["200 mg"] }
+        ]
+      }
+    ]
   },
   "Antieméticos": {
     "sintomas": ["vómito", "náusea", "mareo", "asco", "ganas de vomitar", "revuelto del estómago", "mareo por viaje", "vértigo"],
-    "marcas": ["Dramamine", "Bonadoxina", "Plasil", "Vonau", "Zofran", "Vomisin", "Primperan"],
-    "principios_activos": ["dimenhidrinato", "metoclopramida", "ondansetrón", "meclizina", "piridoxina/doxilamina", "domperidona", "clorpromazina"]
+    "productos": [
+      {
+        "principio_activo": "metoclopramida",
+        "marcas": ["Plasil", "Primperan"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg"] },
+          { "forma": "solución oral (gotas)", "envase": "frasco gotero", "concentraciones": ["4 mg/ml"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["10 mg/2 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "ondansetrón",
+        "marcas": ["Zofran", "Vonau"],
+        "vias_administracion": ["oral", "intravenosa", "intramuscular"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["4 mg", "8 mg"] },
+          { "forma": "tableta liofilizada (flash)", "envase": "caja", "concentraciones": ["4 mg", "8 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["4 mg/2 ml", "8 mg/4 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "dimenhidrinato",
+        "marcas": ["Dramamine"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["50 mg"] },
+          { "forma": "tableta masticable", "envase": "caja", "concentraciones": ["25 mg", "50 mg"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["12.5 mg/5 ml"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["50 mg/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "domperidona",
+        "marcas": ["Motilium"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["1 mg/ml"] }
+        ]
+      }
+    ]
   },
   "Medicamentos para diabetes": {
     "sintomas": ["diabetes", "azúcar alta", "glucosa alta", "insulina", "azúcar en la sangre", "mucha sed", "orinar mucho", "diabetes tipo 2"],
-    "marcas": ["Glucophage", "Januvia", "Amaryl", "Janumet", "Jardiance", "Victoza", "Lantus", "Humalog", "Forxiga", "Galvus", "Tresiba"],
-    "principios_activos": ["metformina", "glibenclamida", "glimepirida", "sitagliptina", "empagliflozina", "dapagliflozina", "liraglutida", "insulina glargina", "insulina lispro", "pioglitazona", "vildagliptina"]
+    "productos": [
+      {
+        "principio_activo": "metformina",
+        "marcas": ["Glucophage", "Dabex"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["500 mg", "850 mg", "1000 mg"] },
+          { "forma": "tableta de liberación prolongada", "envase": "caja", "concentraciones": ["500 mg", "750 mg", "1000 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "glibenclamida",
+        "marcas": ["Daonil", "Euglucon"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["5 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "sitagliptina",
+        "marcas": ["Januvia"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["25 mg", "50 mg", "100 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "empagliflozina",
+        "marcas": ["Jardiance"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg", "25 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "insulina glargina",
+        "marcas": ["Lantus", "Toujeo"],
+        "vias_administracion": ["subcutánea"],
+        "presentaciones": [
+          { "forma": "solución inyectable", "envase": "pluma prellenada", "concentraciones": ["100 UI/ml", "300 UI/ml"] },
+          { "forma": "solución inyectable", "envase": "cartucho", "concentraciones": ["100 UI/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "insulina lispro",
+        "marcas": ["Humalog"],
+        "vias_administracion": ["subcutánea", "intravenosa"],
+        "presentaciones": [
+          { "forma": "solución inyectable", "envase": "pluma prellenada", "concentraciones": ["100 UI/ml"] },
+          { "forma": "solución inyectable", "envase": "frasco ámpula", "concentraciones": ["100 UI/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "liraglutida",
+        "marcas": ["Victoza"],
+        "vias_administracion": ["subcutánea"],
+        "presentaciones": [
+          { "forma": "solución inyectable", "envase": "pluma prellenada", "concentraciones": ["6 mg/ml"] }
+        ]
+      }
+    ]
   },
   "Medicamentos para hipertensión": {
     "sintomas": ["presión alta", "hipertensión", "presión arterial", "dolor de cabeza por presión", "mareo por presión"],
-    "marcas": ["Losartán", "Enalapril", "Amlodipino", "Adalat", "Micardis", "Aprovel", "Concor", "Norvasc", "Atacand", "Co-Diován"],
-    "principios_activos": ["losartán", "enalapril", "amlodipino", "telmisartán", "irbesartán", "valsartán", "metoprolol", "nifedipino", "captopril", "hidroclorotiazida", "candesartán"]
+    "productos": [
+      {
+        "principio_activo": "losartán",
+        "marcas": ["Cozaar"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["25 mg", "50 mg", "100 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "enalapril",
+        "marcas": ["Renitec", "Glioten"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["5 mg", "10 mg", "20 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "amlodipino",
+        "marcas": ["Norvasc"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["5 mg", "10 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "telmisartán",
+        "marcas": ["Micardis"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["40 mg", "80 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "metoprolol",
+        "marcas": ["Concor", "Lopressor"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["50 mg", "100 mg"] },
+          { "forma": "tableta de liberación prolongada", "envase": "caja", "concentraciones": ["25 mg", "50 mg", "100 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["5 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "nifedipino",
+        "marcas": ["Adalat"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula de gelatina blanda", "envase": "caja", "concentraciones": ["10 mg"] },
+          { "forma": "tableta de liberación prolongada", "envase": "caja", "concentraciones": ["30 mg", "60 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "hidroclorotiazida",
+        "marcas": ["Microzide"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["12.5 mg", "25 mg", "50 mg"] }
+        ]
+      }
+    ]
   },
   "Medicamentos cardiovasculares": {
     "sintomas": ["corazón", "arritmia", "palpitaciones", "circulación", "insuficiencia cardíaca", "angina de pecho", "dolor en el pecho", "piernas hinchadas"],
-    "marcas": ["Concor", "Isosorbida", "Lanoxin", "Plavix", "Eliquis", "Xarelto", "Aspirina Protect", "Cordarone"],
-    "principios_activos": ["metoprolol", "bisoprolol", "atenolol", "digoxina", "isosorbida", "clopidogrel", "apixabán", "rivaroxabán", "warfarina", "amiodarona", "furosemida", "espironolactona"]
+    "productos": [
+      {
+        "principio_activo": "clopidogrel",
+        "marcas": ["Plavix"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["75 mg", "300 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "apixabán",
+        "marcas": ["Eliquis"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["2.5 mg", "5 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "rivaroxabán",
+        "marcas": ["Xarelto"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg", "15 mg", "20 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "furosemida",
+        "marcas": ["Lasix"],
+        "vias_administracion": ["oral", "intramuscular", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["20 mg", "40 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["20 mg/2 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "espironolactona",
+        "marcas": ["Aldactone"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["25 mg", "50 mg", "100 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "digoxina",
+        "marcas": ["Lanoxin"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["0.0625 mg", "0.125 mg", "0.25 mg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["0.25 mg/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "isosorbida",
+        "marcas": ["Isordil"],
+        "vias_administracion": ["oral", "sublingual"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg", "20 mg", "40 mg"] },
+          { "forma": "tableta sublingual", "envase": "caja", "concentraciones": ["5 mg"] }
+        ]
+      }
+    ]
   },
   "Medicamentos para colesterol": {
     "sintomas": ["colesterol", "colesterol alto", "triglicéridos", "triglicéridos altos", "grasa en la sangre", "colesterol malo alto"],
-    "marcas": ["Lipitor", "Crestor", "Zocor", "Lopid", "Vytorin", "Ezetrol", "Bezafibrato"],
-    "principios_activos": ["atorvastatina", "rosuvastatina", "simvastatina", "pravastatina", "ezetimiba", "gemfibrozilo", "bezafibrato", "fenofibrato"]
+    "productos": [
+      {
+        "principio_activo": "atorvastatina",
+        "marcas": ["Lipitor"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg", "20 mg", "40 mg", "80 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "rosuvastatina",
+        "marcas": ["Crestor"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["5 mg", "10 mg", "20 mg", "40 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "simvastatina",
+        "marcas": ["Zocor", "Vasotenal"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg", "20 mg", "40 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "ezetimiba",
+        "marcas": ["Ezetrol", "Zetia"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "bezafibrato",
+        "marcas": ["Bezalip"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["200 mg"] },
+          { "forma": "tableta de liberación prolongada", "envase": "caja", "concentraciones": ["400 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "fenofibrato",
+        "marcas": ["Tricor", "Lipidil"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula/tableta", "envase": "caja", "concentraciones": ["160 mg", "200 mg"] }
+        ]
+      }
+    ]
   },
   "Vitaminas y minerales": {
     "sintomas": ["vitaminas", "cansancio", "debilidad", "anemia", "falta de energía", "defensas bajas", "calcio", "hierro", "uñas débiles", "caída de cabello"],
-    "marcas": ["Centrum", "Supradyn", "Bedoyecta", "Neurobión", "Redoxon", "Ensure", "Ferranina", "Cal-C-Tose", "Pharmaton", "One-A-Day"],
-    "principios_activos": ["multivitamínico", "complejo B", "vitamina C", "ácido fólico", "hierro (sulfato ferroso)", "calcio", "vitamina D", "zinc", "magnesio", "vitamina B12", "vitamina E", "omega 3"]
+    "productos": [
+      {
+        "principio_activo": "complejo B (B1, B6, B12)",
+        "marcas": ["Bedoyecta", "Neurobión", "Dolo-Neurobión"],
+        "vias_administracion": ["oral", "intramuscular"],
+        "presentaciones": [
+          { "forma": "tableta/cápsula", "envase": "caja", "concentraciones": ["B1 100mg/B6 5mg/B12 50mcg"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["B1 100mg/B6 100mg/B12 5000mcg"] }
+        ]
+      },
+      {
+        "principio_activo": "vitamina C (ácido ascórbico)",
+        "marcas": ["Redoxon", "Cevalin"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta efervescente", "envase": "tubo", "concentraciones": ["1 g", "2 g"] },
+          { "forma": "tableta masticable", "envase": "frasco", "concentraciones": ["500 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "sulfato ferroso (hierro)",
+        "marcas": ["Ferranina", "Fer-In-Sol"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja/frasco", "concentraciones": ["200 mg (65 mg hierro elemental)"] },
+          { "forma": "gotas", "envase": "frasco gotero", "concentraciones": ["125 mg/ml"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["40 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "calcio + vitamina D",
+        "marcas": ["Cal-C-Tose", "Caltrate"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja/frasco", "concentraciones": ["600 mg Ca + 400 UI D3"] },
+          { "forma": "polvo para suspensión", "envase": "lata", "concentraciones": ["variable"] }
+        ]
+      },
+      {
+        "principio_activo": "multivitamínico",
+        "marcas": ["Centrum", "Pharmaton", "Supradyn"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta/cápsula", "envase": "frasco", "concentraciones": ["fórmula completa"] }
+        ]
+      },
+      {
+        "principio_activo": "ácido fólico",
+        "marcas": ["Acfol"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja/frasco", "concentraciones": ["0.4 mg", "5 mg"] }
+        ]
+      }
+    ]
   },
   "Medicamentos dermatológicos": {
     "sintomas": ["acné", "sarpullido", "dermatitis", "eczema", "quemadura de sol", "piel seca", "rozadura", "manchas en la piel", "piel irritada", "psoriasis"],
-    "marcas": ["Bactroban", "Vitacilina", "Bepanthen", "Hidrocortisona", "Betametasona", "Fucidin", "Isdin", "Epiduo", "Peroxiben"],
-    "principios_activos": ["betametasona", "hidrocortisona", "mupirocina", "ácido fusídico", "retinoides", "peróxido de benzoílo", "adapaleno", "clindamicina tópica", "dexpantenol", "urea", "calamina"]
+    "productos": [
+      {
+        "principio_activo": "betametasona",
+        "marcas": ["Celestoderm", "Diprosone"],
+        "vias_administracion": ["tópica", "intramuscular"],
+        "presentaciones": [
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["0.05%", "0.1%"] },
+          { "forma": "ungüento", "envase": "tubo", "concentraciones": ["0.05%"] },
+          { "forma": "loción", "envase": "frasco", "concentraciones": ["0.05%"] },
+          { "forma": "solución inyectable", "envase": "caja con ampolletas", "concentraciones": ["4 mg/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "hidrocortisona",
+        "marcas": ["Nutracort"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["0.5%", "1%"] }
+        ]
+      },
+      {
+        "principio_activo": "mupirocina",
+        "marcas": ["Bactroban"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "ungüento", "envase": "tubo", "concentraciones": ["2%"] }
+        ]
+      },
+      {
+        "principio_activo": "adapaleno",
+        "marcas": ["Differin", "Epiduo"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "gel", "envase": "tubo", "concentraciones": ["0.1%", "0.3%"] }
+        ]
+      },
+      {
+        "principio_activo": "dexpantenol",
+        "marcas": ["Bepanthen"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["5%"] },
+          { "forma": "ungüento", "envase": "tubo", "concentraciones": ["5%"] }
+        ]
+      },
+      {
+        "principio_activo": "calamina",
+        "marcas": ["Caladryl"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "loción", "envase": "frasco", "concentraciones": ["8%"] }
+        ]
+      }
+    ]
   },
   "Antifúngicos": {
     "sintomas": ["hongos", "pie de atleta", "hongos en las uñas", "candidiasis", "tiña", "comezón entre los dedos", "uñas amarillas"],
-    "marcas": ["Lamisil", "Lotrimin", "Canesten", "Fluconazol", "Diflucan", "Nizoral", "Mykosert", "Onicolaquer"],
-    "principios_activos": ["terbinafina", "clotrimazol", "fluconazol", "ketoconazol", "itraconazol", "nistatina", "miconazol", "ciclopirox"]
+    "productos": [
+      {
+        "principio_activo": "clotrimazol",
+        "marcas": ["Canesten", "Lotrimin"],
+        "vias_administracion": ["tópica", "vaginal"],
+        "presentaciones": [
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["1%"] },
+          { "forma": "solución", "envase": "frasco", "concentraciones": ["1%"] },
+          { "forma": "óvulo vaginal", "envase": "caja", "concentraciones": ["100 mg", "500 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "terbinafina",
+        "marcas": ["Lamisil"],
+        "vias_administracion": ["oral", "tópica"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["250 mg"] },
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["1%"] },
+          { "forma": "spray", "envase": "frasco spray", "concentraciones": ["1%"] }
+        ]
+      },
+      {
+        "principio_activo": "fluconazol",
+        "marcas": ["Diflucan"],
+        "vias_administracion": ["oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["50 mg", "100 mg", "150 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["10 mg/ml", "40 mg/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "ketoconazol",
+        "marcas": ["Nizoral"],
+        "vias_administracion": ["oral", "tópica"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["200 mg"] },
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["2%"] },
+          { "forma": "shampoo", "envase": "frasco", "concentraciones": ["2%"] }
+        ]
+      },
+      {
+        "principio_activo": "nistatina",
+        "marcas": ["Mycostatin"],
+        "vias_administracion": ["oral", "tópica", "vaginal"],
+        "presentaciones": [
+          { "forma": "suspensión oral", "envase": "frasco", "concentraciones": ["100,000 UI/ml"] },
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["100,000 UI/g"] },
+          { "forma": "óvulo vaginal", "envase": "caja", "concentraciones": ["100,000 UI"] }
+        ]
+      }
+    ]
   },
   "Antivirales": {
     "sintomas": ["herpes", "herpes labial", "fuego labial", "varicela", "herpes zóster", "ampolla en el labio"],
-    "marcas": ["Zovirax", "Valtrex", "Famvir", "Tamiflu", "Aciclovir"],
-    "principios_activos": ["aciclovir", "valaciclovir", "famciclovir", "oseltamivir"]
+    "productos": [
+      {
+        "principio_activo": "aciclovir",
+        "marcas": ["Zovirax"],
+        "vias_administracion": ["oral", "tópica", "intravenosa"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["200 mg", "400 mg", "800 mg"] },
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["5%"] },
+          { "forma": "polvo para solución inyectable", "envase": "frasco ámpula", "concentraciones": ["250 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "valaciclovir",
+        "marcas": ["Valtrex"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["500 mg", "1000 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "oseltamivir",
+        "marcas": ["Tamiflu"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["30 mg", "45 mg", "75 mg"] },
+          { "forma": "polvo para suspensión", "envase": "frasco", "concentraciones": ["6 mg/ml"] }
+        ]
+      }
+    ]
   },
   "Antisépticos": {
     "sintomas": ["herida", "cortada", "raspón", "desinfectar", "curación", "quemadura leve", "herida abierta"],
-    "marcas": ["Isodine", "Microdacyn", "Benzal", "Merthiolate", "Curitas", "Gasa estéril", "Bactroban"],
-    "principios_activos": ["yodopovidona", "ácido hipocloroso", "cloruro de benzalconio", "peróxido de hidrógeno", "alcohol isopropílico", "mupirocina", "sulfadiazina de plata"]
+    "productos": [
+      {
+        "principio_activo": "yodopovidona",
+        "marcas": ["Isodine"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "solución", "envase": "frasco", "concentraciones": ["10%"] },
+          { "forma": "espuma", "envase": "frasco spray", "concentraciones": ["10%"] }
+        ]
+      },
+      {
+        "principio_activo": "cloruro de benzalconio",
+        "marcas": ["Benzal"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "solución", "envase": "frasco", "concentraciones": ["0.13%"] }
+        ]
+      },
+      {
+        "principio_activo": "ácido hipocloroso",
+        "marcas": ["Microdacyn"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "solución", "envase": "frasco spray", "concentraciones": ["0.004%"] },
+          { "forma": "gel", "envase": "tubo", "concentraciones": ["0.004%"] }
+        ]
+      },
+      {
+        "principio_activo": "sulfadiazina de plata",
+        "marcas": ["Silvadene", "Argentafil"],
+        "vias_administracion": ["tópica"],
+        "presentaciones": [
+          { "forma": "crema", "envase": "tubo", "concentraciones": ["1%"] }
+        ]
+      }
+    ]
   },
   "Medicamentos oftálmicos": {
     "sintomas": ["ojos rojos", "conjuntivitis", "ojo seco", "irritación ocular", "ojos irritados", "lagrimeo", "ojos cansados", "ardor en los ojos"],
-    "marcas": ["Sophixin", "Systane", "Lagricel", "Refresh", "Oftálmica", "Ciprofloxacino oftálmico", "Tobradex", "Visine"],
-    "principios_activos": ["ciprofloxacino oftálmico", "tobramicina", "tobramicina/dexametasona", "nafazolina", "carboximetilcelulosa", "hialuronato de sodio", "cloranfenicol oftálmico"]
+    "productos": [
+      {
+        "principio_activo": "ciprofloxacino oftálmico",
+        "marcas": ["Sophixin Ofteno"],
+        "vias_administracion": ["oftálmica"],
+        "presentaciones": [
+          { "forma": "solución oftálmica (gotas)", "envase": "frasco gotero", "concentraciones": ["0.3%"] }
+        ]
+      },
+      {
+        "principio_activo": "tobramicina/dexametasona",
+        "marcas": ["Tobradex"],
+        "vias_administracion": ["oftálmica"],
+        "presentaciones": [
+          { "forma": "suspensión oftálmica", "envase": "frasco gotero", "concentraciones": ["0.3%/0.1%"] },
+          { "forma": "ungüento oftálmico", "envase": "tubo", "concentraciones": ["0.3%/0.1%"] }
+        ]
+      },
+      {
+        "principio_activo": "carboximetilcelulosa (lágrima artificial)",
+        "marcas": ["Refresh", "Systane"],
+        "vias_administracion": ["oftálmica"],
+        "presentaciones": [
+          { "forma": "solución oftálmica", "envase": "frasco gotero", "concentraciones": ["0.5%", "1%"] },
+          { "forma": "solución oftálmica", "envase": "caja con unidosis", "concentraciones": ["0.5%"] }
+        ]
+      },
+      {
+        "principio_activo": "nafazolina",
+        "marcas": ["Visine"],
+        "vias_administracion": ["oftálmica"],
+        "presentaciones": [
+          { "forma": "solución oftálmica", "envase": "frasco gotero", "concentraciones": ["0.012%"] }
+        ]
+      }
+    ]
   },
   "Medicamentos óticos": {
     "sintomas": ["dolor de oído", "infección de oído", "otitis", "oído tapado", "zumbido", "comezón en el oído"],
-    "marcas": ["Otocerum", "Ciprodex", "Otomicina", "Synalar Ótico", "Sofradex"],
-    "principios_activos": ["ciprofloxacino/dexametasona ótico", "neomicina/polimixina", "hidrocortisona ótica", "fluocinolona ótica", "benzocaína ótica"]
+    "productos": [
+      {
+        "principio_activo": "ciprofloxacino/dexametasona ótico",
+        "marcas": ["Ciprodex"],
+        "vias_administracion": ["ótica"],
+        "presentaciones": [
+          { "forma": "solución ótica (gotas)", "envase": "frasco gotero", "concentraciones": ["0.3%/0.1%"] }
+        ]
+      },
+      {
+        "principio_activo": "neomicina/polimixina B/hidrocortisona",
+        "marcas": ["Otomicina"],
+        "vias_administracion": ["ótica"],
+        "presentaciones": [
+          { "forma": "solución ótica", "envase": "frasco gotero", "concentraciones": ["3.5mg/10,000UI/10mg por ml"] }
+        ]
+      },
+      {
+        "principio_activo": "benzocaína ótica",
+        "marcas": ["Otalgán"],
+        "vias_administracion": ["ótica"],
+        "presentaciones": [
+          { "forma": "solución ótica", "envase": "frasco gotero", "concentraciones": ["1.4%"] }
+        ]
+      }
+    ]
   },
   "Medicamentos ginecológicos": {
     "sintomas": ["infección vaginal", "flujo vaginal", "cólicos menstruales", "irregularidad menstrual", "menopausia", "comezón vaginal", "resequedad vaginal"],
-    "marcas": ["Canesten V", "Ginkan", "Premarin", "Metronidazol vaginal", "Clindamicina vaginal", "Gyno-Daktarin"],
-    "principios_activos": ["clotrimazol vaginal", "metronidazol vaginal", "clindamicina vaginal", "miconazol vaginal", "nistatina vaginal", "estrógenos conjugados", "progesterona"]
+    "productos": [
+      {
+        "principio_activo": "clotrimazol vaginal",
+        "marcas": ["Canesten V"],
+        "vias_administracion": ["vaginal"],
+        "presentaciones": [
+          { "forma": "óvulo vaginal", "envase": "caja", "concentraciones": ["100 mg", "500 mg"] },
+          { "forma": "crema vaginal", "envase": "tubo con aplicadores", "concentraciones": ["1%", "2%"] }
+        ]
+      },
+      {
+        "principio_activo": "metronidazol vaginal",
+        "marcas": ["Flagyl V", "Ginkan"],
+        "vias_administracion": ["vaginal"],
+        "presentaciones": [
+          { "forma": "óvulo vaginal", "envase": "caja", "concentraciones": ["500 mg"] },
+          { "forma": "gel vaginal", "envase": "tubo con aplicadores", "concentraciones": ["0.75%"] }
+        ]
+      },
+      {
+        "principio_activo": "estrógenos conjugados",
+        "marcas": ["Premarin"],
+        "vias_administracion": ["oral", "vaginal"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["0.3 mg", "0.625 mg"] },
+          { "forma": "crema vaginal", "envase": "tubo con aplicador", "concentraciones": ["0.625 mg/g"] }
+        ]
+      }
+    ]
   },
   "Medicamentos urológicos": {
     "sintomas": ["infección urinaria", "ardor al orinar", "dolor al orinar", "cistitis", "próstata", "incontinencia", "próstata inflamada"],
-    "marcas": ["Pyridium", "Macrodantina", "Urocit-K", "Flomax", "Finasteride", "Urixin"],
-    "principios_activos": ["fenazopiridina", "nitrofurantoína", "fosfomicina", "tamsulosina", "finasterida", "dutasterida", "ciprofloxacino", "trimetoprima/sulfametoxazol"]
+    "productos": [
+      {
+        "principio_activo": "fenazopiridina",
+        "marcas": ["Pyridium"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["100 mg", "200 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "nitrofurantoína",
+        "marcas": ["Macrodantina"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula", "envase": "caja", "concentraciones": ["50 mg", "100 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "fosfomicina",
+        "marcas": ["Monurol"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "polvo para solución oral", "envase": "sobre", "concentraciones": ["3 g"] }
+        ]
+      },
+      {
+        "principio_activo": "tamsulosina",
+        "marcas": ["Flomax", "Secotex"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "cápsula de liberación prolongada", "envase": "caja", "concentraciones": ["0.4 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "finasterida",
+        "marcas": ["Proscar"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["5 mg"] }
+        ]
+      }
+    ]
   },
   "Medicamentos pediátricos": {
     "sintomas": ["fiebre en niños", "cólico del bebé", "tos en niños", "gripa en niños", "diarrea en niños", "dolor de oído en niños", "parásitos en niños"],
-    "marcas": ["Tempra Infantil", "Motrin Infantil", "Pedialyte", "Dimetapp", "Ambroxol pediátrico", "Vermox", "Calpol", "Tylenol Infantil"],
-    "principios_activos": ["paracetamol pediátrico", "ibuprofeno pediátrico", "ambroxol pediátrico", "sales de rehidratación oral", "albendazol", "mebendazol", "trimetoprima/sulfametoxazol pediátrico"]
+    "productos": [
+      {
+        "principio_activo": "paracetamol pediátrico",
+        "marcas": ["Tempra Infantil", "Tylenol Infantil", "Calpol"],
+        "vias_administracion": ["oral", "rectal"],
+        "presentaciones": [
+          { "forma": "gotas", "envase": "frasco gotero", "concentraciones": ["100 mg/ml"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["120 mg/5 ml"] },
+          { "forma": "supositorio", "envase": "caja", "concentraciones": ["100 mg", "200 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "ibuprofeno pediátrico",
+        "marcas": ["Motrin Infantil", "Advil Infantil"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["100 mg/5 ml"] },
+          { "forma": "gotas", "envase": "frasco gotero", "concentraciones": ["40 mg/ml"] }
+        ]
+      },
+      {
+        "principio_activo": "albendazol",
+        "marcas": ["Zentel", "Vermox Plus"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta masticable", "envase": "caja", "concentraciones": ["200 mg", "400 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["200 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "mebendazol",
+        "marcas": ["Vermox"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta masticable", "envase": "caja", "concentraciones": ["100 mg", "500 mg"] },
+          { "forma": "suspensión", "envase": "frasco", "concentraciones": ["100 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "sales de rehidratación oral pediátrico",
+        "marcas": ["Pedialyte", "Vida Suero Oral"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "solución", "envase": "botella", "concentraciones": ["500 ml"] },
+          { "forma": "polvo para solución", "envase": "sobre", "concentraciones": ["27.9 g"] }
+        ]
+      }
+    ]
   },
   "Medicamentos para enfermedades respiratorias": {
     "sintomas": ["asma", "falta de aire", "bronquitis", "sibilancias", "dificultad para respirar", "neumonía", "silbido al respirar", "opresión en el pecho"],
-    "marcas": ["Ventolin", "Salbutamol", "Seretide", "Symbicort", "Combivent", "Singulair", "Pulmicort", "Spiriva"],
-    "principios_activos": ["salbutamol", "fluticasona/salmeterol", "budesonida/formoterol", "ipratropio/salbutamol", "montelukast", "budesonida", "tiotropio", "beclometasona", "teofilina"]
+    "productos": [
+      {
+        "principio_activo": "salbutamol",
+        "marcas": ["Ventolin", "Aeroflux"],
+        "vias_administracion": ["inhalatoria", "oral", "intravenosa"],
+        "presentaciones": [
+          { "forma": "inhalador presurizado (MDI)", "envase": "dispositivo inhalador", "concentraciones": ["100 mcg/dosis"] },
+          { "forma": "solución para nebulizar", "envase": "frasco/ampolletas", "concentraciones": ["5 mg/ml", "2.5 mg/2.5 ml"] },
+          { "forma": "jarabe", "envase": "frasco", "concentraciones": ["2 mg/5 ml"] }
+        ]
+      },
+      {
+        "principio_activo": "fluticasona/salmeterol",
+        "marcas": ["Seretide", "Advair"],
+        "vias_administracion": ["inhalatoria"],
+        "presentaciones": [
+          { "forma": "inhalador en polvo seco (Diskus)", "envase": "dispositivo inhalador", "concentraciones": ["100/50 mcg", "250/50 mcg", "500/50 mcg"] },
+          { "forma": "inhalador presurizado (MDI)", "envase": "dispositivo inhalador", "concentraciones": ["125/25 mcg", "250/25 mcg"] }
+        ]
+      },
+      {
+        "principio_activo": "budesonida/formoterol",
+        "marcas": ["Symbicort"],
+        "vias_administracion": ["inhalatoria"],
+        "presentaciones": [
+          { "forma": "inhalador presurizado (Turbuhaler)", "envase": "dispositivo inhalador", "concentraciones": ["80/4.5 mcg", "160/4.5 mcg", "320/9 mcg"] }
+        ]
+      },
+      {
+        "principio_activo": "montelukast",
+        "marcas": ["Singulair"],
+        "vias_administracion": ["oral"],
+        "presentaciones": [
+          { "forma": "tableta", "envase": "caja", "concentraciones": ["10 mg"] },
+          { "forma": "tableta masticable", "envase": "caja", "concentraciones": ["4 mg", "5 mg"] },
+          { "forma": "granulado", "envase": "caja con sobres", "concentraciones": ["4 mg"] }
+        ]
+      },
+      {
+        "principio_activo": "ipratropio/salbutamol",
+        "marcas": ["Combivent"],
+        "vias_administracion": ["inhalatoria"],
+        "presentaciones": [
+          { "forma": "solución para nebulizar", "envase": "caja con ampolletas", "concentraciones": ["0.5 mg/2.5 mg por 2.5 ml"] },
+          { "forma": "inhalador presurizado", "envase": "dispositivo inhalador", "concentraciones": ["20/100 mcg por dosis"] }
+        ]
+      },
+      {
+        "principio_activo": "budesonida",
+        "marcas": ["Pulmicort"],
+        "vias_administracion": ["inhalatoria"],
+        "presentaciones": [
+          { "forma": "suspensión para nebulizar", "envase": "caja con ampolletas", "concentraciones": ["0.25 mg/ml", "0.5 mg/ml"] },
+          { "forma": "inhalador en polvo seco (Turbuhaler)", "envase": "dispositivo inhalador", "concentraciones": ["100 mcg", "200 mcg", "400 mcg"] }
+        ]
+      },
+      {
+        "principio_activo": "tiotropio",
+        "marcas": ["Spiriva"],
+        "vias_administracion": ["inhalatoria"],
+        "presentaciones": [
+          { "forma": "cápsula para inhalar", "envase": "caja con dispositivo HandiHaler", "concentraciones": ["18 mcg"] },
+          { "forma": "solución para inhalación (Respimat)", "envase": "dispositivo inhalador", "concentraciones": ["2.5 mcg por dosis"] }
+        ]
+      }
+    ]
   }
 }

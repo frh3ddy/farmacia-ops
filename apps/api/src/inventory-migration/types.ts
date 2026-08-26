@@ -49,6 +49,19 @@ export interface CostExtractionResult {
   suggestedCategoryId?: string | null; // Classifier's suggestion, resolved to an id
   suggestedCategoryName?: string | null; // Classifier's suggestion, human-readable
 
+  // --- Name-parsed medication suggestion (product-name-parser.ts) ---
+  isCatalogedMedication?: boolean; // product.medicationDefinitionId already set — nothing to suggest
+  parseConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | null;
+  suggestedBrand?: string | null;
+  ingredients?: Array<{ name: string; concentrationValue: number | null; concentrationUnit: string | null }> | null;
+  form?: string | null; // PharmaceuticalForm value, e.g. 'SUSPENSION'
+  route?: string | null; // AdministrationRoute value, e.g. 'ORAL'
+  presentation?: string | null; // -> Product.manualPresentation on approve
+  brandSearchTerms?: string[] | null; // -> Product.searchAliases on approve
+  formOptions?: string[] | null; // matched ingredient's known presentaciones[].forma values
+  concentrationOptions?: string[] | null; // matched presentación's canonical concentraciones[]
+  routeOptions?: string[] | null; // matched ingredient's vias_administracion, resolved to enum values
+
   // --- Selling price (Square catalog) - extraction-time only ---
   sellingPrices?: Array<{
     variationId: string;

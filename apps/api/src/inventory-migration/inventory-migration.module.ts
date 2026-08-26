@@ -5,6 +5,7 @@ import { SquareInventoryService } from './square-inventory.service';
 import { CostExtractionService } from './cost-extraction.service';
 import { CatalogMapperService } from './catalog-mapper.service';
 import { SupplierService } from './supplier.service';
+import { OcrService } from './ocr.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { ProductsModule } from '../products/products.module';
@@ -18,6 +19,7 @@ import { ProductsModule } from '../products/products.module';
     CostExtractionService,
     CatalogMapperService,
     SupplierService,
+    OcrService,
     PrismaService,
   ],
   exports: [InventoryMigrationService],

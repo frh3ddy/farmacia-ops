@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { suggestSuppliersRemote } from "../../../lib/cutover/supplierMatching";
 import type { SupplierSuggestion } from "../../../lib/cutover/types";
+import { Tooltip } from "../../../components/ui/Tooltip";
 
 type SupplierAutocompleteInputProps = {
   value: string;
@@ -94,52 +94,70 @@ export function SupplierAutocompleteInput({
 
   return (
     <div className="relative">
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        onChange={e => handleChange(e.target.value)}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        placeholder={placeholder}
-        className={`w-full rounded-sm border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
-          highlighted ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"
-        }`}
-      />
-      {matchedByInitialLabel && <p className="mt-0.5 text-xs text-(--color-accent)">Matched by initial: {matchedByInitialLabel}</p>}
-      {open &&
-        suggestions.length > 0 &&
-        menuRect &&
-        createPortal(
-          <div
-            style={{
-              position: "fixed",
-              top: menuRect.top,
-              bottom: menuRect.bottom,
-              left: menuRect.left,
-              width: menuRect.width,
-            }}
-            className={`z-20 max-h-60 overflow-auto rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) shadow-lg ${
-              menuRect.bottom !== undefined ? "mb-1" : "mt-1"
-            }`}
-          >
-            {suggestions.map((s, i) => (
-              <div
-                key={i}
-                onMouseDown={() => {
-                  selectingRef.current = true;
-                  onSelectSuggestion(s);
-                  setOpen(false);
-                }}
-                className="cursor-pointer px-3 py-2 text-sm hover:bg-(--color-surface)"
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={e => handleChange(e.target.value)}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          placeholder={placeholder}
+          className={`w-full rounded-sm border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent) ${
+            matchedByInitialLabel ? "pr-7" : ""
+          } ${highlighted ? "border-(--color-accent) bg-(--color-accent)/5" : "border-(--color-border-standard)"}`}
+        />
+        {matchedByInitialLabel && (
+          // The positioning lives here, on a plain span outside Tooltip —
+          // Tooltip wraps its children in its own `relative` span, which
+          // would otherwise become the containing block for `absolute` (a
+          // tiny box sized to the icon, not the input), throwing off
+          // top-1/2's vertical centering against the input's real height.
+          <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+            <Tooltip label={`Matched by initial: ${matchedByInitialLabel}`}>
+              <span
+                tabIndex={0}
+                aria-label={`Matched by initial: ${matchedByInitialLabel}`}
+                className="flex h-4 w-4 items-center justify-center rounded-full bg-(--color-accent)/15 text-[10px] font-semibold text-(--color-accent) focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
               >
-                <div className="font-medium text-(--color-ink)">{s.name}</div>
-                {s.contactInfo && <div className="text-xs text-(--color-ink-tertiary)">{s.contactInfo}</div>}
-              </div>
-            ))}
-          </div>,
-          document.body
+                i
+              </span>
+            </Tooltip>
+          </span>
         )}
+      </div>
+      {/* Not portaled — see Modal.tsx's comment on why. `position: fixed`
+          with viewport-relative coords from getBoundingClientRect renders
+          identically either way. */}
+      {open && suggestions.length > 0 && menuRect && (
+        <div
+          style={{
+            position: "fixed",
+            top: menuRect.top,
+            bottom: menuRect.bottom,
+            left: menuRect.left,
+            width: menuRect.width,
+          }}
+          className={`z-20 max-h-60 overflow-auto rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) shadow-lg ${
+            menuRect.bottom !== undefined ? "mb-1" : "mt-1"
+          }`}
+        >
+          {suggestions.map((s, i) => (
+            <div
+              key={i}
+              onMouseDown={() => {
+                selectingRef.current = true;
+                onSelectSuggestion(s);
+                setOpen(false);
+              }}
+              className="cursor-pointer px-3 py-2 text-sm hover:bg-(--color-surface)"
+            >
+              <div className="font-medium text-(--color-ink)">{s.name}</div>
+              {s.contactInfo && <div className="text-xs text-(--color-ink-tertiary)">{s.contactInfo}</div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

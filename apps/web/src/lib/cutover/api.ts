@@ -60,10 +60,44 @@ export type ApproveItemPayload = {
   sellingPrice?: { priceCents: number; currency: string } | null;
   sellingPriceRange?: { minCents: number; maxCents: number; currency: string } | null;
   categoryId?: string | null;
+  medicationInfo?: {
+    ingredients: Array<{ name: string; concentrationValue?: number | null; concentrationUnit?: string | null }>;
+    form: string;
+    route: string;
+    presentation?: string | null;
+    brandSearchTerms?: string[] | null;
+  } | null;
+  ocrText?: string | null;
 };
 
 export function approveItem(payload: ApproveItemPayload) {
   return apiFetch(`${BASE}/approve-item`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export type ReparseOcrTextResult = {
+  categoryId: string | null;
+  categoryName: string | null;
+  suggestedCategoryId: string | null;
+  suggestedCategoryName: string | null;
+  isCatalogedMedication: boolean;
+  ocrText: string | null;
+  parseConfidence: "HIGH" | "MEDIUM" | "LOW" | null;
+  suggestedBrand: string | null;
+  ingredients: Array<{ name: string; concentrationValue: number | null; concentrationUnit: string | null }> | null;
+  form: string | null;
+  route: string | null;
+  presentation: string | null;
+  brandSearchTerms: string[] | null;
+  formOptions: string[] | null;
+  concentrationOptions: string[] | null;
+  routeOptions: string[] | null;
+};
+
+export function reparseOcrText(payload: { productId: string; ocrText: string }) {
+  return apiFetch<ReparseOcrTextResult>(`${BASE}/reparse-ocr-text`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function discardItem(payload: {

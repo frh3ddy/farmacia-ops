@@ -22,6 +22,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
     handleDiscardItem,
     handleMarkDiscontinued,
     handleRegenerateExtraction,
+    handleReparseOcrText,
     handleRestoreItem,
     handleReusePreviousApprovals,
     handleContinueBatch,
@@ -82,7 +83,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4">
+    <div className="mx-auto max-w-7xl space-y-4">
       <ErrorBanner error={error} onDismiss={() => setError(null)} />
 
       <div className="rounded-md border border-(--color-border-standard) bg-(--color-surface-raised)">
@@ -191,6 +192,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
           onDiscard={handleDiscardItem}
           onMarkDiscontinued={handleMarkDiscontinued}
           onRegenerateExtraction={handleRegenerateExtraction}
+          onReparseOcrText={handleReparseOcrText}
           setError={setError}
           hideProductImageForTransition={hideProductImageForTransition}
           allCategories={allCategories}
