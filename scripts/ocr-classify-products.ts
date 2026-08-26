@@ -10,12 +10,19 @@
  * often the only source that has the printed active-ingredient/product info
  * a brand-only Square name lacks.
  *
- * Note: @arcships/light-ocr declares support for Node 22/24 only; its native
- * darwin-arm64 runtime was added here as a direct (not optional) dependency
- * because npm silently skips optional platform packages whose `engines`
- * don't match the current Node — verified the addon itself loads and runs
- * fine on Node 25. Add the matching @arcships/light-ocr-<platform> package
- * if running this elsewhere (e.g. linux-x64-gnu in CI).
+ * Note: @arcships/light-ocr declares support for Node 22/24 only. Its native
+ * runtime packages (darwin-arm64, linux-x64-gnu — see root package.json's
+ * optionalDependencies) are legitimately optional: npm skips whichever one
+ * doesn't match the current OS/CPU, same as any platform-specific native
+ * dependency. A local Node that doesn't satisfy the engines range (e.g. this
+ * repo's dev machine on Node 25) additionally skips whichever one WOULD
+ * match the platform too — that's a real local-only gap (this script won't
+ * find the addon there), not something to work around by forcing a platform
+ * package into `dependencies` again: that previously broke the prod build,
+ * since it force-installs the wrong platform's native binary everywhere
+ * (Railway's Linux x64 container tried to install the darwin-arm64 one and
+ * hard-failed with EBADPLATFORM). Use `nvm use 24` (or 22) locally instead
+ * when you need to actually run this script.
  *
  * Caches recognized text on Product.ocrText so this (and the cutover
  * extraction flow, which prefers this cached text for ingredient parsing)

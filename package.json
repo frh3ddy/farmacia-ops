@@ -41,7 +41,6 @@
   },
   "dependencies": {
     "@arcships/light-ocr": "^0.5.7",
-    "@arcships/light-ocr-darwin-arm64": "^0.5.7",
     "@nestjs/config": "^4.0.2",
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
@@ -50,6 +49,10 @@
     "express": "^5.2.1",
     "pg": "^8.13.1",
     "prisma": "^7.2.0"
+  },
+  "optionalDependencies": {
+    "@arcships/light-ocr-darwin-arm64": "^0.5.7",
+    "@arcships/light-ocr-linux-x64-gnu": "^0.5.7"
   },
   "devDependencies": {
     "@types/multer": "^2.0.0",
