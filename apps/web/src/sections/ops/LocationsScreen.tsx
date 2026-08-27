@@ -36,7 +36,7 @@ export function LocationsScreen() {
     setAssigningId(locationId);
     setAssignError(null);
     try {
-      await apiFetch(`/auth/employees/${user.employee.id}/locations`, {
+      await apiFetch(`/employees/${user.employee.id}/locations`, {
         method: "POST",
         body: JSON.stringify({ locationId, role: "OWNER" }),
       });
