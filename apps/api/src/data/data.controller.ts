@@ -250,6 +250,14 @@ export class DataController {
   // can authenticate — the deployment must be reseeded with a new employee
   // before anyone can log back in. Requires an exact confirmation phrase
   // (not just the OWNER role) so it can't be triggered by a stray request.
+  //
+  // Category and ActiveIngredient are deliberately NOT wiped — both are
+  // idempotently reseeded from scratch by scripts/seed-category-hierarchy.ts
+  // and scripts/seed-active-ingredients.ts, so clearing them here would just
+  // mean re-running those scripts to get back to the same rows. Every other
+  // table is covered; deletion order mirrors the schema's FK graph (children
+  // before the parents they reference — e.g. Transfer/TransferLine before
+  // the Product/Location/Inventory rows they point at).
   @Post('wipe/full')
   @Roles('OWNER')
   async wipeFullDatabase(@Body() body?: { confirm?: string }) {
@@ -264,6 +272,9 @@ export class DataController {
       const counts = await this.prisma.$transaction(async (tx) => {
         // Order matters: children (FK holders) before the parents they
         // reference, mirroring the schema's foreign key graph.
+        const transferLine = await tx.transferLine.deleteMany({});
+        const transfer = await tx.transfer.deleteMany({});
+        const medicationDefinitionIngredient = await tx.medicationDefinitionIngredient.deleteMany({});
         const inventoryConsumption = await tx.inventoryConsumption.deleteMany({});
         const costApproval = await tx.costApproval.deleteMany({});
         const catalogMapping = await tx.catalogMapping.deleteMany({});
@@ -288,13 +299,18 @@ export class DataController {
         const cutover = await tx.cutover.deleteMany({});
         const extractionSession = await tx.extractionSession.deleteMany({});
         const product = await tx.product.deleteMany({});
-        const category = await tx.category.deleteMany({});
+        const medicationDefinition = await tx.medicationDefinition.deleteMany({});
+        const laboratory = await tx.laboratory.deleteMany({});
+        const learnedIngredient = await tx.learnedIngredient.deleteMany({});
         const supplier = await tx.supplier.deleteMany({});
         const location = await tx.location.deleteMany({});
         const employee = await tx.employee.deleteMany({});
         const user = await tx.user.deleteMany({});
 
         return {
+          transferLine: transferLine.count,
+          transfer: transfer.count,
+          medicationDefinitionIngredient: medicationDefinitionIngredient.count,
           inventoryConsumption: inventoryConsumption.count,
           costApproval: costApproval.count,
           catalogMapping: catalogMapping.count,
@@ -319,7 +335,9 @@ export class DataController {
           cutover: cutover.count,
           extractionSession: extractionSession.count,
           product: product.count,
-          category: category.count,
+          medicationDefinition: medicationDefinition.count,
+          laboratory: laboratory.count,
+          learnedIngredient: learnedIngredient.count,
           supplier: supplier.count,
           location: location.count,
           employee: employee.count,
@@ -329,7 +347,7 @@ export class DataController {
 
       return {
         success: true,
-        message: 'Full database wipe completed. All Employee/User records are gone — reseed an employee before anyone can log in again.',
+        message: 'Full database wipe completed (Category/ActiveIngredient preserved — reseed everything else via the seed scripts). All Employee/User records are gone — reseed an employee before anyone can log in again.',
         data: counts,
       };
     } catch (error) {
