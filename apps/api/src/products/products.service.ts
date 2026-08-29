@@ -17,6 +17,7 @@ export interface CreateProductInput {
   sellingPrice: number; // Price in dollars (e.g., 45.50)
   costPrice?: number; // Initial cost price in dollars
   initialStock?: number; // Initial inventory quantity
+  supplierId?: string; // Supplier the initial stock came from (requires initialStock + costPrice)
   locationId: string; // Required for inventory and Square sync
   syncToSquare?: boolean; // Default true
   categoryId?: string;
@@ -147,6 +148,7 @@ export class ProductsService {
       sellingPrice,
       costPrice,
       initialStock,
+      supplierId,
       locationId,
       syncToSquare = true,
       categoryId,
@@ -198,6 +200,13 @@ export class ProductsService {
     });
     if (!location) {
       throw new NotFoundException(`Location ${locationId} not found`);
+    }
+
+    if (supplierId) {
+      const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId } });
+      if (!supplier) {
+        throw new NotFoundException(`Supplier ${supplierId} not found`);
+      }
     }
 
     // Derived naming/presentación: only for medicamento products
@@ -324,6 +333,31 @@ export class ProductsService {
       });
       inventoryCreated = true;
       this.logger.log(`[PRODUCT] Created initial inventory: ${initialStock} units @ $${costPrice} ${CURRENCY}`);
+
+      if (supplierId) {
+        await this.prisma.supplierProduct.upsert({
+          where: { supplierId_productId: { supplierId, productId: product.id } },
+          create: {
+            supplierId,
+            productId: product.id,
+            cost: new Prisma.Decimal(costPrice),
+            isPreferred: true,
+            notes: `Auto-created from initial stock on product creation`,
+          },
+          update: { cost: new Prisma.Decimal(costPrice), isPreferred: true },
+        });
+
+        await this.prisma.supplierCostHistory.create({
+          data: {
+            productId: product.id,
+            supplierId,
+            unitCost: new Prisma.Decimal(costPrice),
+            effectiveAt: new Date(),
+            source: 'MANUAL',
+            isCurrent: true,
+          },
+        });
+      }
     }
 
     // Fetch complete product with relations

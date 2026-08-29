@@ -34,6 +34,7 @@ interface CreateProductDto {
   sellingPrice: number;
   costPrice?: number;
   initialStock?: number;
+  supplierId?: string; // Supplier the initial stock came from
   locationId?: string; // Optional - will use current location if not provided
   syncToSquare?: boolean;
   categoryId?: string;
@@ -159,6 +160,7 @@ export class ProductsController {
       sellingPrice: body.sellingPrice,
       costPrice: body.costPrice,
       initialStock: body.initialStock,
+      supplierId: body.supplierId,
       locationId,
       syncToSquare: body.syncToSquare !== false, // Default true
       categoryId: body.categoryId,
