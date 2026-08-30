@@ -70,16 +70,11 @@ export class SalesTestService {
       throw new Error(`Location ${locationId} not found`);
     }
 
-    // Get products with inventory and catalog mappings
+    // All products, in or out of stock — a zero-stock product needs to be
+    // selectable here too, to test the sale-worker's auto-cover-shortfall
+    // path (apps/worker/src/sale.worker.ts calculateFIFOCost). Sorted
+    // in-stock-first below so the common case still lists first.
     const products = await this.prisma.product.findMany({
-      where: {
-        inventories: {
-          some: {
-            locationId: locationId,
-            quantity: { gt: 0 },
-          },
-        },
-      },
       include: {
         inventories: {
           where: {
@@ -103,22 +98,27 @@ export class SalesTestService {
       orderBy: { name: 'asc' },
     });
 
-    return products.map(product => {
-      const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
-      const mapping = product.catalogMappings[0];
-      const hasSquareMapping = !!mapping && !mapping.squareVariationId.startsWith('local_');
+    return products
+      .map(product => {
+        const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
+        const mapping = product.catalogMappings[0];
+        const hasSquareMapping = !!mapping && !mapping.squareVariationId.startsWith('local_');
 
-      return {
-        id: product.id,
-        name: product.name,
-        sku: product.sku,
-        displayName: product.squareProductName || product.squareVariationName || product.name,
-        sellingPrice: mapping ? Number(mapping.priceCents) / 100 : null,
-        totalInventory,
-        squareVariationId: hasSquareMapping ? mapping.squareVariationId : null,
-        hasSquareMapping,
-      };
-    });
+        return {
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          displayName: product.squareProductName || product.squareVariationName || product.name,
+          sellingPrice: mapping ? Number(mapping.priceCents) / 100 : null,
+          totalInventory,
+          squareVariationId: hasSquareMapping ? mapping.squareVariationId : null,
+          hasSquareMapping,
+        };
+      })
+      .sort((a, b) => {
+        const stockRank = (p: { totalInventory: number }) => (p.totalInventory > 0 ? 0 : 1);
+        return stockRank(a) - stockRank(b) || a.name.localeCompare(b.name);
+      });
   }
 
   /**
@@ -186,14 +186,12 @@ export class SalesTestService {
         );
       }
 
-      // Check inventory
-      const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
-      if (totalInventory < item.quantity) {
-        throw new Error(
-          `Insufficient inventory for "${product.name}". ` +
-          `Requested: ${item.quantity}, Available: ${totalInventory}`
-        );
-      }
+      // No pre-flight inventory check here — a real Square sale doesn't get
+      // one either. It's enqueued straight to the worker, which now decides
+      // (calculateFIFOCost in sale.worker.ts: auto-covers a shortfall at a
+      // known cost basis, or fails with InsufficientInventoryError if none
+      // exists) — this test screen should exercise that exact same path,
+      // not a stricter duplicate check that blocks it before it can run.
 
       // Get price (use override or mapping price)
       const price = item.priceOverride ?? (Number(mapping.priceCents) / 100);

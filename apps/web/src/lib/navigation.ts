@@ -34,6 +34,12 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    id: "yastas",
+    label: "Yastás",
+    description: "Ledger paralelo de operaciones bancarias — saldo, retiros y transferencias",
+    items: [{ id: "yastas", label: "Yastás", status: "ready" }],
+  },
+  {
     id: "cutover",
     label: "Cutover",
     description: "One-time historical cost migration",

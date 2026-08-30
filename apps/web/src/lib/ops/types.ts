@@ -3,6 +3,7 @@ export type CatalogMapping = {
   squareVariationId: string;
   syncedAt: string;
   locationId: string | null;
+  employeeId?: string | null;
   product?: { id: string; name: string } | null;
   location?: { id: string; name: string } | null;
 };
@@ -14,9 +15,46 @@ export type Product = {
   sku: string | null;
   createdAt: string;
   category?: { id: string; name: string } | null;
-  catalogMappings?: unknown[];
+  catalogMappings?: CatalogMapping[];
   supplierCount: number;
   searchAliases?: string[];
+  tracksInventory?: boolean;
+};
+
+export type Employee = {
+  id: string;
+  name: string;
+};
+
+export type YastasWallet = {
+  locationId: string;
+  balance: string;
+  updatedAt: string;
+};
+
+export type YastasOperation = {
+  id: string;
+  employeeId: string;
+  locationId: string;
+  direction: "IN" | "OUT";
+  faceAmount: string;
+  yastasReceiptRef: string | null;
+  occurredAt: string;
+  createdAt: string;
+};
+
+export type YastasSettlement = {
+  id: string;
+  locationId: string;
+  periodStart: string;
+  periodEnd: string;
+  amountEarned: string;
+  status: "PROVISIONAL" | "CONFIRMED";
+  reportedAt: string | null;
+  paidAt: string | null;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
 };
 
 export type Supplier = {

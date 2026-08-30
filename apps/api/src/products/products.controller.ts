@@ -656,4 +656,16 @@ export class ProductsController {
     const product = await this.productsService.setSearchAliases(id, body.searchAliases ?? []);
     return { success: true, data: { product } };
   }
+
+  /**
+   * Mark (or unmark) a product as a Yastás per-employee service item.
+   * Pass employeeId: null to revert to normal FIFO-tracked merchandise.
+   * Roles: OWNER, MANAGER
+   */
+  @Patch(':id/yastas-mapping')
+  @Roles('OWNER', 'MANAGER')
+  async setYastasMapping(@Param('id') id: string, @Body() body: { employeeId: string | null }) {
+    const product = await this.productsService.setYastasMapping(id, body.employeeId ?? null);
+    return { success: true, data: { product } };
+  }
 }

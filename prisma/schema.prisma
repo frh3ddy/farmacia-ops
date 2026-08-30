@@ -21,12 +21,19 @@ model Location {
   cutoverLocks    CutoverLock[]
   adjustments     InventoryAdjustment[]
   receivings      InventoryReceiving[]
-  transfersOut    Transfer[] @relation("TransferFrom")
-  transfersIn     Transfer[] @relation("TransferTo")
+  transfersOut    Transfer[]            @relation("TransferFrom")
+  transfersIn     Transfer[]            @relation("TransferTo")
 
   // Authentication relations
-  devices     Device[]
+  devices             Device[]
   employeeAssignments EmployeeLocationAssignment[]
+
+  // Yastás relations
+  yastasOperations   YastasOperation[]
+  yastasWallet       YastasWallet?
+  yastasSettlements  YastasSettlement[]
+  yastasTransfersOut YastasWalletTransfer[] @relation("YastasTransferFrom")
+  yastasTransfersIn  YastasWalletTransfer[] @relation("YastasTransferTo")
 
   createdAt DateTime @default(now())
 }
@@ -38,15 +45,15 @@ model Location {
 
 // Device - represents an activated iPad/tablet at a location
 model Device {
-  id            String    @id @default(uuid())
-  locationId    String
-  name          String    // "iPad Pro - Front Counter"
-  deviceToken   String    @unique // dt_<uuid> format
-  type          DeviceType @default(FIXED)
-  isActive      Boolean   @default(true)
-  lastActiveAt  DateTime?
-  activatedAt   DateTime  @default(now())
-  activatedBy   String    // Employee ID who activated
+  id           String     @id @default(uuid())
+  locationId   String
+  name         String // "iPad Pro - Front Counter"
+  deviceToken  String     @unique // dt_<uuid> format
+  type         DeviceType @default(FIXED)
+  isActive     Boolean    @default(true)
+  lastActiveAt DateTime?
+  activatedAt  DateTime   @default(now())
+  activatedBy  String // Employee ID who activated
 
   location Location @relation(fields: [locationId], references: [id])
 
@@ -55,30 +62,33 @@ model Device {
 }
 
 enum DeviceType {
-  FIXED   // iPad at counter, locked to one location
-  MOBILE  // Mobile device, can switch locations
-  WEB     // Web browser session
+  FIXED // iPad at counter, locked to one location
+  MOBILE // Mobile device, can switch locations
+  WEB // Web browser session
 }
 
 // Employee - a person who can log in with PIN
 model Employee {
-  id           String    @id @default(uuid())
-  name         String
-  email        String?   @unique
-  passwordHash String?   // Only for owner/manager device activation
-  pin          String?   // Hashed 4-6 digit PIN
-  pinSalt      String?   // Salt for PIN hashing
-  pinFailedAttempts Int  @default(0)
-  pinLockedUntil DateTime?
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  createdBy    String?   // Employee ID who created this employee
+  id                String    @id @default(uuid())
+  name              String
+  email             String?   @unique
+  passwordHash      String? // Only for owner/manager device activation
+  pin               String? // Hashed 4-6 digit PIN
+  pinSalt           String? // Salt for PIN hashing
+  pinFailedAttempts Int       @default(0)
+  pinLockedUntil    DateTime?
+  isActive          Boolean   @default(true)
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  createdBy         String? // Employee ID who created this employee
 
   // Relations
-  assignments  EmployeeLocationAssignment[]
-  auditLogs    AuditLog[]
-  sessions     EmployeeSession[]
+  assignments           EmployeeLocationAssignment[]
+  auditLogs             AuditLog[]
+  sessions              EmployeeSession[]
+  catalogMappings       CatalogMapping[]
+  yastasOperations      YastasOperation[]
+  yastasWalletTransfers YastasWalletTransfer[]
 
   @@index([email])
   @@index([isActive])
@@ -92,7 +102,7 @@ model EmployeeLocationAssignment {
   role       EmployeeRole
   isActive   Boolean      @default(true)
   assignedAt DateTime     @default(now())
-  assignedBy String?      // Employee ID who made this assignment
+  assignedBy String? // Employee ID who made this assignment
 
   employee Employee @relation(fields: [employeeId], references: [id])
   location Location @relation(fields: [locationId], references: [id])
@@ -104,21 +114,21 @@ model EmployeeLocationAssignment {
 }
 
 enum EmployeeRole {
-  OWNER      // Full access to everything
-  MANAGER    // Inventory operations, reports, limited employee management
-  CASHIER    // Read-only inventory access
+  OWNER // Full access to everything
+  MANAGER // Inventory operations, reports, limited employee management
+  CASHIER // Read-only inventory access
   ACCOUNTANT // Expenses, reports, read-only inventory
 }
 
 // Session - tracks active employee sessions
 model EmployeeSession {
-  id           String   @id @default(uuid())
-  employeeId   String
-  deviceToken  String   // Links to device
-  sessionToken String   @unique // st_<uuid> format
-  locationId   String   // Current location context
-  expiresAt    DateTime
-  createdAt    DateTime @default(now())
+  id             String   @id @default(uuid())
+  employeeId     String
+  deviceToken    String // Links to device
+  sessionToken   String   @unique // st_<uuid> format
+  locationId     String // Current location context
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
   lastActivityAt DateTime @default(now())
 
   employee Employee @relation(fields: [employeeId], references: [id])
@@ -135,10 +145,10 @@ model AuditLog {
   employeeId String?
   deviceId   String?
   locationId String?
-  action     String   // "LOGIN", "LOGOUT", "CREATE_EXPENSE", etc.
-  entityType String?  // "Expense", "InventoryAdjustment", etc.
+  action     String // "LOGIN", "LOGOUT", "CREATE_EXPENSE", etc.
+  entityType String? // "Expense", "InventoryAdjustment", etc.
   entityId   String?
-  details    Json?    // Additional context
+  details    Json? // Additional context
   ipAddress  String?
   userAgent  String?
   timestamp  DateTime @default(now())
@@ -171,11 +181,12 @@ enum MigrationStatus {
 }
 
 model Product {
-  id             String  @id @default(uuid())
-  name           String
-  sku            String? @unique
-  categoryId     String?
-  isDiscontinued Boolean @default(false)
+  id              String  @id @default(uuid())
+  name            String
+  sku             String? @unique
+  categoryId      String?
+  isDiscontinued  Boolean @default(false)
+  tracksInventory Boolean @default(true) // false only for per-employee Yastás service items — never touches Inventory/FIFO
 
   // Square catalog data (cached to avoid API calls during extraction)
   squareProductName   String? // Product name from Square ITEM
@@ -193,9 +204,9 @@ model Product {
   medicationType         MedicationType?
   medicationDefinitionId String? // links to the underlying medication (brand/generic equivalence)
   presentation           String? // e.g. "Caja c/20 tabletas"
-  requiresPrescription   Boolean          @default(false)
-  isControlled           Boolean          @default(false) // controlled/restricted substance
-  searchAliases          String[]         @default([]) // extra search synonyms/misspellings
+  requiresPrescription   Boolean         @default(false)
+  isControlled           Boolean         @default(false) // controlled/restricted substance
+  searchAliases          String[]        @default([]) // extra search synonyms/misspellings
 
   // Derived naming/presentación inputs — medicamento only. `name`/`presentation`
   // above are the resolved display values (manual override, else derived from
@@ -206,7 +217,7 @@ model Product {
   // liquids/semisolids with BOTH packaging levels set, this means primary
   // packages per secondary package (e.g. bottles per box) instead — see
   // derivePresentation in derived-naming.ts.
-  primaryContent Int? // content of ONE primary package (e.g. ml per bottle) — only meaningful
+  primaryContent     Int? // content of ONE primary package (e.g. ml per bottle) — only meaningful
   // when primaryPackaging is set together with secondaryPackaging on a
   // liquid/semisolid; distinct from `quantity` in that combination.
   manualName         String? // overrides the derived name when set
@@ -222,17 +233,17 @@ model Product {
 
   category             Category?             @relation(fields: [categoryId], references: [id])
   laboratory           Laboratory?           @relation(fields: [labId], references: [id])
-  medicationDefinition  MedicationDefinition? @relation(fields: [medicationDefinitionId], references: [id])
-  suppliers           SupplierProduct[]
-  supplierCostHistory SupplierCostHistory[]
-  inventories         Inventory[]
-  placements          Placement[]
-  saleItems           SaleItem[]
-  catalogMappings     CatalogMapping[]
-  costApprovals       CostApproval[]
-  adjustments         InventoryAdjustment[]
-  receivings          InventoryReceiving[]
-  transfers           Transfer[]
+  medicationDefinition MedicationDefinition? @relation(fields: [medicationDefinitionId], references: [id])
+  suppliers            SupplierProduct[]
+  supplierCostHistory  SupplierCostHistory[]
+  inventories          Inventory[]
+  placements           Placement[]
+  saleItems            SaleItem[]
+  catalogMappings      CatalogMapping[]
+  costApprovals        CostApproval[]
+  adjustments          InventoryAdjustment[]
+  receivings           InventoryReceiving[]
+  transfers            Transfer[]
 
   createdAt DateTime @default(now())
 
@@ -296,7 +307,7 @@ enum AdministrationRoute {
 // can't be expressed as a single DB unique constraint. Two Products are
 // considered equivalent alternatives iff they share a medicationDefinitionId.
 model MedicationDefinition {
-  id       String               @id @default(uuid())
+  id       String              @id @default(uuid())
   name     String // display name, e.g. "Paracetamol 500 mg tablet"
   form     PharmaceuticalForm
   route    AdministrationRoute
@@ -313,11 +324,11 @@ model MedicationDefinitionIngredient {
   activeIngredientId     String
   // Per-ingredient concentration (combination drugs), split so deriveName
   // can format "500mg/125mg" programmatically instead of parsing free text.
-  concentrationValue Decimal?
-  concentrationUnit  String? // 'mg' | 'mg/ml' | '%' | 'mcg' | 'UI' | ...
+  concentrationValue     Decimal?
+  concentrationUnit      String? // 'mg' | 'mg/ml' | '%' | 'mcg' | 'UI' | ...
   // Explicit render order — medical convention (e.g. Amoxicilina always
   // before Ácido Clavulánico), NOT alphabetical or insertion order.
-  order Int @default(0)
+  order                  Int      @default(0)
 
   medicationDefinition MedicationDefinition @relation(fields: [medicationDefinitionId], references: [id], onDelete: Cascade)
   activeIngredient     ActiveIngredient     @relation(fields: [activeIngredientId], references: [id])
@@ -425,8 +436,8 @@ model Inventory {
   createdByReceiving InventoryReceiving? @relation("ReceivingCreatedBatch")
 
   // Transfer: this lot as a ship-out source, or as the batch a receive created
-  transferLinesAsSource      TransferLine[] @relation("TransferLineSource")
-  createdByTransferLine      TransferLine?  @relation("TransferLineDestination")
+  transferLinesAsSource TransferLine[] @relation("TransferLineSource")
+  createdByTransferLine TransferLine?  @relation("TransferLineDestination")
 
   createdAt DateTime @default(now())
 
@@ -514,21 +525,21 @@ model InventoryAdjustment {
   productId  String
 
   // Adjustment details
-  type          AdjustmentType
-  quantity      Int // Positive = add inventory, Negative = remove inventory
-  reason        String? // Human-readable reason
-  notes         String? // Additional notes
+  type     AdjustmentType
+  quantity Int // Positive = add inventory, Negative = remove inventory
+  reason   String? // Human-readable reason
+  notes    String? // Additional notes
 
   // Cost tracking
-  unitCost      Decimal // Cost per unit (for valuation)
-  totalCost     Decimal // |quantity| * unitCost (always positive for reporting)
+  unitCost  Decimal // Cost per unit (for valuation)
+  totalCost Decimal // |quantity| * unitCost (always positive for reporting)
 
   // For positive adjustments: reference to created inventory batch
   createdBatchId String? @unique
 
   // Audit metadata
-  adjustedAt    DateTime @default(now())
-  adjustedBy    String? // User ID who made the adjustment
+  adjustedAt DateTime @default(now())
+  adjustedBy String? // User ID who made the adjustment
 
   // Client-supplied dedup key for offline-queue replay (iOS): lets a retried
   // write after a dropped connection be recognized as the same request
@@ -539,12 +550,12 @@ model InventoryAdjustment {
   effectiveDate DateTime @default(now()) // Date the adjustment applies to
 
   // Relations
-  location      Location @relation(fields: [locationId], references: [id])
-  product       Product  @relation(fields: [productId], references: [id])
-  createdBatch  Inventory? @relation("AdjustmentCreatedBatch", fields: [createdBatchId], references: [id])
+  location     Location   @relation(fields: [locationId], references: [id])
+  product      Product    @relation(fields: [productId], references: [id])
+  createdBatch Inventory? @relation("AdjustmentCreatedBatch", fields: [createdBatchId], references: [id])
 
   // Consumption records (for negative adjustments - FIFO trail)
-  consumptions  InventoryConsumption[]
+  consumptions InventoryConsumption[]
 
   @@index([locationId])
   @@index([productId])
@@ -554,18 +565,19 @@ model InventoryAdjustment {
 }
 
 enum AdjustmentType {
-  DAMAGE          // Product damaged, unsellable
-  THEFT           // Product stolen/missing
-  EXPIRED         // Product past expiration
+  DAMAGE // Product damaged, unsellable
+  THEFT // Product stolen/missing
+  EXPIRED // Product past expiration
   COUNT_CORRECTION // Physical count doesn't match system
-  FOUND           // Product found (positive adjustment)
-  RETURN          // Customer return (positive adjustment)
-  TRANSFER_OUT    // Transferred to another location (negative)
-  TRANSFER_IN     // Received from another location (positive)
-  BREAK_BULK_OUT  // Converted to loose units of a linked looseProduct (negative)
-  BREAK_BULK_IN   // Received as loose units broken from a linked box product (positive)
-  WRITE_OFF       // General write-off
-  OTHER           // Other reason (requires notes)
+  FOUND // Product found (positive adjustment)
+  RETURN // Customer return (positive adjustment)
+  TRANSFER_OUT // Transferred to another location (negative)
+  TRANSFER_IN // Received from another location (positive)
+  BREAK_BULK_OUT // Converted to loose units of a linked looseProduct (negative)
+  BREAK_BULK_IN // Received as loose units broken from a linked box product (positive)
+  WRITE_OFF // General write-off
+  OTHER // Other reason (requires notes)
+  AUTO_SALE_COVER // System-created to cover a Square sale that exceeded recorded stock
 }
 
 enum TransferStatus {
@@ -596,9 +608,9 @@ model Transfer {
   receivedAt     DateTime?
   createdBy      String?
 
-  product      Product  @relation(fields: [productId], references: [id])
-  fromLocation Location @relation("TransferFrom", fields: [fromLocationId], references: [id])
-  toLocation   Location @relation("TransferTo", fields: [toLocationId], references: [id])
+  product      Product        @relation(fields: [productId], references: [id])
+  fromLocation Location       @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location       @relation("TransferTo", fields: [toLocationId], references: [id])
   lines        TransferLine[]
 
   createdAt DateTime @default(now())
@@ -610,17 +622,17 @@ model Transfer {
 }
 
 model TransferLine {
-  id                 String    @id @default(uuid())
-  transferId         String
-  sourceInventoryId  String // which origin lot this line drew from
-  quantity           Int // shipped from this lot
-  quantityReceived   Int? // null until received; discrepancy = quantity - quantityReceived
-  unitCost           Decimal
-  originalReceivedAt DateTime // preserved so destination FIFO ordering isn't corrupted
-  destinationInventoryId String? @unique // set once received
+  id                     String   @id @default(uuid())
+  transferId             String
+  sourceInventoryId      String // which origin lot this line drew from
+  quantity               Int // shipped from this lot
+  quantityReceived       Int? // null until received; discrepancy = quantity - quantityReceived
+  unitCost               Decimal
+  originalReceivedAt     DateTime // preserved so destination FIFO ordering isn't corrupted
+  destinationInventoryId String?  @unique // set once received
 
-  transfer             Transfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
-  sourceInventory      Inventory @relation("TransferLineSource", fields: [sourceInventoryId], references: [id])
+  transfer             Transfer   @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  sourceInventory      Inventory  @relation("TransferLineSource", fields: [sourceInventoryId], references: [id])
   destinationInventory Inventory? @relation("TransferLineDestination", fields: [destinationInventoryId], references: [id])
 }
 
@@ -630,23 +642,23 @@ model TransferLine {
 // Links to Inventory batches for FIFO tracking
 // ============================================================================
 model InventoryReceiving {
-  id         String @id @default(uuid())
+  id         String  @id @default(uuid())
   locationId String
   productId  String
   supplierId String?
 
   // Receiving details
-  quantity      Int
-  unitCost      Decimal
-  totalCost     Decimal // quantity * unitCost
+  quantity  Int
+  unitCost  Decimal
+  totalCost Decimal // quantity * unitCost
 
   // Reference numbers
-  invoiceNumber   String?  // Supplier invoice number
-  purchaseOrderId String?  // Internal PO reference
-  batchNumber     String?  // Lot/batch number from supplier
-  
+  invoiceNumber   String? // Supplier invoice number
+  purchaseOrderId String? // Internal PO reference
+  batchNumber     String? // Lot/batch number from supplier
+
   // Product tracking
-  expiryDate      DateTime? // Product expiration date
+  expiryDate        DateTime? // Product expiration date
   manufacturingDate DateTime? // Manufacturing date if known
 
   // Created inventory batch reference
@@ -657,20 +669,20 @@ model InventoryReceiving {
   clientRequestId String? @unique
 
   // Square sync tracking
-  squareSynced    Boolean @default(false)
+  squareSynced    Boolean   @default(false)
   squareSyncedAt  DateTime?
   squareSyncError String?
 
   // Audit metadata
-  receivedAt   DateTime @default(now())
-  receivedBy   String?  // User ID who received
-  notes        String?
+  receivedAt DateTime @default(now())
+  receivedBy String? // User ID who received
+  notes      String?
 
   // Relations
-  location       Location   @relation(fields: [locationId], references: [id])
-  product        Product    @relation(fields: [productId], references: [id])
-  supplier       Supplier?  @relation(fields: [supplierId], references: [id])
-  inventoryBatch Inventory  @relation("ReceivingCreatedBatch", fields: [inventoryBatchId], references: [id])
+  location       Location  @relation(fields: [locationId], references: [id])
+  product        Product   @relation(fields: [productId], references: [id])
+  supplier       Supplier? @relation(fields: [supplierId], references: [id])
+  inventoryBatch Inventory @relation("ReceivingCreatedBatch", fields: [inventoryBatchId], references: [id])
 
   @@index([locationId])
   @@index([productId])
@@ -687,14 +699,14 @@ model Expense {
   type        ExpenseType
   amount      Decimal
   date        DateTime
-  description String?      // Description of the expense
-  vendor      String?      // Who was paid (landlord, utility company, etc.)
-  reference   String?      // Invoice/receipt number
-  isPaid      Boolean      @default(true)
+  description String? // Description of the expense
+  vendor      String? // Who was paid (landlord, utility company, etc.)
+  reference   String? // Invoice/receipt number
+  isPaid      Boolean     @default(true)
   paidAt      DateTime?
   notes       String?
-  createdBy   String?      // User who recorded it
-  createdAt   DateTime     @default(now())
+  createdBy   String? // User who recorded it
+  createdAt   DateTime    @default(now())
 
   // Client-supplied dedup key for offline-queue replay (iOS) — see
   // InventoryAdjustment.clientRequestId for the full rationale.
@@ -712,13 +724,13 @@ enum ExpenseType {
   UTILITIES
   PAYROLL
   INSURANCE
-  SUPPLIES      // Office/store supplies (not inventory)
+  SUPPLIES // Office/store supplies (not inventory)
   MARKETING
   MAINTENANCE
   TAXES
   BANK_FEES
-  SOFTWARE      // POS software, subscriptions
-  PROFESSIONAL  // Accountant, lawyer fees
+  SOFTWARE // POS software, subscriptions
+  PROFESSIONAL // Accountant, lawyer fees
   OTHER
 }
 
@@ -767,6 +779,7 @@ model CatalogMapping {
   squareVariationId String // ITEM_VARIATION.id from Square
   productId         String
   locationId        String? // Optional, null = global mapping
+  employeeId        String? // set only for Yastás per-employee IN-direction items; null for ordinary product mappings
 
   // Cached selling price from Square
   priceCents    Decimal? // Selling price in cents (from price_money.amount)
@@ -775,6 +788,7 @@ model CatalogMapping {
 
   product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   location Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  employee Employee? @relation(fields: [employeeId], references: [id])
 
   syncedAt  DateTime @default(now())
   createdAt DateTime @default(now())
@@ -784,6 +798,7 @@ model CatalogMapping {
   @@index([productId])
   @@index([locationId])
   @@index([squareVariationId])
+  @@index([employeeId])
 }
 
 model CostApproval {
@@ -931,4 +946,118 @@ model ExtractionBatch {
   @@index([extractionSessionId])
   @@index([cutoverId])
   @@index([status])
+}
+
+enum YastasOperationDirection {
+  IN // money into Yastás via Square (bill pay, topup, remittance, loan payment)
+  OUT // withdrawal, cash handed to customer — never touches Square
+}
+
+enum WalletMovementType {
+  OPENING_BALANCE // cutover seed, at most one per wallet ever (app-enforced, not a DB constraint)
+  LOAD // manual float top-up from Yastás
+  OPERATION_DEBIT // paired with an IN operation (float spent to settle the operation)
+  OPERATION_CREDIT // paired with an OUT operation (float reimbursed after cash payout)
+  TRANSFER_OUT // source side of a YastasWalletTransfer
+  TRANSFER_IN // destination side of a YastasWalletTransfer
+}
+
+enum YastasSettlementStatus {
+  PROVISIONAL // Yastás's running figure, may still be revised
+  CONFIRMED // final, paid-out figure
+}
+
+// ============================================================================
+// Yastás banking-correspondent operations — fully parallel ledger. Customers
+// do banking-style ops (bill pay/topup/remittance/loan payment = IN, cash
+// withdrawal = OUT) through the pharmacy. NEVER touches Sale/SaleItem/
+// InventoryConsumption/FIFO — zero COGS/margin impact by construction.
+// ============================================================================
+model YastasOperation {
+  id               String                   @id @default(uuid())
+  employeeId       String
+  locationId       String
+  squareId         String? // Square payment.id (same convention as Sale.squareId, NOT order id);
+  // set only for IN rows, used for webhook-redelivery idempotency
+  yastasReceiptRef String? // Yastás's own receipt/operation reference for day-end reconciliation
+  direction        YastasOperationDirection
+  faceAmount       Decimal // amount entered at POS or manual entry — NOT revenue
+  occurredAt       DateTime                 @default(now())
+  createdAt        DateTime                 @default(now())
+
+  employee  Employee         @relation(fields: [employeeId], references: [id])
+  location  Location         @relation(fields: [locationId], references: [id])
+  movements WalletMovement[]
+
+  @@unique([squareId])
+  @@index([employeeId])
+  @@index([locationId])
+}
+
+model YastasWallet {
+  id         String   @id @default(uuid())
+  locationId String   @unique
+  balance    Decimal  @default(0) // denormalized for fast reads; source of truth is the WalletMovement sum
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  location  Location         @relation(fields: [locationId], references: [id])
+  movements WalletMovement[]
+}
+
+model WalletMovement {
+  id                 String             @id @default(uuid())
+  walletId           String
+  type               WalletMovementType
+  amount             Decimal // signed: positive increases balance, negative decreases it
+  relatedOperationId String? // set for OPERATION_DEBIT/OPERATION_CREDIT
+  relatedTransferId  String? // set for TRANSFER_OUT/TRANSFER_IN
+  createdAt          DateTime           @default(now())
+
+  wallet    YastasWallet          @relation(fields: [walletId], references: [id])
+  operation YastasOperation?      @relation(fields: [relatedOperationId], references: [id])
+  transfer  YastasWalletTransfer? @relation(fields: [relatedTransferId], references: [id])
+
+  @@index([walletId])
+  @@index([relatedOperationId])
+  @@index([relatedTransferId])
+}
+
+model YastasSettlement {
+  id           String                 @id @default(uuid())
+  locationId   String
+  periodStart  DateTime
+  periodEnd    DateTime // == periodStart for a daily settlement
+  amountEarned Decimal // commission Yastás reports, at zero cost
+  status       YastasSettlementStatus @default(PROVISIONAL)
+  reportedAt   DateTime?
+  paidAt       DateTime?
+  notes        String?
+  createdBy    String? // Employee ID, plain audit string per house convention — not an FK
+  createdAt    DateTime               @default(now())
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@index([locationId])
+  @@index([periodStart, periodEnd])
+}
+
+// Instant — no pending/in-transit status needed (Yastás confirms transfers complete immediately).
+model YastasWalletTransfer {
+  id             String   @id @default(uuid())
+  fromLocationId String
+  toLocationId   String
+  amount         Decimal
+  initiatedAt    DateTime @default(now())
+  createdBy      String // Employee ID — real FK; role-gated action needs a reliable actor
+
+  fromLocation Location         @relation("YastasTransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location         @relation("YastasTransferTo", fields: [toLocationId], references: [id])
+  creator      Employee         @relation(fields: [createdBy], references: [id])
+  movements    WalletMovement[]
+
+  createdAt DateTime @default(now())
+
+  @@index([fromLocationId])
+  @@index([toLocationId])
 }

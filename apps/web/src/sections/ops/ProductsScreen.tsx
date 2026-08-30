@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Table, type Column } from "../../components/ui/Table";
 import { apiFetch, ApiError } from "../../lib/apiFetch";
-import type { Product, ProductSupplier, ProductSupplierCostHistoryGroup } from "../../lib/ops/types";
+import type { Employee, Product, ProductSupplier, ProductSupplierCostHistoryGroup } from "../../lib/ops/types";
 
 const columns: Column<Product>[] = [
   { key: "id", header: "ID", render: v => <code className="tabular text-xs">{String(v).slice(0, 8)}…</code> },
@@ -82,6 +82,7 @@ export function ProductsScreen() {
         {selectedProductId && selectedProduct && (
           <div className="space-y-4">
             <SearchAliasesPanel product={selectedProduct} />
+            <YastasPanel product={selectedProduct} onUpdated={updated => setProducts(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)))} />
             <ProductSupplierPanel product={selectedProduct} />
           </div>
         )}
@@ -176,6 +177,97 @@ function SearchAliasesPanel({ product }: { product: Product }) {
           Agregar
         </button>
       </div>
+    </div>
+  );
+}
+
+function YastasPanel({ product, onUpdated }: { product: Product; onUpdated: (product: Product) => void }) {
+  const currentEmployeeId = product.catalogMappings?.find(m => m.employeeId)?.employeeId ?? null;
+  const [enabled, setEnabled] = useState(product.tracksInventory === false);
+  const [employeeId, setEmployeeId] = useState<string>(currentEmployeeId ?? "");
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEnabled(product.tracksInventory === false);
+    setEmployeeId(product.catalogMappings?.find(m => m.employeeId)?.employeeId ?? "");
+    setError(null);
+  }, [product.id, product.tracksInventory]);
+
+  useEffect(() => {
+    apiFetch<{ data: Employee[] }>("/employees")
+      .then(body => setEmployees(body.data))
+      .catch(() => {}); // Non-fatal — the select just stays empty
+  }, []);
+
+  const save = async (nextEmployeeId: string | null) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const body = await apiFetch<{ data: { product: Product } }>(`/products/${product.id}/yastas-mapping`, {
+        method: "PATCH",
+        body: JSON.stringify({ employeeId: nextEmployeeId }),
+      });
+      onUpdated(body.data.product);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to update Yastás mapping");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = (checked: boolean) => {
+    setEnabled(checked);
+    if (!checked) {
+      setEmployeeId("");
+      save(null);
+    } else if (employeeId) {
+      save(employeeId);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-ink-tertiary)">Yastás</h4>
+      <p className="text-xs text-(--color-ink-tertiary)">
+        Marca este producto como un artículo de servicio Yastás por empleado — nunca afecta inventario/FIFO.
+      </p>
+      {error && <p className="text-xs text-(--color-destructive)">{error}</p>}
+      <label className="flex items-center gap-2 text-sm text-(--color-ink)">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={saving}
+          onChange={e => toggle(e.target.checked)}
+        />
+        Artículo de servicio Yastás
+      </label>
+      {enabled && (
+        <>
+          <select
+            value={employeeId}
+            disabled={saving}
+            onChange={e => {
+              setEmployeeId(e.target.value);
+              if (e.target.value) save(e.target.value);
+            }}
+            className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-3 py-1.5 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
+          >
+            <option value="">Selecciona un empleado…</option>
+            {employees.map(emp => (
+              <option key={emp.id} value={emp.id}>
+                {emp.name}
+              </option>
+            ))}
+          </select>
+          {!employeeId && (
+            <p className="text-xs text-(--color-destructive)">
+              Sin guardar — selecciona un empleado para activar Yastás en este producto.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

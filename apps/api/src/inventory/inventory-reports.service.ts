@@ -919,17 +919,39 @@ export class InventoryReportsService {
 
     const shrinkage = adjustmentLosses._sum.totalCost || new Prisma.Decimal(0);
 
+    // 3b. Get Yastás settlement revenue — service revenue, zero cost, feeds
+    // net profit directly. Explicitly EXCLUDED from COGS/gross-profit/
+    // gross-margin, which must stay product-only.
+    const yastasWhere: Prisma.YastasSettlementWhereInput = {
+      ...(locationId && { locationId }),
+      ...((startDate || endDate) && {
+        periodStart: {
+          ...(startDate && { gte: startDate }),
+          ...(endDate && { lte: endDate }),
+        },
+      }),
+    };
+
+    const yastasAgg = await this.prisma.yastasSettlement.aggregate({
+      where: yastasWhere,
+      _sum: { amountEarned: true },
+    });
+
+    const yastasRevenue = yastasAgg._sum.amountEarned || new Prisma.Decimal(0);
+    const totalRevenue = revenue.add(yastasRevenue);
+
     // 4. Calculate Net Profit
     const operatingExpenses = totalExpenses.add(shrinkage);
-    const netProfit = grossProfit.sub(operatingExpenses);
+    const netProfit = grossProfit.sub(operatingExpenses).add(yastasRevenue);
 
-    // 5. Calculate margins
+    // 5. Calculate margins (gross margin stays product-only; net margin is
+    // against total revenue including Yastás service revenue)
     const grossMarginPercent = revenue.gt(0)
       ? grossProfit.div(revenue).mul(100)
       : new Prisma.Decimal(0);
 
-    const netMarginPercent = revenue.gt(0)
-      ? netProfit.div(revenue).mul(100)
+    const netMarginPercent = totalRevenue.gt(0)
+      ? netProfit.div(totalRevenue).mul(100)
       : new Prisma.Decimal(0);
 
     // 6. Build expense breakdown
@@ -949,8 +971,8 @@ export class InventoryReportsService {
       // Income Statement
       revenue: {
         sales: revenue.toString(),
-        // Could add other income sources here
-        total: revenue.toString(),
+        yastasServiceRevenue: yastasRevenue.toString(),
+        total: totalRevenue.toString(),
       },
       costOfGoodsSold: {
         productCosts: cogs.toString(),
@@ -971,7 +993,7 @@ export class InventoryReportsService {
       },
       // Summary metrics
       summary: {
-        totalRevenue: revenue.toString(),
+        totalRevenue: totalRevenue.toString(),
         totalCOGS: cogs.toString(),
         grossProfit: grossProfit.toString(),
         grossMarginPercent: grossMarginPercent.toFixed(2),

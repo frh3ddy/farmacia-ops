@@ -1,6 +1,12 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { UnmappedVariationError, ProductNotFoundError } from './errors';
 
+export interface MappedProduct {
+  productId: string;
+  tracksInventory: boolean; // false = Yastás service item, skip FIFO entirely
+  employeeId: string | null; // CatalogMapping.employeeId — set only for Yastás per-employee items
+}
+
 /**
  * Map a Square variation ID to a Product ID using CatalogMapping table
  *
@@ -10,12 +16,12 @@ import { UnmappedVariationError, ProductNotFoundError } from './errors';
  * 3. If not found, look up global mapping (squareVariationId + locationId = null)
  * 4. Validate mapping exists (throw UnmappedVariationError if not)
  * 5. Validate product exists (throw ProductNotFoundError if not)
- * 6. Return productId
+ * 6. Return productId + tracksInventory + employeeId
  *
  * @param squareVariationId - ITEM_VARIATION.id from Square
  * @param squareLocationId - Square location_id string (e.g., "LKTAWFNPD1V05")
  * @param prismaClient - Prisma client instance (can be transaction client)
- * @returns Product ID (UUID string)
+ * @returns MappedProduct
  * @throws UnmappedVariationError if mapping not found
  * @throws ProductNotFoundError if mapped product doesn't exist
  */
@@ -26,7 +32,7 @@ export async function mapVariationToProduct(
     PrismaClient,
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
   >,
-): Promise<string> {
+): Promise<MappedProduct> {
   // Step 1: Convert Square location ID to internal location ID
   const location = await prismaClient.location.findUnique({
     where: { squareId: squareLocationId },
@@ -79,6 +85,7 @@ export async function mapVariationToProduct(
   // Step 5: Validate product exists
   const product = await prismaClient.product.findUnique({
     where: { id: mapping.productId },
+    select: { id: true, tracksInventory: true },
   });
 
   if (!product) {
@@ -89,7 +96,11 @@ export async function mapVariationToProduct(
     );
   }
 
-  // Step 6: Return product ID
-  return product.id;
+  // Step 6: Return product ID + tracking flags
+  return {
+    productId: product.id,
+    tracksInventory: product.tracksInventory,
+    employeeId: mapping.employeeId,
+  };
 }
 

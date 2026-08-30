@@ -181,10 +181,45 @@ interface SaleTotals {
  * Calculate FIFO cost for a sale item by consuming inventory batches in chronological order
  * FIFO ordering is mandatory: always order by receivedAt ASC, never by createdAt
  */
+/**
+ * Resolve a cost basis for a product with no (or insufficient) inventory,
+ * so a shortfall can be auto-covered instead of failing the sale. Ported
+ * from InventoryAdjustmentService.getLastKnownCost
+ * (apps/api/src/inventory/inventory-adjustment.service.ts) — same 3-tier
+ * fallback, same DB — the worker can't import the api package directly.
+ */
+async function getLastKnownCost(
+  productId: string,
+  locationId: string,
+  client: Omit<
+    PrismaClient,
+    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+  >,
+): Promise<Prisma.Decimal | null> {
+  const supplierProduct = await client.supplierProduct.findFirst({
+    where: { productId, isPreferred: true },
+    orderBy: { cost: 'desc' },
+  });
+  if (supplierProduct) return supplierProduct.cost;
+
+  const lastBatch = await client.inventory.findFirst({
+    where: { productId, locationId },
+    orderBy: { receivedAt: 'desc' },
+  });
+  if (lastBatch) return lastBatch.unitCost;
+
+  const approval = await client.costApproval.findFirst({
+    where: { productId, migrationStatus: 'APPROVED' },
+    orderBy: { approvedAt: 'desc' },
+  });
+  return approval ? approval.approvedCost : null;
+}
+
 async function calculateFIFOCost(
   productId: string,
   locationId: string,
   quantitySold: number,
+  squareId: string,
   tx?: Omit<
     PrismaClient,
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
@@ -207,8 +242,50 @@ async function calculateFIFOCost(
   // Step 2 & 3: Consume batches oldest-first (pure logic, see fifo.ts)
   const result = consumeBatchesFifo(batches, quantitySold);
 
-  // Step 4: Validate sufficient inventory
+  // Step 4: Validate sufficient inventory. If short, Square already
+  // processed the payment — the item was physically sold, so the
+  // inventory count is what's wrong, not the sale. Auto-cover the
+  // shortfall (at a real cost basis) instead of losing the sale, leaving
+  // the exact same audit trail a human-entered adjustment would.
   if (result.remainingQuantity > 0) {
+    const shortfall = result.remainingQuantity;
+    const unitCost = await getLastKnownCost(productId, locationId, client);
+
+    if (unitCost) {
+      const coveringBatch = await client.inventory.create({
+        data: {
+          productId,
+          locationId,
+          quantity: shortfall,
+          receivedAt: new Date(), // newest batch — FIFO exhausts real stock first, by construction
+          unitCost,
+          source: 'ADJUSTMENT',
+        },
+      });
+      await client.inventoryAdjustment.create({
+        data: {
+          locationId,
+          productId,
+          type: 'AUTO_SALE_COVER',
+          quantity: shortfall,
+          unitCost,
+          totalCost: unitCost.mul(shortfall),
+          createdBatchId: coveringBatch.id,
+          reason: 'Auto-covered to fulfill a Square sale that exceeded recorded stock',
+          notes: `squareId=${squareId}`,
+          adjustedBy: 'SYSTEM',
+          effectiveDate: new Date(),
+        },
+      });
+      debugLog(
+        `[DEBUG] Auto-covered shortfall of ${shortfall} for product ${productId} at ${locationId} — created batch ${coveringBatch.id} @ ${unitCost.toString()}`,
+      );
+      // Re-run FIFO consumption with the covering batch included — exhausts
+      // it exactly, remainingQuantity becomes 0.
+      return consumeBatchesFifo([...batches, coveringBatch], quantitySold);
+    }
+
+    // No cost basis anywhere — fail exactly as before (unpriced/never-received product).
     const available = quantitySold - result.remainingQuantity;
     throw new InsufficientInventoryError(
       productId,
@@ -281,6 +358,7 @@ async function processSaleItem(
   locationId: string,
   quantitySold: number,
   salePrice: Prisma.Decimal | string | number,
+  squareId: string,
   tx?: Omit<
     PrismaClient,
     '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
@@ -293,6 +371,7 @@ async function processSaleItem(
     productId,
     locationId,
     quantitySold,
+    squareId,
     tx,
   );
 
@@ -516,6 +595,15 @@ export async function processSaleJob(job: Job): Promise<void> {
     debugLog(`[DEBUG] Sale ${squareId} already exists, skipping (idempotent)`);
     return;
   }
+  // A purely-Yastás order never creates a Sale row, so the check above can't
+  // catch a redelivered webhook for it — check YastasOperation too.
+  const existingYastasOp = await getPrisma().yastasOperation.findUnique({
+    where: { squareId },
+  });
+  if (existingYastasOp) {
+    debugLog(`[DEBUG] YastasOperation ${squareId} already exists, skipping (idempotent)`);
+    return;
+  }
   debugLog('[DEBUG] ✓ No existing sale found, proceeding...');
 
   // Phase 2: Fetch Order Data from Square (or use test data)
@@ -587,6 +675,7 @@ export async function processSaleJob(job: Job): Promise<void> {
   // You may need to adjust the mapping logic based on your product setup
   debugLog('[DEBUG] Mapping line items to SaleItemInput...');
   const lineItems: SaleItemInput[] = [];
+  const yastasLineItems: Array<{ employeeId: string; faceAmount: Prisma.Decimal }> = [];
 
   for (let i = 0; i < orderLineItems.length; i++) {
     const orderLineItem = orderLineItems[i];
@@ -619,16 +708,22 @@ export async function processSaleJob(job: Job): Promise<void> {
 
     // Map variation to product using CatalogMapping
     let productId: string;
+    let tracksInventory: boolean;
+    let mappedEmployeeId: string | null;
     try {
-      productId = await mapVariationToProduct(
+      const mapped = await mapVariationToProduct(
         catalogObjectId,
         locationId,
         getPrisma(),
       );
+      productId = mapped.productId;
+      tracksInventory = mapped.tracksInventory;
+      mappedEmployeeId = mapped.employeeId;
       debugLog(`[DEBUG] ✓ Product mapped for line item ${i + 1}:`, {
         variationId: catalogObjectId,
         productId,
         locationId,
+        tracksInventory,
       });
     } catch (error) {
       if (error instanceof UnmappedVariationError) {
@@ -689,6 +784,19 @@ export async function processSaleJob(job: Job): Promise<void> {
       unitPrice: unitPrice.toString(),
     });
 
+    if (!tracksInventory) {
+      // Yastás service item — never a Sale/SaleItem, never touches FIFO.
+      if (!mappedEmployeeId) {
+        throw new SaleValidationError(
+          `CatalogMapping for variation ${catalogObjectId} is flagged non-inventory (tracksInventory=false) but has no employeeId`,
+          { catalogObjectId, orderId, squareId, locationId },
+        );
+      }
+      yastasLineItems.push({ employeeId: mappedEmployeeId, faceAmount: totalPriceInDollars });
+      debugLog(`[DEBUG] ✓ Line item ${i + 1} mapped as Yastás operation (employee ${mappedEmployeeId})`);
+      continue;
+    }
+
     lineItems.push({
       productId: productId,
       quantitySold: quantity,
@@ -697,8 +805,8 @@ export async function processSaleJob(job: Job): Promise<void> {
     debugLog(`[DEBUG] ✓ Line item ${i + 1} mapped successfully`);
   }
 
-  debugLog('[DEBUG] Total line items mapped:', lineItems.length);
-  if (lineItems.length === 0) {
+  debugLog('[DEBUG] Total line items mapped:', lineItems.length, 'Yastás line items:', yastasLineItems.length);
+  if (lineItems.length === 0 && yastasLineItems.length === 0) {
     console.error('[DEBUG] ERROR: No valid line items found after mapping');
     throw new SaleValidationError(
       'No valid line items found after mapping',
@@ -727,7 +835,7 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   // Phase 3 & 4: Create Sale Record and Process Items (all in transaction)
   debugLog('[DEBUG] Starting transaction to create sale and process items...');
-  let saleId: string;
+  let saleId: string | null;
   let itemCount: number;
 
   try {
@@ -752,6 +860,49 @@ export async function processSaleJob(job: Job): Promise<void> {
           debugLog('[DEBUG] [TX] Created location:', location.id);
         } else {
           debugLog('[DEBUG] [TX] Found existing location:', location.id);
+        }
+
+        // Yastás line items never create a Sale/SaleItem — write them to the
+        // parallel ledger instead, same transaction, no FIFO involved.
+        debugLog('[DEBUG] [TX] Processing', yastasLineItems.length, 'Yastás line items...');
+        for (const item of yastasLineItems) {
+          const wallet = await tx.yastasWallet.findUnique({
+            where: { locationId: location.id },
+          });
+          if (!wallet) {
+            throw new SaleValidationError(
+              `No YastasWallet for location ${location.id} — run the opening-balance cutover first`,
+              { locationId: location.id, employeeId: item.employeeId },
+            );
+          }
+          const operation = await tx.yastasOperation.create({
+            data: {
+              employeeId: item.employeeId,
+              locationId: location.id,
+              squareId: squareId,
+              direction: 'IN',
+              faceAmount: item.faceAmount,
+              occurredAt: createdAt,
+            },
+          });
+          await tx.walletMovement.create({
+            data: {
+              walletId: wallet.id,
+              type: 'OPERATION_DEBIT',
+              amount: item.faceAmount.neg(),
+              relatedOperationId: operation.id,
+            },
+          });
+          await tx.yastasWallet.update({
+            where: { id: wallet.id },
+            data: { balance: { decrement: item.faceAmount } },
+          });
+          debugLog(`[DEBUG] [TX] ✓ YastasOperation ${operation.id} + WalletMovement recorded`);
+        }
+
+        if (lineItems.length === 0) {
+          // Pure-Yastás order — no Sale/SaleItem rows at all.
+          return { saleId: null, itemCount: 0 };
         }
 
         debugLog('[DEBUG] [TX] Creating Sale record...');
@@ -787,6 +938,7 @@ export async function processSaleJob(job: Job): Promise<void> {
               location.id, // Use Location UUID, not Square location ID
               lineItem.quantitySold,
               new Prisma.Decimal(lineItem.salePrice),
+              squareId,
               tx,
             );
             debugLog(`[DEBUG] [TX] ✓ Line item ${i + 1} processed:`, {

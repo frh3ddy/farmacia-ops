@@ -16,6 +16,7 @@ const apiPrefixes = [
   "/expenses",
   "/products",
   "/labor",
+  "/yastas",
 ];
 
 export default defineConfig({

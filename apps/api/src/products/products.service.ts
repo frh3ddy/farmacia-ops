@@ -1329,6 +1329,36 @@ export class ProductsService {
     });
   }
 
+  /**
+   * Mark (or unmark) a product as a Yastás per-employee service item:
+   * sets tracksInventory and the employeeId on every CatalogMapping row for
+   * this product (mirrors scripts/set-yastas-employee-mapping.ts, keyed by
+   * productId instead of a raw Square variation id). Pass employeeId: null
+   * to revert the product back to normal FIFO-tracked merchandise.
+   */
+  async setYastasMapping(productId: string, employeeId: string | null) {
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product) {
+      throw new NotFoundException(`Product ${productId} not found`);
+    }
+
+    if (employeeId) {
+      const employee = await this.prisma.employee.findUnique({ where: { id: employeeId } });
+      if (!employee) {
+        throw new NotFoundException(`Employee ${employeeId} not found`);
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.catalogMapping.updateMany({ where: { productId }, data: { employeeId } });
+      return tx.product.update({
+        where: { id: productId },
+        data: { tracksInventory: employeeId === null },
+        include: { catalogMappings: true },
+      });
+    });
+  }
+
   /** Set (replace) a category's symptom search keywords. */
   async setCategorySymptomKeywords(categoryId: string, symptomKeywords: string[]) {
     const category = await this.prisma.category.findUnique({ where: { id: categoryId } });

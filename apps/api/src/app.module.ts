@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { LocationsModule } from './locations/locations.module';
 import { ProductsModule } from './products/products.module';
 import { LaborModule } from './labor/labor.module';
+import { YastasModule } from './yastas/yastas.module';
 import { PrismaService } from './prisma/prisma.service';
 
 @Module({
@@ -23,6 +24,7 @@ import { PrismaService } from './prisma/prisma.service';
     LocationsModule,
     ProductsModule,
     LaborModule,
+    YastasModule,
   ],
   providers: [PrismaService],
   exports: [PrismaService],
