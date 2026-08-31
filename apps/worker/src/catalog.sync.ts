@@ -422,30 +422,32 @@ export async function syncSquareCatalog(
           
           // A. UPSERT PRODUCT
           if (!product) {
-            // Try creating (Handle race condition with try/catch inside transaction if needed, 
-            // but purely serial transactions in a batch is safer)
-            try {
-              product = await tx.product.create({
-                data: {
-                  name: squareProductName,
-                  sku: variationSku,
-                  squareProductName: squareProductName,
-                  squareDescription: catalogData.productDescription,
-                  squareImageUrl: catalogData.imageUrl,
-                  squareVariationName: variationName,
-                  squareDataSyncedAt: new Date(),
-                },
+            const productData = {
+              name: squareProductName,
+              sku: variationSku,
+              squareProductName: squareProductName,
+              squareDescription: catalogData.productDescription,
+              squareImageUrl: catalogData.imageUrl,
+              squareVariationName: variationName,
+              squareDataSyncedAt: new Date(),
+            };
+            if (variationSku) {
+              // upsert instead of create-then-catch-P2002: a failed create()
+              // inside a transaction poisons the whole Postgres transaction,
+              // so a recovery query on that same tx also fails ("current
+              // transaction is aborted") instead of actually recovering —
+              // this was firing on every concurrent SKU collision and
+              // flooding the logs. upsert makes the race one atomic
+              // statement with no second query needed.
+              product = await tx.product.upsert({
+                where: { sku: variationSku },
+                create: productData,
+                update: {}, // another concurrent batch item already created it — use as-is
               });
-              result.productsCreated++;
-            } catch (e: any) {
-              // If parallel SKU create clash, recover
-              if (e.code === 'P2002' && variationSku) {
-                 product = await tx.product.findUnique({ where: { sku: variationSku } });
-                 if (!product) throw e; 
-              } else {
-                throw e;
-              }
+            } else {
+              product = await tx.product.create({ data: productData });
             }
+            result.productsCreated++;
           } else if (forceResync || catalogDataMap.has(variationId)) {
             product = await tx.product.update({
               where: { id: product.id },
