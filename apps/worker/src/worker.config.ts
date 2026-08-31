@@ -1,5 +1,6 @@
 import { Job } from 'bullmq';
 import { processSaleJob } from './sale.worker';
+import { debugLog } from './debug-log';
 
 export interface WorkerConfig {
   queueName: string;
@@ -21,8 +22,8 @@ export const WORKERS: WorkerConfig[] = [
   {
     queueName: 'sales',
     processor: (job: Job) => {
-      console.log('[DEBUG] [WORKER_CONFIG] Sales worker processor called for job:', job.id);
-      console.log('[DEBUG] [WORKER_CONFIG] Job data keys:', Object.keys(job.data || {}));
+      debugLog('[DEBUG] [WORKER_CONFIG] Sales worker processor called for job:', job.id);
+      debugLog('[DEBUG] [WORKER_CONFIG] Job data keys:', Object.keys(job.data || {}));
       return processSaleJob(job);
     },
     concurrency: 5,

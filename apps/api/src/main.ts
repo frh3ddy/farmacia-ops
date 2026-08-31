@@ -69,6 +69,12 @@ async function bootstrap() {
   app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // This is crucial: it preserves the raw buffer for signature verification
     rawBody: true,
+    // debug/verbose (Logger.debug/.verbose calls throughout the app) are
+    // noisy per-request tracing — keep them for local dev, drop them in
+    // production. error/warn/log always print.
+    logger: isLocal
+      ? ['error', 'warn', 'log', 'debug', 'verbose']
+      : ['error', 'warn', 'log'],
   });
 
   // Apply JSON parser for all other routes

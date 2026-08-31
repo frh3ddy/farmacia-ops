@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 
 @Injectable()
 export class SaleQueue {
+  private readonly logger = new Logger(SaleQueue.name);
   private queue: Queue;
 
   constructor() {
@@ -21,12 +22,12 @@ export class SaleQueue {
   }
 
   async enqueue(event: any) {
-    console.log('[DEBUG] [SALE_QUEUE] Enqueueing event:', {
+    this.logger.debug(`Enqueueing event: ${JSON.stringify({
       event_id: event.event_id,
       type: event.type,
       hasData: !!event.data,
-    });
-    
+    })}`);
+
     const job = await this.queue.add(
       'process-sale',
       {
@@ -37,13 +38,9 @@ export class SaleQueue {
         jobId: event.event_id, // ⬅️ idempotency
       },
     );
-    
-    console.log('[DEBUG] [SALE_QUEUE] ✅ Job enqueued:', {
-      jobId: job.id,
-      name: job.name,
-      queueName: 'sales',
-    });
-    
+
+    this.logger.debug(`Job enqueued: ${job.id} (queue: sales)`);
+
     return job;
   }
 }

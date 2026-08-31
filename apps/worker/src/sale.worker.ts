@@ -11,18 +11,7 @@ import {
 } from './errors';
 import { mapVariationToProduct } from './catalog.mapper';
 import { consumeBatchesFifo, type ConsumedBatch, type FifoConsumptionResult } from './fifo';
-
-// Step-by-step tracing below runs on every checkout processed by this worker.
-// Unconditional console.log calls add synchronous I/O directly inside the
-// DB-locked sale transaction, so verbose tracing is opt-in via env var.
-// Errors (console.error) are left unconditional — they're rare (exceptional
-// paths only) and error visibility in production matters more than the cost.
-const SALE_WORKER_DEBUG = process.env.SALE_WORKER_DEBUG === 'true';
-function debugLog(...args: unknown[]): void {
-  if (SALE_WORKER_DEBUG) {
-    console.log(...args);
-  }
-}
+import { debugLog } from './debug-log';
 
 // Lazy initialization of database connection (env vars loaded by worker.ts first)
 let pool: Pool | null = null;

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
@@ -156,6 +156,8 @@ interface AgingCacheEntry {
 
 @Injectable()
 export class InventoryAgingService {
+  private readonly logger = new Logger(InventoryAgingService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   // In-memory cache for aging data (keyed by filter hash)
@@ -285,8 +287,8 @@ export class InventoryAgingService {
     if (!skipCache) {
       const cached = this.agingCache.get(cacheKey);
       if (cached && this.isCacheValid(cached)) {
-        console.log(
-          `[InventoryAgingService] Using cached aging data for ${cacheKey} (${cached.agedBatches.length} batches, cached ${Math.floor((Date.now() - cached.timestamp) / 1000)}s ago)`,
+        this.logger.debug(
+          `Using cached aging data for ${cacheKey} (${cached.agedBatches.length} batches, cached ${Math.floor((Date.now() - cached.timestamp) / 1000)}s ago)`,
         );
         return cached.agedBatches;
       }
@@ -317,8 +319,8 @@ export class InventoryAgingService {
       timestamp: Date.now(),
     });
 
-    console.log(
-      `[InventoryAgingService] Fetched and cached ${agedBatches.length} aged batches for ${cacheKey}`,
+    this.logger.debug(
+      `Fetched and cached ${agedBatches.length} aged batches for ${cacheKey}`,
     );
 
     return agedBatches;

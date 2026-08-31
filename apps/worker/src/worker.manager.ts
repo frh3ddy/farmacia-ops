@@ -1,5 +1,6 @@
 import { Worker, Queue, Job } from 'bullmq';
 import { WorkerConfig, WORKERS } from './worker.config';
+import { debugLog } from './debug-log';
 
 interface ManagedWorker {
   config: WorkerConfig;
@@ -160,13 +161,13 @@ export class WorkerManager {
     console.log(`[DEBUG] [WORKER_MANAGER] Setting up event handlers for: ${config.queueName}`);
 
     worker.on('active', (job) => {
-      console.log(`[DEBUG] [WORKER_MANAGER] 🔄 [${config.queueName}] Job ${job.id} started`);
-      console.log(`[DEBUG] [WORKER_MANAGER] Job ${job.id} data:`, JSON.stringify(job.data, null, 2));
+      debugLog(`[DEBUG] [WORKER_MANAGER] 🔄 [${config.queueName}] Job ${job.id} started`);
+      debugLog(`[DEBUG] [WORKER_MANAGER] Job ${job.id} data:`, JSON.stringify(job.data, null, 2));
     });
 
     worker.on('completed', (job, result) => {
-      console.log(`[DEBUG] [WORKER_MANAGER] ✅ [${config.queueName}] Job ${job.id} completed`);
-      console.log(`[DEBUG] [WORKER_MANAGER] Job ${job.id} result:`, result);
+      debugLog(`[DEBUG] [WORKER_MANAGER] ✅ [${config.queueName}] Job ${job.id} completed`);
+      debugLog(`[DEBUG] [WORKER_MANAGER] Job ${job.id} result:`, result);
     });
 
     worker.on('failed', (job, err) => {

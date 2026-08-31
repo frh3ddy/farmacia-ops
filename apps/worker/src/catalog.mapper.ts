@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { UnmappedVariationError, ProductNotFoundError } from './errors';
+import { debugLog } from './debug-log';
 
 export interface MappedProduct {
   productId: string;
@@ -41,7 +42,7 @@ export async function mapVariationToProduct(
 
   const internalLocationId = location?.id || null;
 
-  console.log('[DEBUG] [CATALOG_MAPPER] Location lookup:', {
+  debugLog('[DEBUG] [CATALOG_MAPPER] Location lookup:', {
     squareLocationId,
     internalLocationId,
   });
@@ -66,7 +67,7 @@ export async function mapVariationToProduct(
     });
   }
 
-  console.log('[DEBUG] [CATALOG_MAPPER] Mapping lookup result:', {
+  debugLog('[DEBUG] [CATALOG_MAPPER] Mapping lookup result:', {
     squareVariationId,
     internalLocationId,
     mappingFound: !!mapping,
