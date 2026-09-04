@@ -165,6 +165,7 @@ export function ExtractionItemEditor({
     topCategories.find(c => c.id === categoryTopId)?.name === "Medicamentos" ||
     allCategories.find(c => c.id === edited?.suggestedCategoryId)?.name === "Medicamentos" ||
     (edited?.ingredients?.length ?? 0) > 0;
+  const detectedInfoDisabled = !isMedicine || !!edited?.isCatalogedMedication;
 
   // Reset the new-entry staging date whenever the current item changes, so
   // it doesn't carry a stale date from the previous product.
@@ -352,8 +353,18 @@ export function ExtractionItemEditor({
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-(--color-border-standard) bg-(--color-surface-raised)">
-        <div className="border-b border-(--color-border-standard) px-6 py-3">
-          <h3 className="text-lg font-semibold text-(--color-ink)">{result.productName}</h3>
+        <div className="flex items-center border-b border-(--color-border-standard) px-6 py-3">
+          {/* Spacer's basis mirrors the body grid's col-span-2 width below
+              (grid-cols-6 gap-4: 2 of 6 tracks + the one gap between them),
+              so the shifted title lines up with where the image/intelligence
+              column starts — not just "pushed to the far right". Animating
+              flex-basis (not justify-content/grid-column, which are
+              discrete/non-interpolable) is what gives the ease slide. */}
+          <div
+            className={`shrink-0 transition-all duration-300 ease-in-out ${detectedInfoDisabled ? "basis-[calc((100%-5rem)/3+2rem)]" : "basis-0"
+              }`}
+          />
+          <h3 className="truncate text-lg font-semibold text-(--color-ink)">{result.productName}</h3>
         </div>
 
         <div className="space-y-4 p-6">
@@ -409,10 +420,6 @@ export function ExtractionItemEditor({
                 <div className="rounded-md border border-(--color-border-standard) bg-(--color-surface) p-4">
                   <div className="grid grid-cols-4 gap-4">
                     <div>
-                      <p className="text-xs text-(--color-ink-tertiary)">Stock</p>
-                      <p className="tabular text-xl font-semibold text-(--color-ink)">{result.stockQuantity ?? 0}</p>
-                    </div>
-                    <div>
                       <p className="text-xs text-(--color-ink-tertiary)">Selling price</p>
                       {result.sellingPrice ? (
                         <p className="tabular text-xl font-semibold text-(--color-ink)">
@@ -445,6 +452,10 @@ export function ExtractionItemEditor({
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-(--color-accent)">Current supplier</p>
                       <p className="truncate text-xl font-bold text-(--color-ink)">{displaySupplier || "Not selected"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-(--color-ink-tertiary)">Stock</p>
+                      <p className="tabular text-xl font-semibold text-(--color-ink)">{result.stockQuantity ?? 0}</p>
                     </div>
                   </div>
 
@@ -648,143 +659,144 @@ export function ExtractionItemEditor({
               </div>
             </div>
 
-            {isMedicine && !edited.isCatalogedMedication && (
-              <div className="order-1 col-span-2 space-y-3 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4">
-                <div className="flex items-center gap-1.5">
-                  <SparkleIcon className="h-3.5 w-3.5 text-(--color-accent)" />
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-ink-tertiary)">Detected info</h4>
-                </div>
-                <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${pillClasses}`}>{confidencePill.label}</span>
+            <div
+              className={`order-1 col-span-2 space-y-3 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4 ${detectedInfoDisabled ? "pointer-events-none opacity-50" : ""
+                }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <SparkleIcon className="h-3.5 w-3.5 text-(--color-accent)" />
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-ink-tertiary)">Detected info</h4>
+              </div>
+              <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${pillClasses}`}>{confidencePill.label}</span>
 
-                <div>
-                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Principio(s) activo(s)</label>
-                  <div className="space-y-1.5">
-                    {(edited.ingredients ?? []).map((ing, idx) => (
-                      <div key={idx} className="flex gap-1.5">
-                        <input
-                          value={ing.name}
-                          onChange={e => updateIngredient(idx, { name: e.target.value })}
-                          placeholder="Paracetamol"
-                          className="flex-[2] min-w-0 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                        />
-                        <input
-                          value={ing.concentrationValue ?? ""}
-                          onChange={e => updateIngredient(idx, { concentrationValue: e.target.value ? parseFloat(e.target.value) : null })}
-                          type="number"
-                          placeholder="500"
-                          className="w-16 shrink-0 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                        />
-                        {/* Not always a bare unit — "mg/5 ml"/"mg/100 mL"-style
-                            per-volume concentrations are a normal shape here
-                            too (see splitCompoundConcentration), so this needs
-                            more than a few characters of room. */}
-                        <input
-                          value={ing.concentrationUnit ?? ""}
-                          onChange={e => updateIngredient(idx, { concentrationUnit: e.target.value || null })}
-                          placeholder="mg o mg/5 ml"
-                          className="flex-1 min-w-0 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeIngredient(idx)}
-                          aria-label={`Quitar ${ing.name}`}
-                          className="shrink-0 px-1 text-(--color-ink-tertiary) hover:text-(--color-destructive)"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <div className="flex gap-1.5">
+              <div>
+                <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Principio(s) activo(s)</label>
+                <div className="space-y-1.5">
+                  {(edited.ingredients ?? []).map((ing, idx) => (
+                    <div key={idx} className="flex gap-1.5">
                       <input
-                        value={newIngredientName}
-                        onChange={e => setNewIngredientName(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            addIngredient();
-                          }
-                        }}
-                        placeholder="+ agregar principio activo"
-                        className="flex-1 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                        value={ing.name}
+                        onChange={e => updateIngredient(idx, { name: e.target.value })}
+                        placeholder="Paracetamol"
+                        className="flex-[2] min-w-0 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                      />
+                      <input
+                        value={ing.concentrationValue ?? ""}
+                        onChange={e => updateIngredient(idx, { concentrationValue: e.target.value ? parseFloat(e.target.value) : null })}
+                        type="number"
+                        placeholder="500"
+                        className="w-16 shrink-0 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                      />
+                      {/* Not always a bare unit — "mg/5 ml"/"mg/100 mL"-style
+                          per-volume concentrations are a normal shape here
+                          too (see splitCompoundConcentration), so this needs
+                          more than a few characters of room. */}
+                      <input
+                        value={ing.concentrationUnit ?? ""}
+                        onChange={e => updateIngredient(idx, { concentrationUnit: e.target.value || null })}
+                        placeholder="mg o mg/5 ml"
+                        className="flex-1 min-w-0 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
                       />
                       <button
                         type="button"
-                        onClick={addIngredient}
-                        className="shrink-0 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"
+                        onClick={() => removeIngredient(idx)}
+                        aria-label={`Quitar ${ing.name}`}
+                        className="shrink-0 px-1 text-(--color-ink-tertiary) hover:text-(--color-destructive)"
                       >
-                        Agregar
+                        ×
                       </button>
                     </div>
-                  </div>
-                  {edited.concentrationOptions && edited.concentrationOptions.length > 0 && (
-                    <p className="mt-1 text-xs text-(--color-ink-tertiary)">Concentraciones conocidas: {edited.concentrationOptions.join(", ")}</p>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Forma</label>
-                    <select
-                      value={edited.form ?? ""}
-                      onChange={e => updateManualField({ form: e.target.value || null })}
-                      className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
+                  ))}
+                  <div className="flex gap-1.5">
+                    <input
+                      value={newIngredientName}
+                      onChange={e => setNewIngredientName(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addIngredient();
+                        }
+                      }}
+                      placeholder="+ agregar principio activo"
+                      className="flex-1 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                    />
+                    <button
+                      type="button"
+                      onClick={addIngredient}
+                      className="shrink-0 rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"
                     >
-                      <option value="">Sin especificar</option>
-                      {Object.entries(FORM_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Vía</label>
-                    <select
-                      value={edited.route ?? ""}
-                      onChange={e => updateManualField({ route: e.target.value || null })}
-                      className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
-                    >
-                      <option value="">Sin especificar</option>
-                      {(edited.routeOptions && edited.routeOptions.length > 0 ? edited.routeOptions : Object.keys(ROUTE_LABELS)).map(value => (
-                        <option key={value} value={value}>
-                          {ROUTE_LABELS[value] ?? value}
-                        </option>
-                      ))}
-                    </select>
+                      Agregar
+                    </button>
                   </div>
                 </div>
+                {edited.concentrationOptions && edited.concentrationOptions.length > 0 && (
+                  <p className="mt-1 text-xs text-(--color-ink-tertiary)">Concentraciones conocidas: {edited.concentrationOptions.join(", ")}</p>
+                )}
+              </div>
 
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Presentación</label>
-                  <input
-                    value={edited.presentation ?? ""}
-                    onChange={e => updateManualField({ presentation: e.target.value || null })}
-                    placeholder="Caja c/20 tabletas"
-                    className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                  />
+                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Forma</label>
+                  <select
+                    value={edited.form ?? ""}
+                    onChange={e => updateManualField({ form: e.target.value || null })}
+                    className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
+                  >
+                    <option value="">Sin especificar</option>
+                    {Object.entries(FORM_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-
                 <div>
-                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Laboratorio</label>
-                  <input
-                    value={edited.laboratorio ?? ""}
-                    onChange={e => updateManualField({ laboratorio: e.target.value || null })}
-                    placeholder="Laboratorios Pisa"
-                    className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Marcas conocidas</label>
-                  <input
-                    value={(edited.brandSearchTerms ?? []).join(", ")}
-                    onChange={e => updateManualField({ brandSearchTerms: e.target.value.split(",").map(t => t.trim()).filter(Boolean) })}
-                    placeholder="Tylenol, Panadol"
-                    className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                  />
+                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Vía</label>
+                  <select
+                    value={edited.route ?? ""}
+                    onChange={e => updateManualField({ route: e.target.value || null })}
+                    className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
+                  >
+                    <option value="">Sin especificar</option>
+                    {(edited.routeOptions && edited.routeOptions.length > 0 ? edited.routeOptions : Object.keys(ROUTE_LABELS)).map(value => (
+                      <option key={value} value={value}>
+                        {ROUTE_LABELS[value] ?? value}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            )}
+
+              <div>
+                <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Presentación</label>
+                <input
+                  value={edited.presentation ?? ""}
+                  onChange={e => updateManualField({ presentation: e.target.value || null })}
+                  placeholder="Caja c/20 tabletas"
+                  className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Laboratorio</label>
+                <input
+                  value={edited.laboratorio ?? ""}
+                  onChange={e => updateManualField({ laboratorio: e.target.value || null })}
+                  placeholder="Laboratorios Pisa"
+                  className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Marcas conocidas</label>
+                <input
+                  value={(edited.brandSearchTerms ?? []).join(", ")}
+                  onChange={e => updateManualField({ brandSearchTerms: e.target.value.split(",").map(t => t.trim()).filter(Boolean) })}
+                  placeholder="Tylenol, Panadol"
+                  className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                />
+              </div>
+            </div>
           </div>
         </div>
 
