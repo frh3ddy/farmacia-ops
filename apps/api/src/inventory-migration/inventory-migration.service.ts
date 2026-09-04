@@ -26,12 +26,23 @@ import { SquareInventoryService } from './square-inventory.service';
 import { CostExtractionService } from './cost-extraction.service';
 import { CatalogMapperService } from './catalog-mapper.service';
 import { SupplierService } from './supplier.service';
-import { OcrService } from './ocr.service';
 import { ProductsService } from '../products/products.service';
 import { classifyProductName, classifySubcategory, ensureCategoryIds, type CategoryRow } from './category-classifier';
-import { parseProductName, mergeParsedProductNames } from './product-name-parser';
+import {
+  parseProductName,
+  mergeParsedProductNames,
+  medicineEntryToParsed,
+  type MedicineEntry,
+} from './product-name-parser';
+import medicineByVariationRaw from './medicine-by-variation.json';
 import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from '../products/medication-definition';
 import { findIngredientInText, addLearnedIngredient } from '../products/reference-data.service';
+
+// Curated per-item medicine data (data/medicamentos_procesados_final.json),
+// re-keyed to Square ITEM_VARIATION id — see scripts/rekey-medicine-by-variation.ts.
+// Read once at module load; replaces the per-product live image OCR the
+// cutover extraction loop used to run.
+const medicineByVariation = medicineByVariationRaw as Record<string, MedicineEntry>;
 
 @Injectable()
 export class InventoryMigrationService {
@@ -44,7 +55,6 @@ export class InventoryMigrationService {
     private readonly catalogMapper: CatalogMapperService,
     private readonly supplierService: SupplierService,
     private readonly productsService: ProductsService,
-    private readonly ocrService: OcrService,
   ) {}
 
   /**
@@ -670,7 +680,6 @@ export class InventoryMigrationService {
           squareDescription: true,
           squareImageUrl: true,
           squareVariationName: true,
-          ocrText: true,
           categoryId: true,
           medicationDefinitionId: true,
           category: { select: { id: true, name: true } },
@@ -940,24 +949,18 @@ export class InventoryMigrationService {
       // MedicationDefinition (this cutover, an earlier one, or manual
       // AddProductScreen entry) — medicationDefinitionId is global across
       // every location, so a second location's cutover on the same catalog
-      // simply skips this rather than re-parsing/re-suggesting. Computed here
-      // (rather than closer to where it's used below) so the OCR trigger
-      // right after can use it to skip products with nothing left to gain.
+      // simply skips this rather than re-parsing/re-suggesting.
       const isCatalogedMedication = !!product.medicationDefinitionId;
 
-      // Lazily OCR the product image, same "resolve now, cache in background"
-      // pattern as imageUrl above — only when there's actually something to
-      // gain (no category yet, or not linked to a real medication) and only
-      // if this image hasn't already been OCR'd. This is what actually
-      // populates Product.ocrText in normal use; scripts/ocr-classify-products.ts
-      // is only for a one-off bulk backfill/audit, not a prerequisite.
-      let ocrText = product.ocrText;
-      if (!ocrText && imageUrl && (!product.categoryId || !isCatalogedMedication)) {
-        ocrText = await this.ocrService.recognizeImageUrl(imageUrl);
-        if (ocrText) {
-          this.prisma.product
-            .update({ where: { id: productId }, data: { ocrText } })
-            .catch((e) => this.logger.warn(`Failed to cache OCR text for product ${productId}: ${e}`));
+      // Curated medicine data for this product, if any — looked up by any of
+      // the product's Square variation ids. Replaces the live per-product
+      // image OCR this loop used to run; a plain Map hit, so no gain-gating
+      // like the old OCR call needed.
+      let medicineEntry: MedicineEntry | null = null;
+      for (const vid of variationIdsByProduct.get(productId) ?? []) {
+        if (medicineByVariation[vid]) {
+          medicineEntry = medicineByVariation[vid];
+          break;
         }
       }
 
@@ -975,7 +978,7 @@ export class InventoryMigrationService {
       }
 
       const { suggestedCategoryId, suggestedCategoryName, subcategoryMatch, nameParseFields } = this.buildSuggestionFields(
-        ocrText ?? null,
+        medicineEntry,
         productName,
         isCatalogedMedication,
         categoryIdByName,
@@ -1946,25 +1949,23 @@ export class InventoryMigrationService {
     }
   }
 
-  // Shared by the main extraction loop and reparseProductSuggestions below —
-  // same OCR-first/name-fallback category+ingredient suggestion logic either
-  // way, just called once per batch item there vs. once per manual re-run
-  // click here.
+  // Per-product category + medication suggestion for the reviewer. Structured
+  // offline medicine data (medicine-by-variation.json) is the primary source
+  // when the product is in it; the Square item name parse still runs to fill
+  // any field that data doesn't carry (route, a «»-marked brand). Products not
+  // in the medicine data fall back to a pure name parse.
   private buildSuggestionFields(
-    ocrText: string | null,
+    medicine: MedicineEntry | null,
     productName: string,
     isCatalogedMedication: boolean,
     categoryIdByName: Map<string, string>,
     subcategoriesByParent: Map<string, CategoryRow[]>,
   ) {
-    // Prefer OCR text over the Square item name — box text often states the
-    // category/ingredient a brand-only name omits — but only when it
-    // actually resolves to something; a blurry photo's OCR text falls back
-    // to the name, never overriding a real name-based match with "Sin
-    // clasificar".
-    const ocrCategoryName = ocrText ? classifyProductName(ocrText) : null;
-    const suggestedCategoryName =
-      ocrCategoryName && ocrCategoryName !== 'Sin clasificar' ? ocrCategoryName : classifyProductName(productName);
+    const isMedicine = !isCatalogedMedication && !!medicine?.esMedicamento;
+
+    // medicine-by-variation.json entries are, by construction, medicines;
+    // everything else goes through the name-based rule classifier.
+    const suggestedCategoryName = isMedicine ? 'Medicina' : classifyProductName(productName);
     const suggestedCategoryId = categoryIdByName.get(suggestedCategoryName) ?? null;
 
     // Confidence-gated subcategory guess, scoped to the already-suggested
@@ -1975,15 +1976,15 @@ export class InventoryMigrationService {
       ? classifySubcategory(productName, subcategoriesByParent.get(suggestedCategoryId) ?? [])
       : null;
 
-    // Combine both sources rather than one winning outright: OCR text often
-    // carries the active ingredient a brand-only Square name doesn't, but
-    // the name can carry things OCR misses too (e.g. a «»-marked brand OCR
-    // text never states). mergeParsedProductNames lets whichever parse
-    // actually found ingredients anchor the match, while still falling back
-    // to the other source for any field the winner left blank.
-    const ocrParse = !isCatalogedMedication && ocrText ? parseProductName(ocrText) : null;
+    // Structured medicine data anchors the parse; the name parse still runs
+    // so mergeParsedProductNames can backfill anything it left null (a
+    // «»-marked brand only the Square name carries).
+    const medicineParse = isMedicine ? medicineEntryToParsed(medicine!) : null;
     const nameParseRaw = isCatalogedMedication ? null : parseProductName(productName);
-    const nameParse = ocrParse && nameParseRaw ? mergeParsedProductNames(ocrParse, nameParseRaw) : (ocrParse ?? nameParseRaw);
+    const nameParse =
+      medicineParse && nameParseRaw
+        ? mergeParsedProductNames(medicineParse, nameParseRaw)
+        : (medicineParse ?? nameParseRaw);
 
     // A name-parse ingredient match can also fill in the subcategory guess
     // when the regex-rule classifier above came up empty — fold it into the
@@ -2000,7 +2001,6 @@ export class InventoryMigrationService {
       subcategoryMatch,
       nameParseFields: {
         isCatalogedMedication,
-        ocrText: ocrText ?? null,
         parseConfidence: nameParse?.confidence ?? null,
         suggestedBrand: nameParse?.brand ?? null,
         ingredients: nameParse?.ingredients.length ? nameParse.ingredients : null,
@@ -2011,63 +2011,8 @@ export class InventoryMigrationService {
         formOptions: nameParse?.formOptions.length ? nameParse.formOptions : null,
         concentrationOptions: nameParse?.concentrationOptions.length ? nameParse.concentrationOptions : null,
         routeOptions: nameParse?.routeOptions.length ? nameParse.routeOptions : null,
+        laboratorio: medicine?.laboratorio ?? null,
       },
-    };
-  }
-
-  /** Re-runs category/ingredient suggestion against a reviewer-edited OCR
-   * text (the "Text read from package photo" panel's Try again button) —
-   * same suggestion logic the batch extraction loop runs once per product,
-   * just triggered on demand against whatever text is currently in that
-   * field instead of the cached Product.ocrText. Does not persist anything;
-   * the reviewer still approves (or not) via approveItem as usual. */
-  async reparseProductSuggestions(productId: string, ocrText: string) {
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: {
-        name: true,
-        squareProductName: true,
-        categoryId: true,
-        medicationDefinitionId: true,
-        category: { select: { name: true } },
-      },
-    });
-    if (!product) throw new Error(`Product ${productId} not found`);
-
-    const productName = product.squareProductName || product.name;
-    const isCatalogedMedication = !!product.medicationDefinitionId;
-
-    const categoryIdByName = await ensureCategoryIds(this.prisma);
-    const allSubcategories = await this.prisma.category.findMany({
-      where: { parentId: { not: null } },
-      select: { id: true, name: true, parentId: true },
-    });
-    const subcategoriesByParent = new Map<string, CategoryRow[]>();
-    for (const sub of allSubcategories) {
-      const list = subcategoriesByParent.get(sub.parentId!) ?? [];
-      list.push(sub);
-      subcategoriesByParent.set(sub.parentId!, list);
-    }
-
-    const { suggestedCategoryId, suggestedCategoryName, subcategoryMatch, nameParseFields } = this.buildSuggestionFields(
-      ocrText || null,
-      productName,
-      isCatalogedMedication,
-      categoryIdByName,
-      subcategoriesByParent,
-    );
-
-    const effectiveCategoryId = product.categoryId ?? subcategoryMatch?.id ?? suggestedCategoryId;
-    const effectiveCategoryName = product.categoryId
-      ? (product.category?.name ?? null)
-      : (subcategoryMatch?.name ?? suggestedCategoryName ?? null);
-
-    return {
-      categoryId: effectiveCategoryId,
-      categoryName: effectiveCategoryName,
-      suggestedCategoryId,
-      suggestedCategoryName,
-      ...nameParseFields,
     };
   }
 
@@ -2099,7 +2044,7 @@ export class InventoryMigrationService {
       presentation?: string | null;
       brandSearchTerms?: string[] | null;
     } | null,
-    ocrText?: string | null,
+    labId?: string | null,
   ): Promise<{ success: boolean }> {
     this.logger.log(`[APPROVE_ITEM] cutoverId: ${cutoverId}, productId: ${productId}, cost: ${cost}`);
     try {
@@ -2113,7 +2058,7 @@ export class InventoryMigrationService {
       if (medicationInfo && medicationInfo.ingredients.length > 0) {
         // Reviewer-confirmed ingredient names not already recognized (static
         // dataset or previously learned) get remembered here so the next
-        // cutover's OCR/name parse resolves them directly instead of only
+        // cutover's name parse resolves them directly instead of only
         // via the structural guess — see LearnedIngredient in schema.prisma.
         for (const ingredient of medicationInfo.ingredients) {
           if (findIngredientInText(ingredient.name)) continue;
@@ -2200,12 +2145,8 @@ export class InventoryMigrationService {
           await tx.product.update({ where: { id: productId }, data: { categoryId } });
         }
 
-        // Reviewer-corrected OCR text overwrites the cached value so a
-        // misread doesn't keep resurfacing on future extractions/cutovers
-        // for this product. undefined (old callers that don't send this
-        // field) leaves the cache untouched; "" is a deliberate clear.
-        if (ocrText !== undefined) {
-          await tx.product.update({ where: { id: productId }, data: { ocrText: ocrText || null } });
+        if (labId) {
+          await tx.product.update({ where: { id: productId }, data: { labId } });
         }
 
         if (medicationDefinitionId) {

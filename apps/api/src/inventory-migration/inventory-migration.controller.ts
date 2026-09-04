@@ -15,6 +15,7 @@ import {
 import { InventoryMigrationService } from './inventory-migration.service';
 import { SupplierService } from './supplier.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { findOrCreateLaboratory } from '../products/laboratory';
 import { Prisma, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
 import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
 import {
@@ -606,19 +607,6 @@ export class InventoryMigrationController {
     }
   }
 
-  @Post('reparse-ocr-text')
-  async reparseOcrText(@Body() body: { productId: string; ocrText: string }) {
-    try {
-      const result = await this.migrationService.reparseProductSuggestions(body.productId, body.ocrText);
-      return result;
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: `Failed to reparse OCR text: ${error}` },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
   @Post('mark-discontinued')
   async markDiscontinued(
     @Body()
@@ -714,11 +702,12 @@ export class InventoryMigrationController {
         presentation?: string | null;
         brandSearchTerms?: string[] | null;
       } | null;
-      ocrText?: string | null;
+      labName?: string | null;
     },
     @Req() req: any,
   ) {
     try {
+      const labId = body.labName ? await findOrCreateLaboratory(this.prisma, body.labName) : undefined;
       const result = await this.migrationService.approveItem(
         body.cutoverId,
         body.productId,
@@ -733,7 +722,7 @@ export class InventoryMigrationController {
         body.categoryId || null,
         req.employee.id,
         body.medicationInfo || null,
-        body.ocrText,
+        labId,
       );
       return result;
     } catch (error) {

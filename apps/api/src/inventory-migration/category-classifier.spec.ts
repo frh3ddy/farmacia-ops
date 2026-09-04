@@ -19,6 +19,15 @@ describe('classifyProductName', () => {
     expect(classifyProductName('Paracetamol 500mg tabs')).toBe('Medicina');
   });
 
+  it('classifies a bare dose token as Medicina via the low-priority rule', () => {
+    expect(classifyProductName('Loratadina 10 mg')).toBe('Medicina');
+  });
+
+  it('lets a named personal-care bucket win over a bare dose token', () => {
+    expect(classifyProductName('Shampoo anticaspa 400 ml')).toBe('Cuidado capilar e higiene');
+    expect(classifyProductName('Gel Xtreme 230 g')).toBe('Dermocosmética');
+  });
+
   it('classifies hair/hygiene products', () => {
     expect(classifyProductName('Shampoo anticaspa')).toBe('Cuidado capilar e higiene');
   });

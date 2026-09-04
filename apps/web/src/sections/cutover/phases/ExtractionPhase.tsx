@@ -22,7 +22,6 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
     handleDiscardItem,
     handleMarkDiscontinued,
     handleRegenerateExtraction,
-    handleReparseOcrText,
     handleRestoreItem,
     handleReusePreviousApprovals,
     handleContinueBatch,
@@ -192,7 +191,6 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
           onDiscard={handleDiscardItem}
           onMarkDiscontinued={handleMarkDiscontinued}
           onRegenerateExtraction={handleRegenerateExtraction}
-          onReparseOcrText={handleReparseOcrText}
           setError={setError}
           hideProductImageForTransition={hideProductImageForTransition}
           allCategories={allCategories}

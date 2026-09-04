@@ -524,3 +524,80 @@ export function mergeParsedProductNames(a: ParsedProductName, b: ParsedProductNa
     concentrationOptions: primary.concentrationOptions.length > 0 ? primary.concentrationOptions : secondary.concentrationOptions,
   };
 }
+
+/** One entry of medicine-by-variation.json — curated per-item medicine data
+ * (see scripts/rekey-medicine-by-variation.ts, sourced from
+ * data/medicamentos_procesados_final.json). Ingredients arrive already
+ * broken out with a parsed strength per molecule. */
+export type MedicineStrength = { valor: number | null; unidad: string | null; por: string | null };
+export type MedicinePrincipioActivo = { nombre: string; dosis: string | null; strength: MedicineStrength };
+export type MedicineEntry = {
+  name: string; // original Square catalog name — traceability only
+  esMedicamento: boolean;
+  principios_activos: MedicinePrincipioActivo[];
+  formaFarmaceutica: string | null;
+  presentacion: string | null;
+  marca: string | null;
+  laboratorio: string | null;
+};
+
+// forma farmacéutica text -> administration route. The curated dataset spells
+// the site out ("Solución Oftálmica", "Óvulo Vaginal", "Suspensión
+// Inyectable"), so this reads an explicit word rather than guessing. Ordered,
+// first-match-wins, same idiom as FORM_RULES; site-specific before the oral
+// catch-all; no match -> null (reviewer picks).
+const FORMA_ROUTE_RULES: Array<{ route: AdministrationRoute; pattern: RegExp }> = [
+  { route: 'OPHTHALMIC', pattern: /oftalmic/ },
+  { route: 'OTIC', pattern: /\botic[oa]?\b/ },
+  { route: 'NASAL', pattern: /nasal/ },
+  { route: 'INHALED', pattern: /inhalac|nebuliz|inhalador/ },
+  { route: 'VAGINAL', pattern: /vaginal|ovulo/ },
+  { route: 'RECTAL', pattern: /rectal|supositorio/ },
+  { route: 'INJECTABLE', pattern: /inyectab|\biny\b/ },
+  { route: 'SUBLINGUAL', pattern: /sublingual/ },
+  { route: 'TOPICAL', pattern: /crema|unguento|\bgel\b|dermic|locion|topic|parche|transdermic/ },
+  {
+    route: 'ORAL',
+    pattern: /tableta|capsula|jarabe|suspension|solucion|gotas|comprimido|gragea|masticable|efervescente|ingerible|perla|elixir|polvo/,
+  },
+];
+
+function inferRouteFromForma(forma: string): AdministrationRoute | null {
+  const normalized = stripAccents(forma.toLowerCase());
+  for (const rule of FORMA_ROUTE_RULES) {
+    if (rule.pattern.test(normalized)) return rule.route;
+  }
+  return null;
+}
+
+/** Turns a medicine-by-variation.json entry into the same ParsedProductName
+ * shape parseProductName produces, so buildSuggestionFields can consume it
+ * through the exact same merge/fallback path — just sourced from the curated
+ * dataset instead of a live OCR + name parse. Confidence is fixed HIGH: this
+ * is hand-processed catalog data, not a regex guess. */
+export function medicineEntryToParsed(e: MedicineEntry): ParsedProductName {
+  const ingredients: ParsedIngredient[] = (e.principios_activos ?? []).map((p, order) => {
+    const s = p.strength;
+    let value = s?.valor ?? null;
+    let unit = s?.unidad ? (s.por ? `${s.unidad}/${s.por}` : s.unidad) : null;
+    if (value == null && p.dosis) {
+      const parsed = parseValueUnit(p.dosis.trim());
+      value = parsed.value;
+      unit = parsed.unit;
+    }
+    return { name: p.nombre, concentrationValue: value, concentrationUnit: unit, order };
+  });
+
+  return {
+    ingredients,
+    form: e.formaFarmaceutica ? inferFormEnum(e.formaFarmaceutica) : null,
+    route: e.formaFarmaceutica ? inferRouteFromForma(e.formaFarmaceutica) : null,
+    routeOptions: [],
+    formOptions: e.formaFarmaceutica ? [e.formaFarmaceutica] : [],
+    concentrationOptions: [],
+    presentation: e.presentacion ?? null,
+    brand: e.marca ?? null,
+    category: 'Medicina',
+    confidence: 'HIGH',
+  };
+}

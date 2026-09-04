@@ -42,7 +42,7 @@ export type CostExtractionResult = {
   suggestedCategoryId?: string | null;
   suggestedCategoryName?: string | null;
   isCatalogedMedication?: boolean;
-  ocrText?: string | null;
+  laboratorio?: string | null;
   parseConfidence?: "HIGH" | "MEDIUM" | "LOW" | null;
   suggestedBrand?: string | null;
   ingredients?: Array<{ name: string; concentrationValue: number | null; concentrationUnit: string | null }> | null;

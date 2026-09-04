@@ -42,12 +42,17 @@ const RULES: Array<{ category: CategoryName; pattern: RegExp }> = [
   {
     category: 'Medicina',
     pattern:
-      /\d+\s?(mg|mcg|ml|g)\b|susp\.?\b|iny\.?\b|\btabs?\.?\b|\bcaps?\.?\b|\bsol\.?\b|soluci[oó]n|jarabe|\bgotas\b|comprimido|unguento|ung[uü]ento|cilina\b|prazol\b|[^a-z]azol\b|micina\b|olol\b|statina\b|sartan\b|oxacina\b/i,
+      /susp\.?\b|iny\.?\b|\btabs?\.?\b|\bcaps?\.?\b|\bsol\.?\b|soluci[oó]n|jarabe|\bgotas\b|comprimido|unguento|ung[uü]ento|cilina\b|prazol\b|[^a-z]azol\b|micina\b|olol\b|statina\b|sartan\b|oxacina\b/i,
   },
   { category: 'Dermocosmética', pattern: /crema|locion|\bgel\b|labial|maquillaje|perfume|colonia|esmalte/i },
   { category: 'Cuidado capilar e higiene', pattern: /shampoo|champu|jabon|talco|pasta dental|cepillo dental|desodorante|papel higienico|acondicionador|tinte/i },
   { category: 'Accesorio', pattern: /jeringa|guante|termometro|prueba( de embarazo)?\b|\btest\b|cepillo|soporte|cubrebocas|mascarilla|aguja/i },
   { category: 'General/Misceláneos', pattern: /juguete|vaso entrenador|regalo/i },
+  // Weak signal, deliberately last: a dose-shaped token (500 mg, 200 ml) with
+  // none of the stronger drug cues above. Any named personal-care / snack /
+  // accessory bucket wins first, so "shampoo 400 ml" or "gel 100 g" don't land
+  // in Medicina just for carrying a unit.
+  { category: 'Medicina', pattern: /\d+\s?(mg|mcg|ml|g)\b/i },
 ];
 
 export function stripAccents(s: string): string {

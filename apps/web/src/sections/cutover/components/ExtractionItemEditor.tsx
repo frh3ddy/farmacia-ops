@@ -37,20 +37,6 @@ function DocumentIcon({ className = "" }: { className?: string }) {
   );
 }
 
-// A viewfinder/scan motif, deliberately distinct from DocumentIcon — this
-// one represents "what was read off the package photo," not a generic file.
-function ScanIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2M20 8V6a2 2 0 0 0-2-2h-2M20 16v2a2 2 0 0 1-2 2h-2M7 12h10"
-      />
-    </svg>
-  );
-}
-
 function SparkleIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
@@ -91,7 +77,6 @@ type ExtractionItemEditorProps = {
   onDiscard: (productId: string) => void;
   onMarkDiscontinued: (productId: string) => Promise<void>;
   onRegenerateExtraction: (productId: string, description: string) => Promise<void>;
-  onReparseOcrText: (productId: string, ocrText: string) => Promise<void>;
   setError: (message: string) => void;
   hideProductImageForTransition: boolean;
   allCategories: CategoryOption[];
@@ -109,7 +94,6 @@ export function ExtractionItemEditor({
   onDiscard,
   onMarkDiscontinued,
   onRegenerateExtraction,
-  onReparseOcrText,
   setError,
   hideProductImageForTransition,
   allCategories,
@@ -117,14 +101,12 @@ export function ExtractionItemEditor({
   const [showPriceDetails, setShowPriceDetails] = useState(false);
   const [viewingImage, setViewingImage] = useState(false);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
-  const [detectedModalOpen, setDetectedModalOpen] = useState(false);
   // Raw text of whichever cost field is currently focused. A controlled
   // number input snaps back to its last committed value on every re-render,
   // so an in-progress edit (e.g. deleting down to "") needs to be tracked
   // separately from the committed numeric value until blur.
   const [costDraft, setCostDraft] = useState<{ idx: number; raw: string } | null>(null);
   const [regenerating, setRegenerating] = useState(false);
-  const [reparsingOcr, setReparsingOcr] = useState(false);
   const [confirmingDiscontinue, setConfirmingDiscontinue] = useState(false);
   const [discontinuing, setDiscontinuing] = useState(false);
   const [newEntrySupplier, setNewEntrySupplier] = useState("");
@@ -194,7 +176,6 @@ export function ExtractionItemEditor({
     setNewIngredientName("");
     setViewingImage(false);
     setSourceModalOpen(false);
-    setDetectedModalOpen(false);
   }, [result?.productId, cutoverDate]);
 
   useEffect(() => {
@@ -333,15 +314,6 @@ export function ExtractionItemEditor({
       await onRegenerateExtraction(result.productId, edited.originalDescription ?? "");
     } finally {
       setRegenerating(false);
-    }
-  };
-
-  const handleReparseOcr = async () => {
-    setReparsingOcr(true);
-    try {
-      await onReparseOcrText(result.productId, edited.ocrText ?? "");
-    } finally {
-      setReparsingOcr(false);
     }
   };
 
@@ -674,19 +646,9 @@ export function ExtractionItemEditor({
 
             {isMedicine && !edited.isCatalogedMedication && (
               <div className="order-1 col-span-2 space-y-3 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <SparkleIcon className="h-3.5 w-3.5 text-(--color-accent)" />
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-ink-tertiary)">Detected info</h4>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setDetectedModalOpen(true)}
-                    aria-label="View or edit the text read from the package photo"
-                    className="text-(--color-ink-tertiary) hover:text-(--color-accent)"
-                  >
-                    <ScanIcon className="h-4 w-4" />
-                  </button>
+                <div className="flex items-center gap-1.5">
+                  <SparkleIcon className="h-3.5 w-3.5 text-(--color-accent)" />
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-ink-tertiary)">Detected info</h4>
                 </div>
                 <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${pillClasses}`}>{confidencePill.label}</span>
 
@@ -799,6 +761,16 @@ export function ExtractionItemEditor({
                 </div>
 
                 <div>
+                  <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Laboratorio</label>
+                  <input
+                    value={edited.laboratorio ?? ""}
+                    onChange={e => updateManualField({ laboratorio: e.target.value || null })}
+                    placeholder="Laboratorios Pisa"
+                    className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
+                  />
+                </div>
+
+                <div>
                   <label className="mb-1 block text-xs text-(--color-ink-tertiary)">Marcas conocidas</label>
                   <input
                     value={(edited.brandSearchTerms ?? []).join(", ")}
@@ -859,31 +831,6 @@ export function ExtractionItemEditor({
         >
           {regenerating ? "Regenerating…" : "Regenerate from description"}
         </button>
-      </Modal>
-
-      <Modal open={detectedModalOpen} onClose={() => setDetectedModalOpen(false)} title="Text read from package photo">
-        <textarea
-          value={edited.ocrText ?? ""}
-          onChange={e => updateManualField({ ocrText: e.target.value })}
-          rows={10}
-          spellCheck={false}
-          placeholder="No text recognized from the package photo yet"
-          className="w-full resize-y rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1.5 font-mono text-xs leading-relaxed text-(--color-ink-secondary) focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-        />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <p className="text-xs text-(--color-ink-tertiary)">
-            Feeds the category and ingredient suggestions. Fix misreads here, then try again — corrections are saved when you
-            approve.
-          </p>
-          <button
-            type="button"
-            onClick={handleReparseOcr}
-            disabled={reparsingOcr || !(edited.ocrText ?? "").trim()}
-            className="shrink-0 text-xs font-medium text-(--color-accent) hover:text-(--color-accent-hover) disabled:opacity-50"
-          >
-            {reparsingOcr ? "Trying…" : "Try again"}
-          </button>
-        </div>
       </Modal>
 
       <ConfirmDialog

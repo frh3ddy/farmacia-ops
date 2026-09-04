@@ -61,6 +61,7 @@ export interface CostExtractionResult {
   formOptions?: string[] | null; // matched ingredient's known presentaciones[].forma values
   concentrationOptions?: string[] | null; // matched presentación's canonical concentraciones[]
   routeOptions?: string[] | null; // matched ingredient's vias_administracion, resolved to enum values
+  laboratorio?: string | null; // manufacturer from the curated medicine dataset -> Product.labId on approve
 
   // --- Selling price (Square catalog) - extraction-time only ---
   sellingPrices?: Array<{

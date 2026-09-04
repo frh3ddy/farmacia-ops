@@ -1,4 +1,10 @@
-import { parseProductName, mergeParsedProductNames, type ParsedProductName } from './product-name-parser';
+import {
+  parseProductName,
+  mergeParsedProductNames,
+  medicineEntryToParsed,
+  type ParsedProductName,
+  type MedicineEntry,
+} from './product-name-parser';
 
 describe('parseProductName', () => {
   it('parses a «»-separated single-ingredient name to HIGH confidence with a canonical concentration match', () => {
@@ -224,5 +230,68 @@ describe('mergeParsedProductNames', () => {
     expect(merged.ingredients).toEqual(highConfidence.ingredients);
     expect(merged.confidence).toBe('HIGH');
     expect(merged.presentation).toBe('Caja con 10 tabletas');
+  });
+});
+
+describe('medicineEntryToParsed', () => {
+  const base: MedicineEntry = {
+    name: 'Metformina/Glibenclamida 500/5 mg «» GLUCOVANCE c/40 TABS',
+    esMedicamento: true,
+    principios_activos: [
+      { nombre: 'Metformina', dosis: '500 mg', strength: { valor: 500, unidad: 'mg', por: null } },
+      { nombre: 'Glibenclamida', dosis: '5.0 mg', strength: { valor: 5, unidad: 'mg', por: null } },
+    ],
+    formaFarmaceutica: 'Tableta',
+    presentacion: 'Caja con 40 tabletas',
+    marca: 'Glucovance',
+    laboratorio: 'Merck',
+  };
+
+  it('maps each broken-down ingredient to its own value + unit', () => {
+    const parsed = medicineEntryToParsed(base);
+    expect(parsed.brand).toBe('Glucovance');
+    expect(parsed.form).toBe('TABLET');
+    expect(parsed.route).toBe('ORAL');
+    expect(parsed.confidence).toBe('HIGH');
+    expect(parsed.presentation).toBe('Caja con 40 tabletas');
+    expect(parsed.ingredients).toEqual([
+      { name: 'Metformina', concentrationValue: 500, concentrationUnit: 'mg', order: 0 },
+      { name: 'Glibenclamida', concentrationValue: 5, concentrationUnit: 'mg', order: 1 },
+    ]);
+  });
+
+  it('renders a per-volume strength as "<unidad>/<por>"', () => {
+    const parsed = medicineEntryToParsed({
+      ...base,
+      principios_activos: [{ nombre: 'Amoxicilina', dosis: '250 mg/5 mL', strength: { valor: 250, unidad: 'mg', por: '5 mL' } }],
+      formaFarmaceutica: 'Suspensión Oral',
+    });
+    expect(parsed.ingredients).toEqual([
+      { name: 'Amoxicilina', concentrationValue: 250, concentrationUnit: 'mg/5 mL', order: 0 },
+    ]);
+    expect(parsed.route).toBe('ORAL');
+  });
+
+  it('falls back to parsing dosis when strength.valor is null', () => {
+    const parsed = medicineEntryToParsed({
+      ...base,
+      principios_activos: [{ nombre: 'Paracetamol', dosis: '300 mg', strength: { valor: null, unidad: null, por: null } }],
+    });
+    expect(parsed.ingredients[0]).toEqual({ name: 'Paracetamol', concentrationValue: 300, concentrationUnit: 'mg', order: 0 });
+  });
+
+  it('infers route from an explicit forma word', () => {
+    const oft = medicineEntryToParsed({ ...base, formaFarmaceutica: 'Solución Oftálmica en Gotas' });
+    expect(oft.route).toBe('OPHTHALMIC');
+    const crema = medicineEntryToParsed({ ...base, formaFarmaceutica: 'Crema' });
+    expect(crema.route).toBe('TOPICAL');
+    const iny = medicineEntryToParsed({ ...base, formaFarmaceutica: 'Suspensión Inyectable' });
+    expect(iny.route).toBe('INJECTABLE');
+  });
+
+  it('leaves ingredients empty when principios_activos is empty', () => {
+    const parsed = medicineEntryToParsed({ ...base, principios_activos: [] });
+    expect(parsed.ingredients).toEqual([]);
+    expect(parsed.brand).toBe('Glucovance');
   });
 });
