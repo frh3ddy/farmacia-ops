@@ -334,6 +334,15 @@ export class ProductsService {
       inventoryCreated = true;
       this.logger.log(`[PRODUCT] Created initial inventory: ${initialStock} units @ $${costPrice} ${CURRENCY}`);
 
+      if (squareVariationId && location.squareId) {
+        try {
+          await this.setInitialInventoryInSquare(squareVariationId, location.squareId, initialStock, product.id);
+          this.logger.log(`[PRODUCT] Pushed initial stock to Square: ${initialStock} units`);
+        } catch (error) {
+          this.logger.error(`[PRODUCT] Failed to push initial stock to Square: ${error}`);
+        }
+      }
+
       if (supplierId) {
         await this.prisma.supplierProduct.upsert({
           where: { supplierId_productId: { supplierId, productId: product.id } },
@@ -515,6 +524,7 @@ export class ProductsService {
                   amount: this.toCents(input.sellingPrice),
                   currency: CURRENCY,
                 },
+                trackInventory: true,
               },
             },
           ],
@@ -540,6 +550,34 @@ export class ProductsService {
     return { itemId, variationId };
   }
 
+  /**
+   * Set the opening physical count for a newly created variation in Square.
+   * Keyed off the local product id so a retry replays the same idempotency key.
+   */
+  private async setInitialInventoryInSquare(
+    variationId: string,
+    squareLocationId: string,
+    quantity: number,
+    productId: string,
+  ): Promise<void> {
+    const client = this.getSquareClient();
+
+    await client.inventory.batchCreateChanges({
+      idempotencyKey: `initial_stock_${productId}`,
+      changes: [
+        {
+          type: 'PHYSICAL_COUNT',
+          physicalCount: {
+            catalogObjectId: variationId,
+            state: 'IN_STOCK',
+            locationId: squareLocationId,
+            quantity: quantity.toString(),
+            occurredAt: new Date().toISOString(),
+          },
+        },
+      ],
+    });
+  }
 
   /**
    * Update product selling price and sync to Square
