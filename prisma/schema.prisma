@@ -549,6 +549,11 @@ model InventoryAdjustment {
   // Cutover validation
   effectiveDate DateTime @default(now()) // Date the adjustment applies to
 
+  // Square sync tracking
+  squareSynced    Boolean   @default(false)
+  squareSyncedAt  DateTime?
+  squareSyncError String?
+
   // Relations
   location     Location   @relation(fields: [locationId], references: [id])
   product      Product    @relation(fields: [productId], references: [id])

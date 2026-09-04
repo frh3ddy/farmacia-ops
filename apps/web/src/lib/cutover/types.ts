@@ -54,6 +54,7 @@ export type CostExtractionResult = {
   concentrationOptions?: string[] | null;
   routeOptions?: string[] | null;
   imageUrl?: string | null;
+  stockQuantity?: number | null;
   sellingPrices?: SellingPriceVariation[] | null;
   sellingPrice?: SellingPrice | null;
   sellingPriceRange?: SellingPriceRange | null;

@@ -3,7 +3,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { buildTransferLines, resolveQuantityReceived } from './transfer';
 import { SquareClient, SquareEnvironment } from 'square';
-import { randomUUID } from 'crypto';
 
 export interface ShipTransferInput {
   productId: string;
@@ -63,6 +62,7 @@ export class TransferService {
 
   /** Push a plain NONE->IN_STOCK ADJUSTMENT for the received quantity at toLocationId. */
   private async syncReceiveToSquare(
+    transferId: string,
     locationId: string,
     productId: string,
     quantity: number,
@@ -80,8 +80,11 @@ export class TransferService {
       });
       if (!catalogMapping?.squareVariationId) return { synced: false, error: 'Product not mapped to Square catalog' };
 
-      await client.inventory.batchCreateChanges({
-        idempotencyKey: randomUUID(),
+      const response = await client.inventory.batchCreateChanges({
+        // Keyed on the transfer itself (not randomUUID()) so a retry of this
+        // receive call replays the same key — Square returns the original
+        // result instead of double-applying the stock change.
+        idempotencyKey: transferId,
         changes: [
           {
             type: 'ADJUSTMENT',
@@ -92,11 +95,18 @@ export class TransferService {
               fromState: 'NONE' as any,
               toState: 'IN_STOCK' as any,
               occurredAt: new Date().toISOString(),
-              referenceId: `transfer-receive-${Date.now()}`,
+              referenceId: `transfer-receive-${transferId}`,
             },
           },
         ],
       });
+
+      if (response.errors && response.errors.length > 0) {
+        const errorMessage = response.errors.map(e => e.detail || e.code).join('; ');
+        this.logger.error(`[TRANSFER] Square rejected receive: ${errorMessage}`);
+        return { synced: false, error: errorMessage };
+      }
+
       return { synced: true };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -254,7 +264,7 @@ export class TransferService {
 
     let squareSync: { synced: boolean; error?: string } | undefined;
     if (input.syncToSquare && totalReceived > 0) {
-      squareSync = await this.syncReceiveToSquare(transfer.toLocationId, transfer.productId, totalReceived);
+      squareSync = await this.syncReceiveToSquare(transfer.id, transfer.toLocationId, transfer.productId, totalReceived);
     }
 
     this.logger.log(`[TRANSFER] Received ${totalReceived} of ${transfer.productId} at ${transfer.toLocationId} for transfer ${transfer.id}`);

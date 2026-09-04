@@ -2,7 +2,6 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, AdjustmentType } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
-import { randomUUID } from 'crypto';
 
 // ============================================================================
 // Types
@@ -97,6 +96,7 @@ export class InventoryAdjustmentService {
   // Square Inventory Sync
   // --------------------------------------------------------------------------
   private async syncToSquare(
+    adjustmentId: string,
     locationId: string,
     productId: string,
     quantityChange: number,
@@ -161,7 +161,10 @@ export class InventoryAdjustmentService {
       this.logger.log(`[SQUARE_SYNC] Syncing adjustment: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${Math.abs(quantityChange)}, ${fromState} → ${toState}, type=${adjustmentType}`);
       
       const response = await client.inventory.batchCreateChanges({
-        idempotencyKey: randomUUID(),
+        // Keyed on the adjustment record itself (not randomUUID()) so a
+        // retry (retrySquareSync) replays the same key — Square returns the
+        // original result instead of double-applying the stock change.
+        idempotencyKey: adjustmentId,
         changes: [
           {
             type: 'ADJUSTMENT',
@@ -172,11 +175,17 @@ export class InventoryAdjustmentService {
               fromState: fromState as any,
               toState: toState as any,
               occurredAt: new Date().toISOString(),
-              referenceId: `adjustment-${adjustmentType}-${Date.now()}`,
+              referenceId: `adjustment-${adjustmentType}-${adjustmentId}`,
             },
           },
         ],
       });
+
+      if (response.errors && response.errors.length > 0) {
+        const errorMessage = response.errors.map(e => e.detail || e.code).join('; ');
+        this.logger.error(`[SQUARE_SYNC] Square rejected adjustment: ${errorMessage}`);
+        return { synced: false, error: errorMessage };
+      }
 
       this.logger.log(`[SQUARE_SYNC] Successfully synced adjustment to Square. Response counts: ${JSON.stringify(response.counts || 'no counts')}`);
       return { synced: true };
@@ -357,11 +366,21 @@ export class InventoryAdjustmentService {
     let squareSync: { synced: boolean; error?: string } | undefined;
     if (input.syncToSquare) {
       squareSync = await this.syncToSquare(
+        result.id,
         input.locationId,
         input.productId,
         input.quantity, // negative
         input.type // Pass the adjustment type for proper state transition
       );
+
+      await this.prisma.inventoryAdjustment.update({
+        where: { id: result.id },
+        data: {
+          squareSynced: squareSync.synced,
+          squareSyncedAt: squareSync.synced ? new Date() : null,
+          squareSyncError: squareSync.error || null,
+        },
+      });
     }
 
     return {
@@ -455,11 +474,21 @@ export class InventoryAdjustmentService {
     let squareSync: { synced: boolean; error?: string } | undefined;
     if (input.syncToSquare) {
       squareSync = await this.syncToSquare(
+        result.adjustment.id,
         input.locationId,
         input.productId,
         input.quantity, // positive
         input.type // Pass the adjustment type for proper state transition
       );
+
+      await this.prisma.inventoryAdjustment.update({
+        where: { id: result.adjustment.id },
+        data: {
+          squareSynced: squareSync.synced,
+          squareSyncedAt: squareSync.synced ? new Date() : null,
+          squareSyncError: squareSync.error || null,
+        },
+      });
     }
 
     return {
@@ -481,6 +510,42 @@ export class InventoryAdjustmentService {
       },
       squareSync,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // Retry Square sync
+  // --------------------------------------------------------------------------
+  async retrySquareSync(adjustmentId: string): Promise<{ synced: boolean; error?: string }> {
+    const adjustment = await this.prisma.inventoryAdjustment.findUnique({
+      where: { id: adjustmentId },
+    });
+
+    if (!adjustment) {
+      throw new NotFoundException(`Adjustment ${adjustmentId} not found`);
+    }
+
+    if (adjustment.squareSynced) {
+      return { synced: true, error: 'Already synced' };
+    }
+
+    const result = await this.syncToSquare(
+      adjustmentId,
+      adjustment.locationId,
+      adjustment.productId,
+      adjustment.quantity,
+      adjustment.type
+    );
+
+    await this.prisma.inventoryAdjustment.update({
+      where: { id: adjustmentId },
+      data: {
+        squareSynced: result.synced,
+        squareSyncedAt: result.synced ? new Date() : null,
+        squareSyncError: result.error || null,
+      },
+    });
+
+    return result;
   }
 
   // --------------------------------------------------------------------------

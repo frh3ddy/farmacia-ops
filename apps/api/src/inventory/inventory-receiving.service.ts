@@ -2,7 +2,6 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
-import { randomUUID } from 'crypto';
 
 // ============================================================================
 // Types
@@ -87,6 +86,7 @@ export class InventoryReceivingService {
   // Square Sync - RECEIVE_STOCK
   // --------------------------------------------------------------------------
   private async syncToSquare(
+    receivingId: string,
     locationId: string,
     productId: string,
     quantity: number
@@ -122,7 +122,10 @@ export class InventoryReceivingService {
       this.logger.log(`[SQUARE_SYNC] Syncing receiving: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${quantity}`);
       
       const response = await client.inventory.batchCreateChanges({
-        idempotencyKey: randomUUID(),
+        // Keyed on the receiving record itself (not randomUUID()) so a retry
+        // (retrySquareSync) replays the same key — Square returns the
+        // original result instead of double-applying the stock change.
+        idempotencyKey: receivingId,
         changes: [
           {
             type: 'ADJUSTMENT',
@@ -133,11 +136,17 @@ export class InventoryReceivingService {
               fromState: 'NONE',
               toState: 'IN_STOCK',
               occurredAt: new Date().toISOString(),
-              referenceId: `receiving-${Date.now()}`,
+              referenceId: `receiving-${receivingId}`,
             },
           },
         ],
       });
+
+      if (response.errors && response.errors.length > 0) {
+        const errorMessage = response.errors.map(e => e.detail || e.code).join('; ');
+        this.logger.error(`[SQUARE_SYNC] Square rejected receiving: ${errorMessage}`);
+        return { synced: false, error: errorMessage };
+      }
 
       this.logger.log(`[SQUARE_SYNC] Successfully synced receiving to Square. Response counts: ${JSON.stringify(response.counts || 'no counts')}`);
       return { synced: true };
@@ -330,6 +339,7 @@ export class InventoryReceivingService {
     let squareSync: { synced: boolean; error?: string } | undefined;
     if (input.syncToSquare) {
       squareSync = await this.syncToSquare(
+        result.receiving.id,
         input.locationId,
         input.productId,
         input.quantity
@@ -534,6 +544,7 @@ export class InventoryReceivingService {
     }
 
     const result = await this.syncToSquare(
+      receivingId,
       receiving.locationId,
       receiving.productId,
       receiving.quantity

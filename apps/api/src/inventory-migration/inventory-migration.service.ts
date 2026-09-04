@@ -648,6 +648,11 @@ export class InventoryMigrationService {
     // productId -> variationId -> set of locationIds it was seen at this batch, so step 11 can
     // resolve Square's per-location price overrides instead of only the base variation price.
     const locationsByProductVariation = new Map<string, Map<string, Set<string>>>();
+    // Summed across every (variation, location) pair seen for the product this batch — same
+    // shape as catalog-product-view.ts's inventories.quantity sum, but sourced from the
+    // already-in-hand Square counts (see getCutoverItemsForLocations) rather than local Inventory
+    // rows, which don't exist yet at extraction time (they're created on cutover approval).
+    const stockQuantityByProduct = new Map<string, number>();
 
     for (const item of nonSkipped) {
       if (!representativeByProduct.has(item.productId)) {
@@ -665,6 +670,11 @@ export class InventoryMigrationService {
       const varLocMap = locationsByProductVariation.get(item.productId)!;
       if (!varLocMap.has(vid)) varLocMap.set(vid, new Set());
       varLocMap.get(vid)!.add(item.locationId);
+
+      stockQuantityByProduct.set(
+        item.productId,
+        (stockQuantityByProduct.get(item.productId) ?? 0) + item.squareInventoryItem.quantity,
+      );
     }
 
     const batchProductIds = Array.from(representativeByProduct.keys());
@@ -1018,6 +1028,7 @@ export class InventoryMigrationService {
           existingApprovalDate: existingApproval.approvedAt,
           existingCutoverId: existingApproval.cutoverId,
           imageUrl,
+          stockQuantity: stockQuantityByProduct.get(productId) ?? 0,
           migrationStatus: (existingApproval as any).migrationStatus || 'PENDING',
 
           sellingPrices,
@@ -1049,6 +1060,7 @@ export class InventoryMigrationService {
           originalDescription: productDescription ?? productName,
           extractedEntries: enrichedEntries,
           imageUrl,
+          stockQuantity: stockQuantityByProduct.get(productId) ?? 0,
           migrationStatus: 'PENDING' as const,
           requiresManualReview: extraction.requiresManualReview || guard.isCostTooHigh,
 

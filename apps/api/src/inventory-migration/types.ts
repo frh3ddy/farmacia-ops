@@ -42,6 +42,7 @@ export interface CostExtractionResult {
   isPreferredSupplier?: boolean; // Whether this supplier is preferred for the product
   latestCostHistoryDate?: string | null; // Latest cost history date for selected supplier
   imageUrl?: string | null; // Product image URL from Square catalog
+  stockQuantity?: number | null; // Current Square inventory count, summed across this batch's locations
 
   // --- Product category ---
   categoryId?: string | null; // Product's current categoryId, if any

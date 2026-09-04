@@ -407,7 +407,11 @@ export function ExtractionItemEditor({
                   )}
 
                 <div className="rounded-md border border-(--color-border-standard) bg-(--color-surface) p-4">
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-xs text-(--color-ink-tertiary)">Stock</p>
+                      <p className="tabular text-xl font-semibold text-(--color-ink)">{result.stockQuantity ?? 0}</p>
+                    </div>
                     <div>
                       <p className="text-xs text-(--color-ink-tertiary)">Selling price</p>
                       {result.sellingPrice ? (

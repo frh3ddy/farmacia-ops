@@ -307,6 +307,22 @@ export class InventoryAdjustmentController {
   }
 
   // --------------------------------------------------------------------------
+  // Retry Square sync - OWNER only
+  // --------------------------------------------------------------------------
+  @Post(':id/retry-square-sync')
+  @Roles('OWNER')
+  async retrySquareSync(@Param('id') id: string) {
+    const result = await this.adjustmentService.retrySquareSync(id);
+    return {
+      success: result.synced,
+      message: result.synced
+        ? 'Successfully synced to Square'
+        : `Square sync failed: ${result.error}`,
+      data: result,
+    };
+  }
+
+  // --------------------------------------------------------------------------
   // Utility endpoints - Public
   // --------------------------------------------------------------------------
   @Get('types/list')

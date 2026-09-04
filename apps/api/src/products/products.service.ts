@@ -432,6 +432,7 @@ export class ProductsService {
           description: product.squareDescription || undefined,
           sellingPrice: price,
           locationId: location?.squareId || undefined,
+          productId: product.id,
         });
 
         // Update catalog mapping with real Square ID
@@ -479,9 +480,15 @@ export class ProductsService {
     description?: string;
     sellingPrice: number;
     locationId?: string;
+    // Keys the Square call to this local product's own id so a retry (e.g.
+    // the bulk unsynced-products sweep or a re-run of updatePrice's backfill
+    // path) replays the same idempotency key instead of creating a second
+    // duplicate Square item. Omitted only when called from createProduct(),
+    // before the local Product row exists to key off of.
+    productId?: string;
   }): Promise<{ itemId: string; variationId: string }> {
     const client = this.getSquareClient();
-    const idempotencyKey = randomUUID();
+    const idempotencyKey = input.productId ?? randomUUID();
 
     // Generate temporary IDs for the request
     const tempItemId = `#item_${idempotencyKey}`;
@@ -601,6 +608,7 @@ export class ProductsService {
             description: product.squareDescription || undefined,
             sellingPrice,
             locationId: location?.squareId || undefined,
+            productId,
           });
           
           // Update the catalog mapping with the real Square variation ID
