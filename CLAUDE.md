@@ -8,7 +8,7 @@ Data: PostgreSQL via Prisma (`prisma/schema.prisma`, shared by api + worker), Re
 
 > Global rules live in `~/dev/CLAUDE.md` and `~/CLAUDE.md`. This file is project-specific only.
 
-## When working on X, read Y
+## Session checklist — if working on X, read Y
 
 - **Architecture / domain model / "where does X live"** → `graphify query "<question>"` (graph at `graphify-out/`), then `graphify-out/wiki/index.md`. Don't browse raw source blind.
 - **Square API code** (payments, Orders, Catalog, Inventory, webhooks) → the `square-integration` skill first — the REST API is date-versioned and the Node SDK had a breaking `Client` → `SquareClient` rename.
@@ -40,6 +40,9 @@ Runs the api, web, and worker workspace test suites. Must pass before push.
 
 ## Rules
 
-- FIFO consumption order is `Inventory.receivedAt ASC` — never `createdAt`. Backfilled/migrated batches have a `createdAt` that lags real receiving date. Because using `createdAt` silently mis-costs COGS on any location that went through cutover.
-- Don't add a hand-maintained architecture doc. Instead update the graphify graph. Because prose docs drift; the graph is regenerated from the AST.
-- Don't commit files over 256 KB of source/data into a path Claude needs to read (e.g. `data/*.json`). Instead keep large datasets out of the read path or split them. Because Claude Code cannot open files that large.
+- Don't order FIFO consumption by `Inventory.createdAt`. Instead order by `receivedAt ASC`.
+  Because: backfilled/migrated batches have a `createdAt` that lags the real receiving date, so `createdAt` silently mis-costs COGS on any location that went through cutover.
+- Don't add a hand-maintained architecture doc. Instead update the graphify graph (`graphify update .`).
+  Because: prose docs drift; the graph is regenerated from the AST.
+- Don't commit files over 256 KB into a path Claude reads (e.g. `data/*.json`). Instead keep large datasets out of the read path or split them.
+  Because: Claude Code cannot open files that large.
