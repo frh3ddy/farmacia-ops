@@ -678,6 +678,7 @@ export class InventoryMigrationController {
     body: {
       cutoverId: string;
       productId: string;
+      productName?: string;
       cost: number;
       source?: string;
       notes?: string | null;
@@ -723,6 +724,7 @@ export class InventoryMigrationController {
         req.employee.id,
         body.medicationInfo || null,
         labId,
+        body.productName || null,
       );
       return result;
     } catch (error) {

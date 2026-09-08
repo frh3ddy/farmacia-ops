@@ -45,6 +45,29 @@ function SparkleIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function PencilIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+// Mirrors backend deriveName() in apps/api/src/products/derived-naming.ts —
+// same "local copy, no shared package" precedent as FORM_LABELS/ROUTE_LABELS
+// above, minus the packaging half of that file which the cutover editor's
+// Detected Info panel doesn't track. Null when there isn't enough detected
+// info to build a name from.
+function deriveMedicineName(ingredients: NonNullable<CostExtractionResult["ingredients"]>, form: string | null | undefined): string | null {
+  if (!form || ingredients.length === 0) return null;
+  const names = ingredients.map(i => i.name).join("/");
+  const concentrations = ingredients
+    .filter(i => i.concentrationValue != null && i.concentrationUnit)
+    .map(i => `${i.concentrationValue}${i.concentrationUnit}`)
+    .join("/");
+  return [names, concentrations, FORM_LABELS[form] ?? form].filter(Boolean).join(" ");
+}
+
 function computeExtractedDate(entry: ExtractedCostEntry, cutoverDate: string): string | null {
   if (!entry.month) return null;
   const monthIndex = MONTH_NAMES.indexOf(entry.month);
@@ -114,6 +137,7 @@ export function ExtractionItemEditor({
   const [newEntryCost, setNewEntryCost] = useState("");
   const [newEntryDate, setNewEntryDate] = useState(cutoverDate);
   const [newIngredientName, setNewIngredientName] = useState("");
+  const [editingName, setEditingName] = useState(false);
 
   // Preload the next 10 product images so Next navigation feels instant.
   useEffect(() => {
@@ -177,6 +201,7 @@ export function ExtractionItemEditor({
     setNewIngredientName("");
     setViewingImage(false);
     setSourceModalOpen(false);
+    setEditingName(false);
   }, [result?.productId, cutoverDate]);
 
   useEffect(() => {
@@ -364,7 +389,40 @@ export function ExtractionItemEditor({
             className={`shrink-0 transition-all duration-300 ease-in-out ${detectedInfoDisabled ? "basis-[calc((100%-5rem)/3+2rem)]" : "basis-0"
               }`}
           />
-          <h3 className="truncate text-lg font-semibold text-(--color-ink)">{result.productName}</h3>
+          {editingName ? (
+            <input
+              autoFocus
+              value={edited.productName}
+              onChange={e => updateManualField({ productName: e.target.value })}
+              onBlur={() => setEditingName(false)}
+              onKeyDown={e => e.key === "Enter" && setEditingName(false)}
+              className="min-w-0 flex-1 rounded-sm border border-(--color-accent) bg-(--color-surface-inset) px-2 py-1 text-lg font-semibold text-(--color-ink) focus:outline-none"
+            />
+          ) : (
+            <h3 className="min-w-0 flex-1 truncate text-lg font-semibold text-(--color-ink)">{edited.productName}</h3>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditingName(v => !v)}
+            aria-label="Edit product name"
+            className="ml-2 shrink-0 rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-surface-inset) hover:text-(--color-ink)"
+          >
+            <PencilIcon className="h-4 w-4" />
+          </button>
+          {isMedicine && deriveMedicineName(edited.ingredients ?? [], edited.form) && (
+            <button
+              type="button"
+              onClick={() => {
+                updateManualField({ productName: deriveMedicineName(edited.ingredients ?? [], edited.form)! });
+                setEditingName(true);
+              }}
+              aria-label="Autofill name from detected info"
+              title="Autofill from detected info"
+              className="ml-1 shrink-0 rounded-sm p-1 text-(--color-accent) hover:bg-(--color-accent)/10"
+            >
+              <SparkleIcon className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         <div className="space-y-4 p-6">

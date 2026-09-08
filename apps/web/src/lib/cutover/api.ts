@@ -51,6 +51,7 @@ export async function extractCosts(payload: ExtractCostsPayload): Promise<Extrac
 export type ApproveItemPayload = {
   cutoverId: string;
   productId: string;
+  productName?: string;
   cost: number;
   source: string;
   notes?: string | null;
@@ -70,8 +71,10 @@ export type ApproveItemPayload = {
   labName?: string | null;
 };
 
+export type ApproveItemResult = { success: boolean; squareNameSynced?: boolean; squareNameSyncError?: string };
+
 export function approveItem(payload: ApproveItemPayload) {
-  return apiFetch(`${BASE}/approve-item`, { method: "POST", body: JSON.stringify(payload) });
+  return apiFetch<ApproveItemResult>(`${BASE}/approve-item`, { method: "POST", body: JSON.stringify(payload) });
 }
 
 export function discardItem(payload: {
