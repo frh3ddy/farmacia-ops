@@ -421,9 +421,10 @@ export function useCutoverWizard() {
 
       setHideProductImageForTransition(true);
       try {
-        await api.approveItem({
+        const approveResult = await api.approveItem({
           cutoverId,
           productId: result.productId,
+          productName: edited.productName,
           cost,
           source,
           notes: `Supplier: ${supplierName}`,
@@ -455,6 +456,10 @@ export function useCutoverWizard() {
               : null,
           labName: edited.laboratorio?.trim() || null,
         });
+
+        if (approveResult.squareNameSynced === false) {
+          setError(`Name saved locally, but syncing to Square failed: ${approveResult.squareNameSyncError ?? "unknown error"}`);
+        }
 
         if (initialsToAdd.length > 0) {
           await Promise.all(initialsToAdd.map(i => api.addSupplierInitial(i.supplierName, i.initial).catch(() => undefined)));

@@ -45,6 +45,29 @@ function SparkleIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function PencilIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+// Mirrors backend deriveName() in apps/api/src/products/derived-naming.ts —
+// same "local copy, no shared package" precedent as FORM_LABELS/ROUTE_LABELS
+// above, minus the packaging half of that file which the cutover editor's
+// Detected Info panel doesn't track. Null when there isn't enough detected
+// info to build a name from.
+function deriveMedicineName(ingredients: NonNullable<CostExtractionResult["ingredients"]>, form: string | null | undefined): string | null {
+  if (!form || ingredients.length === 0) return null;
+  const names = ingredients.map(i => i.name).join("/");
+  const concentrations = ingredients
+    .filter(i => i.concentrationValue != null && i.concentrationUnit)
+    .map(i => `${i.concentrationValue}${i.concentrationUnit}`)
+    .join("/");
+  return [names, concentrations, FORM_LABELS[form] ?? form].filter(Boolean).join(" ");
+}
+
 function computeExtractedDate(entry: ExtractedCostEntry, cutoverDate: string): string | null {
   if (!entry.month) return null;
   const monthIndex = MONTH_NAMES.indexOf(entry.month);
@@ -114,6 +137,7 @@ export function ExtractionItemEditor({
   const [newEntryCost, setNewEntryCost] = useState("");
   const [newEntryDate, setNewEntryDate] = useState(cutoverDate);
   const [newIngredientName, setNewIngredientName] = useState("");
+  const [editingName, setEditingName] = useState(false);
 
   // Preload the next 10 product images so Next navigation feels instant.
   useEffect(() => {
@@ -177,6 +201,7 @@ export function ExtractionItemEditor({
     setNewIngredientName("");
     setViewingImage(false);
     setSourceModalOpen(false);
+    setEditingName(false);
   }, [result?.productId, cutoverDate]);
 
   useEffect(() => {
@@ -352,8 +377,14 @@ export function ExtractionItemEditor({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-(--color-border-standard) bg-(--color-surface-raised)">
-        <div className="flex items-center border-b border-(--color-border-standard) px-6 py-3">
+      {/* Bounded flex column: header + action bar are non-scrolling, the body
+          scrolls internally. Keeps the action bar a fixed distance from the
+          viewport bottom regardless of how many supplier-cost rows the body
+          holds. ponytail: the height constant tracks the stats/tabs card height
+          above; retune if that card's layout changes materially, or wire a real
+          flex-height chain from <main> down (multi-file, other cutover phases). */}
+      <div className="flex h-[calc(100vh-9rem)] flex-col rounded-lg border border-(--color-border-standard) bg-(--color-surface-raised)">
+        <div className="flex shrink-0 items-center border-b border-(--color-border-standard) px-6 py-3">
           {/* Spacer's basis mirrors the body grid's col-span-2 width below
               (grid-cols-6 gap-4: 2 of 6 tracks + the one gap between them),
               so the shifted title lines up with where the image/intelligence
@@ -364,10 +395,43 @@ export function ExtractionItemEditor({
             className={`shrink-0 transition-all duration-300 ease-in-out ${detectedInfoDisabled ? "basis-[calc((100%-5rem)/3+2rem)]" : "basis-0"
               }`}
           />
-          <h3 className="truncate text-lg font-semibold text-(--color-ink)">{result.productName}</h3>
+          {editingName ? (
+            <input
+              autoFocus
+              value={edited.productName}
+              onChange={e => updateManualField({ productName: e.target.value })}
+              onBlur={() => setEditingName(false)}
+              onKeyDown={e => e.key === "Enter" && setEditingName(false)}
+              className="min-w-0 flex-1 rounded-sm border border-(--color-accent) bg-(--color-surface-inset) px-2 py-1 text-lg font-semibold text-(--color-ink) focus:outline-none"
+            />
+          ) : (
+            <h3 className="min-w-0 flex-1 truncate text-lg font-semibold text-(--color-ink)">{edited.productName}</h3>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditingName(v => !v)}
+            aria-label="Edit product name"
+            className="ml-2 shrink-0 rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-surface-inset) hover:text-(--color-ink)"
+          >
+            <PencilIcon className="h-4 w-4" />
+          </button>
+          {isMedicine && deriveMedicineName(edited.ingredients ?? [], edited.form) && (
+            <button
+              type="button"
+              onClick={() => {
+                updateManualField({ productName: deriveMedicineName(edited.ingredients ?? [], edited.form)! });
+                setEditingName(true);
+              }}
+              aria-label="Autofill name from detected info"
+              title="Autofill from detected info"
+              className="ml-1 shrink-0 rounded-sm p-1 text-(--color-accent) hover:bg-(--color-accent)/10"
+            >
+              <SparkleIcon className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
-        <div className="space-y-4 p-6">
+        <div className="flex-1 space-y-4 overflow-y-auto p-6">
           {/* Left: image + intelligence card, then supplier history below.
               Right: detected info, spanning the full height of both —
               matches the reference mockup's 2-column relationship rather
@@ -800,14 +864,10 @@ export function ExtractionItemEditor({
           </div>
         </div>
 
-        {/* Pinned to the bottom of main's own scroll area (App.tsx's <main>
-            is h-screen + overflow-y-auto, same bounded pattern Sidebar
-            already uses) — sticky, not fixed, so it stays in normal flow
-            horizontally (no need to duplicate Sidebar's width or
-            ExtractionPhase's max-w-6xl/px-8 to line up) and still respects
-            the card's own bottom edge once you've scrolled past it, rather
-            than floating past it. */}
-        <div className="sticky bottom-0 z-10 flex items-center justify-between gap-3 rounded-b-lg border-t border-(--color-border-standard) bg-(--color-surface-raised) px-6 py-4">
+        {/* Non-scrolling flex child at the bottom of the bounded card (see the
+            card wrapper comment) — always at the card's bottom edge, so its
+            screen position doesn't move with the body's row count. */}
+        <div className="flex shrink-0 items-center justify-between gap-3 rounded-b-lg border-t border-(--color-border-standard) bg-(--color-surface-raised) px-6 py-4">
           <button
             onClick={() => setConfirmingDiscontinue(true)}
             className="text-xs font-medium text-(--color-destructive) hover:underline"

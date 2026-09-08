@@ -88,6 +88,11 @@ sudospecs
 
 farmacia-ios/
 
+# Claude Code — per-machine local state, not shared
+.claude/settings.local.json
+.claude/.headroom_wrap_settings.lock
+.serena/
+
 # graphify (local knowledge graph, not shared)
 graphify-out/
 

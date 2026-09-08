@@ -2057,9 +2057,26 @@ export class InventoryMigrationService {
       brandSearchTerms?: string[] | null;
     } | null,
     labId?: string | null,
-  ): Promise<{ success: boolean }> {
+    productName?: string | null,
+  ): Promise<{ success: boolean; squareNameSynced?: boolean; squareNameSyncError?: string }> {
     this.logger.log(`[APPROVE_ITEM] cutoverId: ${cutoverId}, productId: ${productId}, cost: ${cost}`);
     try {
+      // Fetched unconditionally (not just for the medication branch below) —
+      // also doubles as the before-state for the Square rename push after
+      // the transaction: whichever of these three the display formula
+      // resolves to elsewhere in this file is what a reviewer's name edit
+      // needs to beat before it's worth pushing to Square.
+      const existingProduct = await this.prisma.product.findUnique({
+        where: { id: productId },
+        select: {
+          medicationDefinitionId: true,
+          name: true,
+          squareProductName: true,
+          squareVariationName: true,
+          catalogMappings: { select: { squareVariationId: true } },
+        },
+      });
+
       // Resolved outside the $transaction below, same as findOrCreateSupplier
       // elsewhere in this method — find-or-create helpers here use this.prisma
       // directly rather than the transaction client. Reviewer-confirmed data
@@ -2080,10 +2097,6 @@ export class InventoryMigrationService {
           addLearnedIngredient(ingredient.name);
         }
 
-        const existingProduct = await this.prisma.product.findUnique({
-          where: { id: productId },
-          select: { medicationDefinitionId: true },
-        });
         if (!existingProduct?.medicationDefinitionId) {
           const ingredientIds = await Promise.all(
             medicationInfo.ingredients.map((i) => findOrCreateActiveIngredient(this.prisma, i.name)),
@@ -2155,6 +2168,20 @@ export class InventoryMigrationService {
 
         if (categoryId) {
           await tx.product.update({ where: { id: productId }, data: { categoryId } });
+        }
+
+        // squareProductName wins over `name` in every "display name" read
+        // path elsewhere in this file (getCutoverItemsForLocations,
+        // approvals/skipped-items listings, etc.) — updating `name` alone
+        // would leave a reviewer's edit invisible everywhere it's cached.
+        // The actual Square catalog push happens after this transaction
+        // commits (external network call, kept out of it).
+        if (productName && productName.trim()) {
+          const trimmedName = productName.trim();
+          await tx.product.update({
+            where: { id: productId },
+            data: { name: trimmedName, squareProductName: trimmedName },
+          });
         }
 
         if (labId) {
@@ -2345,6 +2372,28 @@ export class InventoryMigrationService {
           });
         }
       });
+
+      // Push the rename to the live Square listing, best-effort — only when
+      // the name actually changed and the product has a real (non-`local_`,
+      // i.e. actually synced) Square mapping. Never fails the request: the
+      // local approval above already succeeded and matters more than a
+      // transient Square hiccup, but the caller still needs to know so the
+      // reviewer can see it rather than the two silently drifting apart.
+      const trimmedName = productName?.trim() || null;
+      const beforeName =
+        existingProduct?.squareProductName || existingProduct?.squareVariationName || existingProduct?.name || null;
+      if (trimmedName && trimmedName !== beforeName) {
+        const mapping = existingProduct?.catalogMappings.find((m) => !m.squareVariationId.startsWith('local_'));
+        if (mapping) {
+          try {
+            await this.productsService.renameProductInSquare(mapping.squareVariationId, trimmedName);
+            return { success: true, squareNameSynced: true };
+          } catch (e) {
+            this.logger.warn(`[SQUARE_RENAME] Failed to rename Square item for product ${productId}: ${e}`);
+            return { success: true, squareNameSynced: false, squareNameSyncError: e instanceof Error ? e.message : String(e) };
+          }
+        }
+      }
 
       return { success: true };
     } catch (error) {

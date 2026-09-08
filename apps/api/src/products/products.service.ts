@@ -889,6 +889,24 @@ export class ProductsService {
   }
 
   /**
+   * `Product`/`CatalogMapping` only ever store the ITEM_VARIATION id — never
+   * the parent ITEM id — so every operation that needs the parent (delete,
+   * rename) resolves it the same way: fetch the variation object and read
+   * itemVariationData.itemId off it.
+   */
+  private async resolveParentItemId(variationId: string): Promise<string> {
+    const client = this.getSquareClient();
+    const retrieveResponse = await client.catalog.object.get({ objectId: variationId });
+    const currentObject = retrieveResponse.object;
+    const variationData = (currentObject as any)?.itemVariationData;
+    const parentItemId = variationData?.itemId;
+    if (!parentItemId) {
+      throw new Error(`Could not resolve parent item for Square variation ${variationId}`);
+    }
+    return parentItemId;
+  }
+
+  /**
    * Permanently retires a catalog item in Square. `variationId` is an
    * ITEM_VARIATION catalog object ID (what inventory rows store) — this
    * resolves its parent ITEM id and deletes that, since BatchDeleteCatalogObjects
@@ -897,17 +915,59 @@ export class ProductsService {
    */
   async deleteCatalogItem(variationId: string): Promise<void> {
     const client = this.getSquareClient();
-
-    const retrieveResponse = await client.catalog.object.get({ objectId: variationId });
-    const currentObject = retrieveResponse.object;
-    const variationData = (currentObject as any)?.itemVariationData;
-    const parentItemId = variationData?.itemId;
-    if (!parentItemId) {
-      throw new Error(`Could not resolve parent item for Square variation ${variationId}`);
-    }
+    const parentItemId = await this.resolveParentItemId(variationId);
 
     await client.catalog.batchDelete({ objectIds: [parentItemId] });
     this.logger.log(`[PRODUCT] Deleted Square catalog item ${parentItemId} (via variation ${variationId})`);
+  }
+
+  /**
+   * Renames the parent ITEM's display name in Square. Mirrors
+   * updatePriceInSquare's fetch-preserve-upsert shape: CatalogObject upsert
+   * is a full-object replace, and CatalogItem.variations is required
+   * ("an item must have at least one variation"), so the current itemData
+   * (including its nested variations) is spread back untouched and only
+   * `name` is overridden — never build the object from scratch here.
+   */
+  async renameProductInSquare(variationId: string, newName: string): Promise<void> {
+    const client = this.getSquareClient();
+    const parentItemId = await this.resolveParentItemId(variationId);
+
+    const retrieveResponse = await client.catalog.object.get({ objectId: parentItemId });
+    const currentObject = retrieveResponse.object;
+    if (!currentObject) {
+      throw new Error(`Item ${parentItemId} not found in Square`);
+    }
+
+    const itemData = (currentObject as any).itemData;
+    if (!itemData) {
+      throw new Error(`Invalid item data for ${parentItemId}`);
+    }
+
+    const upsertObject: any = {
+      type: 'ITEM',
+      id: parentItemId,
+      version: currentObject.version,
+      itemData: { ...itemData, name: newName },
+    };
+
+    // Preserve item-level location settings — same fields/logic as
+    // updatePriceInSquare preserves at the variation level.
+    if (currentObject.presentAtAllLocations !== undefined) {
+      upsertObject.presentAtAllLocations = currentObject.presentAtAllLocations;
+    }
+    if (currentObject.presentAtLocationIds) {
+      upsertObject.presentAtLocationIds = currentObject.presentAtLocationIds;
+    }
+    if (currentObject.absentAtLocationIds) {
+      upsertObject.absentAtLocationIds = currentObject.absentAtLocationIds;
+    }
+
+    await client.catalog.object.upsert({
+      idempotencyKey: randomUUID(),
+      object: upsertObject,
+    });
+    this.logger.log(`[PRODUCT] Renamed Square item ${parentItemId} (via variation ${variationId}) to "${newName}"`);
   }
 
   /**
