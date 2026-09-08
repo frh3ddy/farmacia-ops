@@ -377,8 +377,14 @@ export function ExtractionItemEditor({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-(--color-border-standard) bg-(--color-surface-raised)">
-        <div className="flex items-center border-b border-(--color-border-standard) px-6 py-3">
+      {/* Bounded flex column: header + action bar are non-scrolling, the body
+          scrolls internally. Keeps the action bar a fixed distance from the
+          viewport bottom regardless of how many supplier-cost rows the body
+          holds. ponytail: the height constant tracks the stats/tabs card height
+          above; retune if that card's layout changes materially, or wire a real
+          flex-height chain from <main> down (multi-file, other cutover phases). */}
+      <div className="flex h-[calc(100vh-9rem)] flex-col rounded-lg border border-(--color-border-standard) bg-(--color-surface-raised)">
+        <div className="flex shrink-0 items-center border-b border-(--color-border-standard) px-6 py-3">
           {/* Spacer's basis mirrors the body grid's col-span-2 width below
               (grid-cols-6 gap-4: 2 of 6 tracks + the one gap between them),
               so the shifted title lines up with where the image/intelligence
@@ -425,7 +431,7 @@ export function ExtractionItemEditor({
           )}
         </div>
 
-        <div className="space-y-4 p-6">
+        <div className="flex-1 space-y-4 overflow-y-auto p-6">
           {/* Left: image + intelligence card, then supplier history below.
               Right: detected info, spanning the full height of both —
               matches the reference mockup's 2-column relationship rather
@@ -858,14 +864,10 @@ export function ExtractionItemEditor({
           </div>
         </div>
 
-        {/* Pinned to the bottom of main's own scroll area (App.tsx's <main>
-            is h-screen + overflow-y-auto, same bounded pattern Sidebar
-            already uses) — sticky, not fixed, so it stays in normal flow
-            horizontally (no need to duplicate Sidebar's width or
-            ExtractionPhase's max-w-6xl/px-8 to line up) and still respects
-            the card's own bottom edge once you've scrolled past it, rather
-            than floating past it. */}
-        <div className="sticky bottom-0 z-10 flex items-center justify-between gap-3 rounded-b-lg border-t border-(--color-border-standard) bg-(--color-surface-raised) px-6 py-4">
+        {/* Non-scrolling flex child at the bottom of the bounded card (see the
+            card wrapper comment) — always at the card's bottom edge, so its
+            screen position doesn't move with the body's row count. */}
+        <div className="flex shrink-0 items-center justify-between gap-3 rounded-b-lg border-t border-(--color-border-standard) bg-(--color-surface-raised) px-6 py-4">
           <button
             onClick={() => setConfirmingDiscontinue(true)}
             className="text-xs font-medium text-(--color-destructive) hover:underline"
