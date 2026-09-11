@@ -53,19 +53,47 @@ function PencilIcon({ className = "" }: { className?: string }) {
   );
 }
 
+// First number in the free-text "Presentación" field (e.g. "Caja c/20
+// tabletas" or raw-OCR "Caja con 20 Tabletas") — there's no structured
+// quantity field to read instead, see CostExtractionResult["presentation"].
+function extractQuantity(presentation: string | null | undefined): number | null {
+  const match = presentation?.match(/\d+/);
+  return match ? parseInt(match[0], 10) : null;
+}
+
+// Mirrors backend pluralize()'s vowel/consonant rule in
+// apps/api/src/products/derived-naming.ts, same local-copy precedent as
+// FORM_LABELS below — except it keeps the label's original case instead of
+// lowercasing: the backend embeds the result in a sentence-style
+// presentation string ("Caja c/20 tabletas"), this one sits alone in a
+// product name and should stay "Tabletas".
+// ponytail: double-pluralizes an already-plural label (DROPS: "Gotas" ->
+// "Gotass"), same pre-existing gap as the backend original this mirrors.
+function pluralize(label: string): string {
+  return /[aeiouáéíóúü]$/i.test(label) ? `${label}s` : `${label}es`;
+}
+
 // Mirrors backend deriveName() in apps/api/src/products/derived-naming.ts —
 // same "local copy, no shared package" precedent as FORM_LABELS/ROUTE_LABELS
-// above, minus the packaging half of that file which the cutover editor's
-// Detected Info panel doesn't track. Null when there isn't enough detected
-// info to build a name from.
-function deriveMedicineName(ingredients: NonNullable<CostExtractionResult["ingredients"]>, form: string | null | undefined): string | null {
+// above — plus derivePresentation()'s quantity+pluralization half for the
+// form word, read out of the free-text presentation field via
+// extractQuantity. Null when there isn't enough detected info to build a
+// name from.
+export function deriveMedicineName(
+  ingredients: NonNullable<CostExtractionResult["ingredients"]>,
+  form: string | null | undefined,
+  presentation: string | null | undefined,
+): string | null {
   if (!form || ingredients.length === 0) return null;
   const names = ingredients.map(i => i.name).join("/");
   const concentrations = ingredients
     .filter(i => i.concentrationValue != null && i.concentrationUnit)
     .map(i => `${i.concentrationValue}${i.concentrationUnit}`)
     .join("/");
-  return [names, concentrations, FORM_LABELS[form] ?? form].filter(Boolean).join(" ");
+  const formLabel = FORM_LABELS[form] ?? form;
+  const quantity = extractQuantity(presentation);
+  const formPart = quantity != null ? `${quantity} ${pluralize(formLabel)}` : formLabel;
+  return [names, concentrations, formPart].filter(Boolean).join(" ");
 }
 
 function computeExtractedDate(entry: ExtractedCostEntry, cutoverDate: string): string | null {
@@ -415,11 +443,11 @@ export function ExtractionItemEditor({
           >
             <PencilIcon className="h-4 w-4" />
           </button>
-          {isMedicine && deriveMedicineName(edited.ingredients ?? [], edited.form) && (
+          {isMedicine && deriveMedicineName(edited.ingredients ?? [], edited.form, edited.presentation) && (
             <button
               type="button"
               onClick={() => {
-                updateManualField({ productName: deriveMedicineName(edited.ingredients ?? [], edited.form)! });
+                updateManualField({ productName: deriveMedicineName(edited.ingredients ?? [], edited.form, edited.presentation)! });
                 setEditingName(true);
               }}
               aria-label="Autofill name from detected info"
