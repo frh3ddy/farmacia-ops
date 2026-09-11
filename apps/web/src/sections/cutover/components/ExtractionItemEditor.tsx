@@ -67,18 +67,27 @@ function extractQuantity(presentation: string | null | undefined): number | null
 // lowercasing: the backend embeds the result in a sentence-style
 // presentation string ("Caja c/20 tabletas"), this one sits alone in a
 // product name and should stay "Tabletas".
-// ponytail: double-pluralizes an already-plural label (DROPS: "Gotas" ->
-// "Gotass"), same pre-existing gap as the backend original this mirrors.
 function pluralize(label: string): string {
   return /[aeiouáéíóúü]$/i.test(label) ? `${label}s` : `${label}es`;
 }
 
+// Mirrors backend inferQuantityUnit() in
+// apps/api/src/products/derived-naming.ts: a detected quantity only counts
+// discrete units (pluralize the form) for sólidos — for líquidos/semisólidos
+// it's a volume/weight, so "125" means "125 Ml", never "125 Suspensiónes".
+const SOLID_FORMS = new Set(["TABLET", "CAPSULE", "PATCH", "SUPPOSITORY", "INHALER", "OTHER"]);
+const LIQUID_FORMS = new Set(["SUSPENSION", "SYRUP", "DROPS", "INJECTION", "SPRAY", "SOLUTION"]);
+function inferQuantityUnitLabel(form: string): string {
+  if (LIQUID_FORMS.has(form)) return "Ml";
+  if (!SOLID_FORMS.has(form)) return "G"; // CREAM, OINTMENT, GEL
+  return ""; // sólidos pluralize the form label instead, see deriveMedicineName
+}
+
 // Mirrors backend deriveName() in apps/api/src/products/derived-naming.ts —
 // same "local copy, no shared package" precedent as FORM_LABELS/ROUTE_LABELS
-// above — plus derivePresentation()'s quantity+pluralization half for the
-// form word, read out of the free-text presentation field via
-// extractQuantity. Null when there isn't enough detected info to build a
-// name from.
+// above — plus derivePresentation()'s quantity-unit half, read out of the
+// free-text presentation field via extractQuantity. Null when there isn't
+// enough detected info to build a name from.
 export function deriveMedicineName(
   ingredients: NonNullable<CostExtractionResult["ingredients"]>,
   form: string | null | undefined,
@@ -92,7 +101,9 @@ export function deriveMedicineName(
     .join("/");
   const formLabel = FORM_LABELS[form] ?? form;
   const quantity = extractQuantity(presentation);
-  const formPart = quantity != null ? `${quantity} ${pluralize(formLabel)}` : formLabel;
+  const unitLabel = inferQuantityUnitLabel(form);
+  const formPart =
+    quantity == null ? formLabel : unitLabel ? `${quantity} ${unitLabel}` : `${quantity} ${pluralize(formLabel)}`;
   return [names, concentrations, formPart].filter(Boolean).join(" ");
 }
 
