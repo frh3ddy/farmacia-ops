@@ -43,4 +43,20 @@ describe("deriveMedicineName", () => {
   it("returns null without ingredients", () => {
     expect(deriveMedicineName([], "TABLET", "Caja con 20 tabletas")).toBeNull();
   });
+
+  it("uses a volume unit instead of pluralizing the form for liquids", () => {
+    expect(
+      deriveMedicineName(
+        [ingredient("Aciclovir", 200, "mg/5 mL")],
+        "SUSPENSION",
+        "Caja con frasco con 125 mL y vaso dosificador adosado",
+      ),
+    ).toBe("Aciclovir 200mg/5 mL 125 Ml");
+  });
+
+  it("uses a weight unit instead of pluralizing the form for semisólidos", () => {
+    expect(deriveMedicineName([ingredient("Betametasona", 0.05, "%")], "CREAM", "Tubo con 20 g")).toBe(
+      "Betametasona 0.05% 20 G",
+    );
+  });
 });
