@@ -71,6 +71,11 @@ function pluralize(label: string): string {
   return /[aeiouáéíóúü]$/i.test(label) ? `${label}s` : `${label}es`;
 }
 
+// A count of 1 stays singular ("1 Ampolleta", not "1 Ampolletas").
+function pluralizeByCount(label: string, count: number): string {
+  return count === 1 ? label : pluralize(label);
+}
+
 // Mirrors backend inferQuantityUnit() in
 // apps/api/src/products/derived-naming.ts: a detected quantity only counts
 // discrete units (pluralize the form) for sólidos — for líquidos/semisólidos
@@ -83,11 +88,41 @@ function inferQuantityUnitLabel(form: string): string {
   return ""; // sólidos pluralize the form label instead, see deriveMedicineName
 }
 
+// Mirrors backend PACKAGING_LABELS in derived-naming.ts (single-word entries
+// only — "Frasco ámpula"/VIAL is skipped, see ponytail note below), used to
+// recognize a per-container content like "1 ampolleta de 2 mL": a count of
+// containers, each holding its own volume, distinct from the plain
+// "125 mL" single-number case extractQuantity/inferQuantityUnitLabel handle.
+const PACKAGING_LABELS = ["Frasco", "Tubo", "Blíster", "Sobre", "Ampolleta", "Gotero", "Aerosol", "Parche", "Caja"];
+const PACKAGING_LABEL_BY_NOUN = new Map<string, string>(
+  PACKAGING_LABELS.flatMap(label => [
+    [label.toLowerCase(), label],
+    [pluralize(label).toLowerCase(), label],
+  ]),
+);
+// ponytail: single-word packaging nouns only (skips two-word "Frasco
+// ámpula") and requires the exact "<count> <noun> de <content> <unit>"
+// shape — add more shapes as real presentations surface them.
+function extractPackagingCount(
+  presentation: string | null | undefined,
+): { count: number; label: string; content: number; unit: string } | null {
+  const match = presentation?.match(/(\d+)\s+([a-záéíóúñ]+)\s+de\s+(\d+)\s*(m?l|gr?)\b/i);
+  if (!match) return null;
+  const label = PACKAGING_LABEL_BY_NOUN.get(match[2].toLowerCase());
+  if (!label) return null;
+  return {
+    count: parseInt(match[1], 10),
+    label,
+    content: parseInt(match[3], 10),
+    unit: match[4].toLowerCase().startsWith("g") ? "G" : "Ml",
+  };
+}
+
 // Mirrors backend deriveName() in apps/api/src/products/derived-naming.ts —
 // same "local copy, no shared package" precedent as FORM_LABELS/ROUTE_LABELS
 // above — plus derivePresentation()'s quantity-unit half, read out of the
-// free-text presentation field via extractQuantity. Null when there isn't
-// enough detected info to build a name from.
+// free-text presentation field via extractQuantity/extractPackagingCount.
+// Null when there isn't enough detected info to build a name from.
 export function deriveMedicineName(
   ingredients: NonNullable<CostExtractionResult["ingredients"]>,
   form: string | null | undefined,
@@ -100,10 +135,18 @@ export function deriveMedicineName(
     .map(i => `${i.concentrationValue}${i.concentrationUnit}`)
     .join("/");
   const formLabel = FORM_LABELS[form] ?? form;
-  const quantity = extractQuantity(presentation);
-  const unitLabel = inferQuantityUnitLabel(form);
-  const formPart =
-    quantity == null ? formLabel : unitLabel ? `${quantity} ${unitLabel}` : `${quantity} ${pluralize(formLabel)}`;
+
+  const packagingCount = extractPackagingCount(presentation);
+  let formPart: string;
+  if (packagingCount) {
+    const { count, label, content, unit } = packagingCount;
+    formPart = `${count} ${pluralizeByCount(label, count)} de ${content} ${unit}`;
+  } else {
+    const quantity = extractQuantity(presentation);
+    const unitLabel = inferQuantityUnitLabel(form);
+    formPart =
+      quantity == null ? formLabel : unitLabel ? `${quantity} ${unitLabel}` : `${quantity} ${pluralizeByCount(formLabel, quantity)}`;
+  }
   return [names, concentrations, formPart].filter(Boolean).join(" ");
 }
 
