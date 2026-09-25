@@ -132,6 +132,19 @@ export function zeroStock(payload: { productId: string; locationIds: string[] })
   return apiFetch(`${BASE}/zero-stock`, { method: "POST", body: JSON.stringify(payload) });
 }
 
+export type LocationPrice = { locationId: string; locationName: string; priceCents: number | null };
+
+/** Live Square selling price per location. `variationCount` > 1 means the price can't be edited here. */
+export function getPriceByLocation(productId: string) {
+  return apiFetch<{ variationCount: number; currency: string | null; locations: LocationPrice[] }>(
+    `${BASE}/price-by-location?productId=${encodeURIComponent(productId)}`
+  );
+}
+
+export function setPrice(payload: { productId: string; priceCents: number; locationIds: string[] }) {
+  return apiFetch(`${BASE}/set-price`, { method: "POST", body: JSON.stringify(payload) });
+}
+
 export async function reusePreviousApprovals(cutoverId: string, productIds: string[]) {
   return apiFetch<{ approvedCount: number }>(`${BASE}/reuse-previous-approvals`, {
     method: "POST",
