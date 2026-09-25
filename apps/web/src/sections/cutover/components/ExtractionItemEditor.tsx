@@ -28,7 +28,7 @@ const ROUTE_LABELS: Record<string, string> = {
 };
 
 // Small inline icons — the app has no icon library/convention to match, and
-// four one-off glyphs isn't reason enough to add one.
+// five one-off glyphs isn't reason enough to add one.
 function DocumentIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
@@ -50,6 +50,16 @@ function PencilIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+// Empty-set glyph (circle with a slash) — "none in stock".
+function EmptyStockIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <circle cx="12" cy="12" r="8" />
+      <path strokeLinecap="round" d="M6.5 17.5l11-11" />
     </svg>
   );
 }
@@ -606,7 +616,18 @@ export function ExtractionItemEditor({
                     </div>
                     <div>
                       <p className="text-xs text-(--color-ink-tertiary)">Stock</p>
-                      <p className="tabular text-xl font-semibold text-(--color-ink)">{result.stockQuantity ?? 0}</p>
+                      <div className="flex items-center gap-1">
+                        <p className="tabular text-xl font-semibold text-(--color-ink)">{result.stockQuantity ?? 0}</p>
+                        <button
+                          type="button"
+                          onClick={() => setZeroStockOpen(true)}
+                          aria-label="Mark as 0 stock"
+                          title="Mark as 0 stock"
+                          className="rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-destructive-bg) hover:text-(--color-destructive)"
+                        >
+                          <EmptyStockIcon className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -955,20 +976,12 @@ export function ExtractionItemEditor({
             card wrapper comment) — always at the card's bottom edge, so its
             screen position doesn't move with the body's row count. */}
         <div className="flex shrink-0 items-center justify-between gap-3 rounded-b-lg border-t border-(--color-border-standard) bg-(--color-surface-raised) px-6 py-4">
-          <div className="flex gap-4">
-            <button
-              onClick={() => setConfirmingDiscontinue(true)}
-              className="text-xs font-medium text-(--color-destructive) hover:underline"
-            >
-              Mark as no longer for sale
-            </button>
-            <button
-              onClick={() => setZeroStockOpen(true)}
-              className="text-xs font-medium text-(--color-destructive) hover:underline"
-            >
-              Mark as 0 stock
-            </button>
-          </div>
+          <button
+            onClick={() => setConfirmingDiscontinue(true)}
+            className="text-xs font-medium text-(--color-destructive) hover:underline"
+          >
+            Mark as no longer for sale
+          </button>
           <div className="flex gap-3">
             <button
               onClick={() => onDiscard(result.productId)}
