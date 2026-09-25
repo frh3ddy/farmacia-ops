@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { SupplierAutocompleteInput } from "./SupplierAutocompleteInput";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Modal } from "../../../components/ui/Modal";
+import { ZeroStockDialog } from "./ZeroStockDialog";
 import type { CategoryOption, CostExtractionResult, ExtractedCostEntry, SupplierSuggestion } from "../../../lib/cutover/types";
 
 const MONTH_NAMES = [
@@ -181,6 +182,7 @@ type ExtractionItemEditorProps = {
   onApprove: (result: CostExtractionResult) => void;
   onDiscard: (productId: string) => void;
   onMarkDiscontinued: (productId: string) => Promise<void>;
+  onZeroStock: (productId: string, locationIds: string[]) => Promise<boolean>;
   onRegenerateExtraction: (productId: string, description: string) => Promise<void>;
   setError: (message: string) => void;
   hideProductImageForTransition: boolean;
@@ -198,6 +200,7 @@ export function ExtractionItemEditor({
   onApprove,
   onDiscard,
   onMarkDiscontinued,
+  onZeroStock,
   onRegenerateExtraction,
   setError,
   hideProductImageForTransition,
@@ -214,6 +217,7 @@ export function ExtractionItemEditor({
   const [regenerating, setRegenerating] = useState(false);
   const [confirmingDiscontinue, setConfirmingDiscontinue] = useState(false);
   const [discontinuing, setDiscontinuing] = useState(false);
+  const [zeroStockOpen, setZeroStockOpen] = useState(false);
   const [newEntrySupplier, setNewEntrySupplier] = useState("");
   const [newEntrySupplierId, setNewEntrySupplierId] = useState<string | null>(null);
   const [newEntryCost, setNewEntryCost] = useState("");
@@ -283,6 +287,7 @@ export function ExtractionItemEditor({
     setNewIngredientName("");
     setViewingImage(false);
     setSourceModalOpen(false);
+    setZeroStockOpen(false);
     setEditingName(false);
   }, [result?.productId, cutoverDate]);
 
@@ -950,12 +955,20 @@ export function ExtractionItemEditor({
             card wrapper comment) — always at the card's bottom edge, so its
             screen position doesn't move with the body's row count. */}
         <div className="flex shrink-0 items-center justify-between gap-3 rounded-b-lg border-t border-(--color-border-standard) bg-(--color-surface-raised) px-6 py-4">
-          <button
-            onClick={() => setConfirmingDiscontinue(true)}
-            className="text-xs font-medium text-(--color-destructive) hover:underline"
-          >
-            Mark as no longer for sale
-          </button>
+          <div className="flex gap-4">
+            <button
+              onClick={() => setConfirmingDiscontinue(true)}
+              className="text-xs font-medium text-(--color-destructive) hover:underline"
+            >
+              Mark as no longer for sale
+            </button>
+            <button
+              onClick={() => setZeroStockOpen(true)}
+              className="text-xs font-medium text-(--color-destructive) hover:underline"
+            >
+              Mark as 0 stock
+            </button>
+          </div>
           <div className="flex gap-3">
             <button
               onClick={() => onDiscard(result.productId)}
@@ -1000,6 +1013,14 @@ export function ExtractionItemEditor({
         destructive
         onConfirm={handleConfirmDiscontinue}
         onCancel={() => setConfirmingDiscontinue(false)}
+      />
+
+      <ZeroStockDialog
+        open={zeroStockOpen}
+        productId={result.productId}
+        productName={result.productName}
+        onConfirm={locationIds => onZeroStock(result.productId, locationIds)}
+        onClose={() => setZeroStockOpen(false)}
       />
     </div>
   );

@@ -1860,6 +1860,81 @@ export class InventoryMigrationService {
   }
 
   /**
+   * Every active Square-linked location, each paired with the product's
+   * variations mapped there (a location-scoped mapping or a global one —
+   * same rule as getCutoverItemsForLocations).
+   */
+  private async productVariationsByLocation(productId: string) {
+    const [locations, mappings] = await Promise.all([
+      this.prisma.location.findMany({
+        where: { isActive: true, squareId: { not: null } },
+        select: { id: true, name: true, squareId: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.catalogMapping.findMany({
+        where: { productId },
+        select: { squareVariationId: true, locationId: true },
+      }),
+    ]);
+    return locations.map(loc => ({
+      locationId: loc.id,
+      locationName: loc.name,
+      squareLocationId: loc.squareId!,
+      variationIds: [
+        ...new Set(
+          mappings.filter(m => m.locationId === null || m.locationId === loc.id).map(m => m.squareVariationId),
+        ),
+      ],
+    }));
+  }
+
+  /**
+   * Live Square stock for a product at every location, summed across its
+   * variations — what the cutover review's "0 stock" dialog shows before
+   * the reviewer overwrites it.
+   */
+  async getProductStockByLocation(
+    productId: string,
+  ): Promise<{ locationId: string; locationName: string; quantity: number }[]> {
+    const byLocation = await this.productVariationsByLocation(productId);
+    const counts = await this.squareInventory.fetchCounts(
+      [...new Set(byLocation.flatMap(l => l.variationIds))],
+      byLocation.map(l => l.squareLocationId),
+    );
+    return byLocation.map(l => ({
+      locationId: l.locationId,
+      locationName: l.locationName,
+      quantity: counts
+        .filter(c => c.locationId === l.squareLocationId && l.variationIds.includes(c.catalogObjectId))
+        .reduce((sum, c) => sum + c.quantity, 0),
+    }));
+  }
+
+  /**
+   * Sets the product's Square stock to 0 at the given locations, for every
+   * variation mapped there. Writes to Square rather than flagging locally:
+   * the migration reads Square's live count at execution time, so a zero
+   * written here is exactly what it picks up — and a genuine restock
+   * recorded in Square afterwards still wins, which a local flag would
+   * silently override.
+   */
+  async zeroProductStock(productId: string, locationIds: string[]): Promise<{ success: boolean }> {
+    if (locationIds.length === 0) throw new Error('Select at least one location');
+    const byLocation = await this.productVariationsByLocation(productId);
+    const unknown = locationIds.filter(id => !byLocation.some(l => l.locationId === id));
+    if (unknown.length > 0) throw new Error(`Unknown or non-Square location(s): ${unknown.join(', ')}`);
+
+    const pairs = byLocation
+      .filter(l => locationIds.includes(l.locationId))
+      .flatMap(l => l.variationIds.map(catalogObjectId => ({ catalogObjectId, locationId: l.squareLocationId })));
+    if (pairs.length === 0) throw new Error(`Product ${productId} has no Square variation at the selected locations`);
+
+    await this.squareInventory.zeroCounts(pairs);
+    this.logger.log(`[ZERO_STOCK] Set product ${productId} to 0 at ${locationIds.length} location(s) (${pairs.length} variation count(s))`);
+    return { success: true };
+  }
+
+  /**
    * Deletes a discontinued product's Square catalog item, and only if that
    * succeeds, deletes the local Product row (and everything referencing it
    * via ON DELETE RESTRICT — CatalogMapping cascades on its own). Order

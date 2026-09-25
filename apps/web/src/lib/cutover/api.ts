@@ -118,6 +118,20 @@ export function markDiscontinued(payload: {
   return apiFetch(`${BASE}/mark-discontinued`, { method: "POST", body: JSON.stringify(payload) });
 }
 
+export type LocationStock = { locationId: string; locationName: string; quantity: number };
+
+/** Live Square stock for a product at every location (not the extraction-time number). */
+export async function getStockByLocation(productId: string) {
+  const body = await apiFetch<{ locations: LocationStock[] }>(
+    `${BASE}/stock-by-location?productId=${encodeURIComponent(productId)}`
+  );
+  return body.locations;
+}
+
+export function zeroStock(payload: { productId: string; locationIds: string[] }) {
+  return apiFetch(`${BASE}/zero-stock`, { method: "POST", body: JSON.stringify(payload) });
+}
+
 export async function reusePreviousApprovals(cutoverId: string, productIds: string[]) {
   return apiFetch<{ approvedCount: number }>(`${BASE}/reuse-previous-approvals`, {
     method: "POST",

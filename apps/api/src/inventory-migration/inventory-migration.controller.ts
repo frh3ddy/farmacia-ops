@@ -633,6 +633,31 @@ export class InventoryMigrationController {
     }
   }
 
+  @Get('stock-by-location')
+  async getStockByLocation(@Query('productId') productId: string) {
+    if (!productId) throw new HttpException({ success: false, message: 'productId is required' }, HttpStatus.BAD_REQUEST);
+    try {
+      return { locations: await this.migrationService.getProductStockByLocation(productId) };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to fetch stock by location: ${error}` },
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+  }
+
+  @Post('zero-stock')
+  async zeroStock(@Body() body: { productId: string; locationIds: string[] }) {
+    try {
+      return await this.migrationService.zeroProductStock(body.productId, body.locationIds ?? []);
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to set stock to 0: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Post('discard-item')
   async discardItem(
     @Body()
