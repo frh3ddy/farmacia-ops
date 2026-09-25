@@ -690,6 +690,7 @@ export class InventoryMigrationService {
           squareDescription: true,
           squareImageUrl: true,
           squareVariationName: true,
+          sku: true,
           categoryId: true,
           medicationDefinitionId: true,
           category: { select: { id: true, name: true } },
@@ -1028,6 +1029,7 @@ export class InventoryMigrationService {
           existingApprovalDate: existingApproval.approvedAt,
           existingCutoverId: existingApproval.cutoverId,
           imageUrl,
+          sku: product.sku,
           stockQuantity: stockQuantityByProduct.get(productId) ?? 0,
           migrationStatus: (existingApproval as any).migrationStatus || 'PENDING',
 
@@ -1060,6 +1062,7 @@ export class InventoryMigrationService {
           originalDescription: productDescription ?? productName,
           extractedEntries: enrichedEntries,
           imageUrl,
+          sku: product.sku,
           stockQuantity: stockQuantityByProduct.get(productId) ?? 0,
           migrationStatus: 'PENDING' as const,
           requiresManualReview: extraction.requiresManualReview || guard.isCostTooHigh,
