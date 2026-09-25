@@ -21,6 +21,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
     handleApproveItem,
     handleDiscardItem,
     handleMarkDiscontinued,
+    handleZeroStock,
     handleRegenerateExtraction,
     handleRestoreItem,
     handleReusePreviousApprovals,
@@ -190,6 +191,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
           onApprove={handleApproveItem}
           onDiscard={handleDiscardItem}
           onMarkDiscontinued={handleMarkDiscontinued}
+          onZeroStock={handleZeroStock}
           onRegenerateExtraction={handleRegenerateExtraction}
           setError={setError}
           hideProductImageForTransition={hideProductImageForTransition}

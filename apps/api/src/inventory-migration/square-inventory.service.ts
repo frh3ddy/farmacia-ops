@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { SquareClient, SquareEnvironment, Square } from 'square';
 import {
   SquareInventoryItem,
@@ -398,5 +399,61 @@ export class SquareInventoryService {
    */
   async fetchSquareCost(variationId: string): Promise<number | null> {
     return null;
+  }
+
+  /**
+   * Live IN_STOCK counts for specific variations at specific locations,
+   * bypassing the per-location cache — used where the caller is about to
+   * overwrite these numbers and must show what's really there right now.
+   * Square omits (variation, location) pairs it has no count for; callers
+   * treat a missing pair as 0.
+   */
+  async fetchCounts(
+    catalogObjectIds: string[],
+    squareLocationIds: string[],
+  ): Promise<{ catalogObjectId: string; locationId: string; quantity: number }[]> {
+    if (catalogObjectIds.length === 0 || squareLocationIds.length === 0) return [];
+    const page = await this.getSquareClient().inventory.batchGetCounts({
+      catalogObjectIds,
+      locationIds: squareLocationIds,
+      states: ['IN_STOCK'],
+    });
+    const counts: { catalogObjectId: string; locationId: string; quantity: number }[] = [];
+    for await (const count of page) {
+      if (!count.catalogObjectId || !count.locationId) continue;
+      counts.push({
+        catalogObjectId: count.catalogObjectId,
+        locationId: count.locationId,
+        quantity: parseInt(count.quantity ?? '0', 10) || 0,
+      });
+    }
+    return counts;
+  }
+
+  /**
+   * Sets each (variation, location) pair's IN_STOCK count to 0 via one
+   * PHYSICAL_COUNT batch — Square applies a batch atomically, so either every
+   * pair is zeroed or none is. Clears the affected locations' cached counts
+   * so a migration run right after reads 0, not a pre-zero cached number.
+   * A fresh idempotency key per call is safe: a physical count of 0 is
+   * absolute, so a replayed request can't change the result.
+   */
+  async zeroCounts(pairs: { catalogObjectId: string; locationId: string }[]): Promise<void> {
+    if (pairs.length === 0) return;
+    const occurredAt = new Date().toISOString();
+    await this.getSquareClient().inventory.batchCreateChanges({
+      idempotencyKey: randomUUID(),
+      changes: pairs.map(p => ({
+        type: 'PHYSICAL_COUNT' as const,
+        physicalCount: {
+          catalogObjectId: p.catalogObjectId,
+          locationId: p.locationId,
+          state: 'IN_STOCK' as const,
+          quantity: '0',
+          occurredAt,
+        },
+      })),
+    });
+    for (const locationId of new Set(pairs.map(p => p.locationId))) this.clearInventoryCache(locationId);
   }
 }

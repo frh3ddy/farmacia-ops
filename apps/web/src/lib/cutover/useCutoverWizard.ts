@@ -305,6 +305,26 @@ export function useCutoverWizard() {
     [cutoverId, extractionResults, updateItemStatus, advanceAfterAction]
   );
 
+  /** Sets the product's Square stock to 0 at the given locations. The item
+   * stays in the review queue (it still needs a cost decision); only its
+   * Stock tile changes, and only if this session's location was zeroed.
+   * Returns false on failure so the dialog can stay open. */
+  const handleZeroStock = useCallback(
+    async (productId: string, locationIds: string[]) => {
+      try {
+        await api.zeroStock({ productId, locationIds });
+        if (selectedLocationId && locationIds.includes(selectedLocationId)) {
+          updateItemStatus(productId, { stockQuantity: 0 });
+        }
+        return true;
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Failed to set stock to 0");
+        return false;
+      }
+    },
+    [selectedLocationId, updateItemStatus]
+  );
+
   /** Re-parses a product's (possibly user-corrected) description. Replaces
    * the regex-parsed entries with the fresh result but preserves any
    * manually-added entries (tagged via originalLine, see ExtractionItemEditor's
@@ -638,6 +658,7 @@ export function useCutoverWizard() {
     handleDiscardItem,
     handleRestoreItem,
     handleMarkDiscontinued,
+    handleZeroStock,
     handleRegenerateExtraction,
     handleReusePreviousApprovals,
     handleApproveItem,

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { SupplierAutocompleteInput } from "./SupplierAutocompleteInput";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Modal } from "../../../components/ui/Modal";
+import { ZeroStockDialog } from "./ZeroStockDialog";
 import type { CategoryOption, CostExtractionResult, ExtractedCostEntry, SupplierSuggestion } from "../../../lib/cutover/types";
 
 const MONTH_NAMES = [
@@ -27,7 +28,7 @@ const ROUTE_LABELS: Record<string, string> = {
 };
 
 // Small inline icons — the app has no icon library/convention to match, and
-// four one-off glyphs isn't reason enough to add one.
+// five one-off glyphs isn't reason enough to add one.
 function DocumentIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
@@ -49,6 +50,16 @@ function PencilIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+// Empty-set glyph (circle with a slash) — "none in stock".
+function EmptyStockIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <circle cx="12" cy="12" r="8" />
+      <path strokeLinecap="round" d="M6.5 17.5l11-11" />
     </svg>
   );
 }
@@ -181,6 +192,7 @@ type ExtractionItemEditorProps = {
   onApprove: (result: CostExtractionResult) => void;
   onDiscard: (productId: string) => void;
   onMarkDiscontinued: (productId: string) => Promise<void>;
+  onZeroStock: (productId: string, locationIds: string[]) => Promise<boolean>;
   onRegenerateExtraction: (productId: string, description: string) => Promise<void>;
   setError: (message: string) => void;
   hideProductImageForTransition: boolean;
@@ -198,6 +210,7 @@ export function ExtractionItemEditor({
   onApprove,
   onDiscard,
   onMarkDiscontinued,
+  onZeroStock,
   onRegenerateExtraction,
   setError,
   hideProductImageForTransition,
@@ -214,6 +227,7 @@ export function ExtractionItemEditor({
   const [regenerating, setRegenerating] = useState(false);
   const [confirmingDiscontinue, setConfirmingDiscontinue] = useState(false);
   const [discontinuing, setDiscontinuing] = useState(false);
+  const [zeroStockOpen, setZeroStockOpen] = useState(false);
   const [newEntrySupplier, setNewEntrySupplier] = useState("");
   const [newEntrySupplierId, setNewEntrySupplierId] = useState<string | null>(null);
   const [newEntryCost, setNewEntryCost] = useState("");
@@ -283,6 +297,7 @@ export function ExtractionItemEditor({
     setNewIngredientName("");
     setViewingImage(false);
     setSourceModalOpen(false);
+    setZeroStockOpen(false);
     setEditingName(false);
   }, [result?.productId, cutoverDate]);
 
@@ -601,7 +616,18 @@ export function ExtractionItemEditor({
                     </div>
                     <div>
                       <p className="text-xs text-(--color-ink-tertiary)">Stock</p>
-                      <p className="tabular text-xl font-semibold text-(--color-ink)">{result.stockQuantity ?? 0}</p>
+                      <div className="flex items-center gap-1">
+                        <p className="tabular text-xl font-semibold text-(--color-ink)">{result.stockQuantity ?? 0}</p>
+                        <button
+                          type="button"
+                          onClick={() => setZeroStockOpen(true)}
+                          aria-label="Mark as 0 stock"
+                          title="Mark as 0 stock"
+                          className="rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-destructive-bg) hover:text-(--color-destructive)"
+                        >
+                          <EmptyStockIcon className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -999,6 +1025,14 @@ export function ExtractionItemEditor({
         destructive
         onConfirm={handleConfirmDiscontinue}
         onCancel={() => setConfirmingDiscontinue(false)}
+      />
+
+      <ZeroStockDialog
+        open={zeroStockOpen}
+        productId={result.productId}
+        productName={result.productName}
+        onConfirm={locationIds => onZeroStock(result.productId, locationIds)}
+        onClose={() => setZeroStockOpen(false)}
       />
     </div>
   );
