@@ -55,6 +55,14 @@ function PencilIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function BarcodeIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={className}>
+      <path strokeLinecap="round" d="M4 5v14M7 5v14M11 5v14M14 5v14M17 5v14M20 5v14" />
+    </svg>
+  );
+}
+
 // Empty-set glyph (circle with a slash) — "none in stock".
 function EmptyStockIcon({ className = "" }: { className?: string }) {
   return (
@@ -270,6 +278,7 @@ export function ExtractionItemEditor({
   const [newEntryDate, setNewEntryDate] = useState(cutoverDate);
   const [newIngredientName, setNewIngredientName] = useState("");
   const [editingName, setEditingName] = useState(false);
+  const [skuOpen, setSkuOpen] = useState(false);
 
   // Preload the next 10 product images so Next navigation feels instant.
   useEffect(() => {
@@ -336,6 +345,7 @@ export function ExtractionItemEditor({
     setZeroStockOpen(false);
     setPriceDialogOpen(false);
     setEditingName(false);
+    setSkuOpen(false);
   }, [result?.productId, cutoverDate]);
 
   useEffect(() => {
@@ -565,6 +575,30 @@ export function ExtractionItemEditor({
             >
               <SparkleIcon className="h-4 w-4" />
             </button>
+          )}
+          {result.sku && (
+            <span className="relative ml-2 inline-flex shrink-0">
+              <button
+                type="button"
+                onClick={() => setSkuOpen(v => !v)}
+                onBlur={() => setSkuOpen(false)}
+                aria-label="Show SKU"
+                aria-expanded={skuOpen}
+                className="rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-surface-inset) hover:text-(--color-ink)"
+              >
+                <BarcodeIcon className="h-4 w-4" />
+              </button>
+              {/* Below the trigger, not above like ui/Tooltip — the header
+                  sits at the card's top edge. */}
+              {skuOpen && (
+                <span
+                  role="tooltip"
+                  className="absolute right-0 top-full z-30 mt-1.5 whitespace-nowrap rounded-sm border border-(--color-border-standard) bg-(--color-surface-raised) px-2 py-1 font-mono text-xs text-(--color-ink) shadow-lg"
+                >
+                  {result.sku}
+                </span>
+              )}
+            </span>
           )}
         </div>
 
