@@ -995,7 +995,6 @@ export function ExtractionItemEditor({
         open={confirmingDiscontinue}
         title="Mark as no longer for sale?"
         description={`"${result.productName}" will be permanently removed from Square's catalog once migration runs, and excluded from inventory in this and all future cutover sessions.`}
-        mathChallenge
         confirmLabel={discontinuing ? "Marking…" : "Mark discontinued"}
         destructive
         onConfirm={handleConfirmDiscontinue}

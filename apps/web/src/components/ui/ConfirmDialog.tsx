@@ -16,8 +16,9 @@ type ConfirmDialogProps = BaseProps &
     | {
         /** The exact phrase the user must type to enable the confirm button —
          * e.g. a location name or "DELETE". Verifies the user is confirming
-         * the right item, not just adding friction. */
-        confirmPhrase: string;
+         * the right item, not just adding friction. Omit (with no
+         * mathChallenge) for a plain confirm/cancel dialog. */
+        confirmPhrase?: string;
         mathChallenge?: false;
       }
     | {
@@ -63,36 +64,41 @@ export function ConfirmDialog({
 
   if (!open) return null;
 
-  const canConfirm = mathChallenge ? typed.trim() === String(challenge.answer) : typed === confirmPhrase;
+  const hasChallenge = mathChallenge || confirmPhrase !== undefined;
+  const canConfirm = mathChallenge ? typed.trim() === String(challenge.answer) : !hasChallenge || typed === confirmPhrase;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-lg border border-(--color-border-emphasis) bg-(--color-surface-raised) p-5">
         <h2 className="text-base font-semibold text-(--color-ink)">{title}</h2>
         <div className="mt-2 text-sm text-(--color-ink-secondary)">{description}</div>
-        <label htmlFor="confirm-dialog-phrase" className="mt-4 block text-xs font-medium text-(--color-ink-tertiary)">
-          {mathChallenge ? (
-            <>
-              Solve{" "}
-              <span className="tabular text-(--color-ink)">
-                {challenge.a} {challenge.op} {challenge.b}
-              </span>{" "}
-              to confirm
-            </>
-          ) : (
-            <>
-              Type <span className="tabular text-(--color-ink)">{confirmPhrase}</span> to confirm
-            </>
-          )}
-        </label>
-        <input
-          id="confirm-dialog-phrase"
-          autoFocus
-          inputMode={mathChallenge ? "numeric" : "text"}
-          value={typed}
-          onChange={e => setTyped(e.target.value)}
-          className="mt-1 w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-3 py-1.5 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
-        />
+        {hasChallenge && (
+          <>
+            <label htmlFor="confirm-dialog-phrase" className="mt-4 block text-xs font-medium text-(--color-ink-tertiary)">
+              {mathChallenge ? (
+                <>
+                  Solve{" "}
+                  <span className="tabular text-(--color-ink)">
+                    {challenge.a} {challenge.op} {challenge.b}
+                  </span>{" "}
+                  to confirm
+                </>
+              ) : (
+                <>
+                  Type <span className="tabular text-(--color-ink)">{confirmPhrase}</span> to confirm
+                </>
+              )}
+            </label>
+            <input
+              id="confirm-dialog-phrase"
+              autoFocus
+              inputMode={mathChallenge ? "numeric" : "text"}
+              value={typed}
+              onChange={e => setTyped(e.target.value)}
+              className="mt-1 w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-3 py-1.5 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
+            />
+          </>
+        )}
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onCancel}
