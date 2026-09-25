@@ -325,6 +325,30 @@ export function useCutoverWizard() {
     [selectedLocationId, updateItemStatus]
   );
 
+  /** Sets the product's Square selling price at the given locations. Like
+   * handleZeroStock, the item stays in the queue and only its displayed
+   * price changes — and only if this session's location was updated. */
+  const handleSetPrice = useCallback(
+    async (productId: string, priceCents: number, currency: string, locationIds: string[]) => {
+      try {
+        await api.setPrice({ productId, priceCents, locationIds });
+        if (selectedLocationId && locationIds.includes(selectedLocationId)) {
+          const item = extractionResultsRef.current.find(r => r.productId === productId);
+          updateItemStatus(productId, {
+            sellingPrice: { priceCents, currency },
+            sellingPriceRange: null,
+            sellingPrices: item?.sellingPrices?.map(p => ({ ...p, priceCents, currency })) ?? null,
+          });
+        }
+        return true;
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Failed to set price");
+        return false;
+      }
+    },
+    [selectedLocationId, updateItemStatus]
+  );
+
   /** Re-parses a product's (possibly user-corrected) description. Replaces
    * the regex-parsed entries with the fresh result but preserves any
    * manually-added entries (tagged via originalLine, see ExtractionItemEditor's
@@ -659,6 +683,7 @@ export function useCutoverWizard() {
     handleRestoreItem,
     handleMarkDiscontinued,
     handleZeroStock,
+    handleSetPrice,
     handleRegenerateExtraction,
     handleReusePreviousApprovals,
     handleApproveItem,

@@ -456,4 +456,52 @@ export class SquareInventoryService {
     });
     for (const locationId of new Set(pairs.map(p => p.locationId))) this.clearInventoryCache(locationId);
   }
+
+  /**
+   * Sets a variation's selling price. `squareLocationIds === null` means every
+   * location: the base price changes and every location override's price is
+   * dropped, so no store keeps an old override. A subset leaves the base
+   * alone and writes a price override for just those locations — changing
+   * the base there would silently move the unchecked stores' price too.
+   * Spreads the fetched itemVariationData back (upsert is a full replace)
+   * and sends its version, so a concurrent edit fails instead of clobbering.
+   */
+  async setVariationPrice(
+    variationId: string,
+    priceCents: number,
+    currency: string,
+    squareLocationIds: string[] | null,
+  ): Promise<void> {
+    const client = this.getSquareClient();
+    const { object } = await client.catalog.object.get({ objectId: variationId });
+    if (object?.type !== 'ITEM_VARIATION' || !object.itemVariationData) {
+      throw new Error(`Variation ${variationId} not found in Square`);
+    }
+    const data = object.itemVariationData;
+
+    const priceMoney = { amount: BigInt(priceCents), currency: currency as Square.Currency };
+    let itemVariationData: Square.CatalogItemVariation;
+    if (squareLocationIds === null) {
+      itemVariationData = {
+        ...data,
+        pricingType: 'FIXED_PRICING',
+        priceMoney,
+        locationOverrides: data.locationOverrides?.map(({ priceMoney: _drop, pricingType: _dropType, ...rest }) => rest),
+      };
+    } else {
+      const overrides = [...(data.locationOverrides ?? [])];
+      for (const locationId of squareLocationIds) {
+        const idx = overrides.findIndex(o => o.locationId === locationId);
+        const override = { ...(idx >= 0 ? overrides[idx] : { locationId }), pricingType: 'FIXED_PRICING' as const, priceMoney };
+        if (idx >= 0) overrides[idx] = override;
+        else overrides.push(override);
+      }
+      itemVariationData = { ...data, locationOverrides: overrides };
+    }
+
+    await client.catalog.object.upsert({
+      idempotencyKey: randomUUID(),
+      object: { ...object, itemVariationData },
+    });
+  }
 }

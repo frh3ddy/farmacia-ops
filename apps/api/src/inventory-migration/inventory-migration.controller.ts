@@ -658,6 +658,31 @@ export class InventoryMigrationController {
     }
   }
 
+  @Get('price-by-location')
+  async getPriceByLocation(@Query('productId') productId: string) {
+    if (!productId) throw new HttpException({ success: false, message: 'productId is required' }, HttpStatus.BAD_REQUEST);
+    try {
+      return await this.migrationService.getProductPriceByLocation(productId);
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to fetch price by location: ${error}` },
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+  }
+
+  @Post('set-price')
+  async setPrice(@Body() body: { productId: string; priceCents: number; locationIds: string[] }) {
+    try {
+      return await this.migrationService.setProductPrice(body.productId, body.priceCents, body.locationIds ?? []);
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: `Failed to set price: ${error}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   @Post('discard-item')
   async discardItem(
     @Body()

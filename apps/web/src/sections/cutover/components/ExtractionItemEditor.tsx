@@ -4,6 +4,7 @@ import { SupplierAutocompleteInput } from "./SupplierAutocompleteInput";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Modal } from "../../../components/ui/Modal";
 import { ZeroStockDialog } from "./ZeroStockDialog";
+import { PriceDialog } from "./PriceDialog";
 import type { CategoryOption, CostExtractionResult, ExtractedCostEntry, SupplierSuggestion } from "../../../lib/cutover/types";
 
 const MONTH_NAMES = [
@@ -193,6 +194,7 @@ type ExtractionItemEditorProps = {
   onDiscard: (productId: string) => void;
   onMarkDiscontinued: (productId: string) => Promise<void>;
   onZeroStock: (productId: string, locationIds: string[]) => Promise<boolean>;
+  onSetPrice: (productId: string, priceCents: number, currency: string, locationIds: string[]) => Promise<boolean>;
   onRegenerateExtraction: (productId: string, description: string) => Promise<void>;
   setError: (message: string) => void;
   hideProductImageForTransition: boolean;
@@ -211,6 +213,7 @@ export function ExtractionItemEditor({
   onDiscard,
   onMarkDiscontinued,
   onZeroStock,
+  onSetPrice,
   onRegenerateExtraction,
   setError,
   hideProductImageForTransition,
@@ -228,6 +231,7 @@ export function ExtractionItemEditor({
   const [confirmingDiscontinue, setConfirmingDiscontinue] = useState(false);
   const [discontinuing, setDiscontinuing] = useState(false);
   const [zeroStockOpen, setZeroStockOpen] = useState(false);
+  const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [newEntrySupplier, setNewEntrySupplier] = useState("");
   const [newEntrySupplierId, setNewEntrySupplierId] = useState<string | null>(null);
   const [newEntryCost, setNewEntryCost] = useState("");
@@ -298,6 +302,7 @@ export function ExtractionItemEditor({
     setViewingImage(false);
     setSourceModalOpen(false);
     setZeroStockOpen(false);
+    setPriceDialogOpen(false);
     setEditingName(false);
   }, [result?.productId, cutoverDate]);
 
@@ -582,15 +587,26 @@ export function ExtractionItemEditor({
                   <div className="grid grid-cols-4 gap-4">
                     <div>
                       <p className="text-xs text-(--color-ink-tertiary)">Selling price</p>
-                      {result.sellingPrice ? (
-                        <p className="tabular text-xl font-semibold text-(--color-ink)">
-                          {result.sellingPriceRange && result.sellingPriceRange.minCents !== result.sellingPriceRange.maxCents
-                            ? `$${(result.sellingPrice.priceCents / 100).toFixed(2)}–$${(result.sellingPriceRange.maxCents / 100).toFixed(2)}`
-                            : `$${(result.sellingPrice.priceCents / 100).toFixed(2)}`}
-                        </p>
-                      ) : (
-                        <p className="text-sm text-(--color-ink-muted)">Not set</p>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {result.sellingPrice ? (
+                          <p className="tabular text-xl font-semibold text-(--color-ink)">
+                            {result.sellingPriceRange && result.sellingPriceRange.minCents !== result.sellingPriceRange.maxCents
+                              ? `$${(result.sellingPrice.priceCents / 100).toFixed(2)}–$${(result.sellingPriceRange.maxCents / 100).toFixed(2)}`
+                              : `$${(result.sellingPrice.priceCents / 100).toFixed(2)}`}
+                          </p>
+                        ) : (
+                          <p className="text-sm text-(--color-ink-muted)">Not set</p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setPriceDialogOpen(true)}
+                          aria-label="Edit selling price"
+                          title="Edit selling price"
+                          className="rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-surface-inset) hover:text-(--color-ink)"
+                        >
+                          <PencilIcon className="h-4 w-4" />
+                        </button>
+                      </div>
                       {result.sellingPrices && result.sellingPrices.length > 1 && (
                         <button
                           onClick={() => setShowPriceDetails(v => !v)}
@@ -1034,6 +1050,14 @@ export function ExtractionItemEditor({
         productName={result.productName}
         onConfirm={locationIds => onZeroStock(result.productId, locationIds)}
         onClose={() => setZeroStockOpen(false)}
+      />
+
+      <PriceDialog
+        open={priceDialogOpen}
+        productId={result.productId}
+        productName={result.productName}
+        onConfirm={(priceCents, currency, locationIds) => onSetPrice(result.productId, priceCents, currency, locationIds)}
+        onClose={() => setPriceDialogOpen(false)}
       />
     </div>
   );

@@ -1935,6 +1935,82 @@ export class InventoryMigrationService {
   }
 
   /**
+   * The product's single Square variation, or null when it has several —
+   * one price box can't say which variation (box vs. unit) it's for.
+   * ponytail: multi-variation products are edited in Square directly; add a
+   * per-variation price row here if they turn out to be common in review.
+   */
+  private async singleVariation(productId: string) {
+    const byLocation = await this.productVariationsByLocation(productId);
+    const variationIds = [...new Set(byLocation.flatMap(l => l.variationIds))];
+    return { byLocation, variationId: variationIds.length === 1 ? variationIds[0] : null, variationCount: variationIds.length };
+  }
+
+  /**
+   * Live Square selling price at every location the product's variation is
+   * mapped to — the location override when one exists, else the base price.
+   */
+  async getProductPriceByLocation(productId: string): Promise<{
+    variationCount: number;
+    currency: string | null;
+    locations: { locationId: string; locationName: string; priceCents: number | null }[];
+  }> {
+    const { byLocation, variationId, variationCount } = await this.singleVariation(productId);
+    if (!variationId) return { variationCount, currency: null, locations: [] };
+
+    const cat = (await this.squareInventory.batchFetchSquareCatalogObjects([variationId])).get(variationId);
+    const locations = byLocation
+      .filter(l => l.variationIds.includes(variationId))
+      .map(l => {
+        const price = cat ? this.squareInventory.resolvePriceForLocation(cat, l.squareLocationId) : null;
+        return { locationId: l.locationId, locationName: l.locationName, priceCents: price?.priceCents ?? null, currency: price?.currency };
+      });
+    const currency = cat?.variationCurrency ?? locations.find(l => l.currency)?.currency ?? null;
+    return {
+      variationCount,
+      currency,
+      locations: locations.map(({ currency: _c, ...l }) => l),
+    };
+  }
+
+  /**
+   * Sets the product's Square selling price at the given locations (see
+   * SquareInventoryService.setVariationPrice for base-vs-override). When
+   * every mapped location is selected, the local price cache on the
+   * variation's CatalogMappings is updated too — it only holds the base
+   * price, so a per-location override leaves it alone.
+   */
+  async setProductPrice(productId: string, priceCents: number, locationIds: string[]): Promise<{ success: boolean }> {
+    if (!Number.isInteger(priceCents) || priceCents <= 0) throw new Error('Price must be greater than 0');
+    if (locationIds.length === 0) throw new Error('Select at least one location');
+
+    const { byLocation, variationId, variationCount } = await this.singleVariation(productId);
+    if (!variationId) throw new Error(`Product has ${variationCount} Square variations — edit its price in Square`);
+    const mapped = byLocation.filter(l => l.variationIds.includes(variationId));
+    const unknown = locationIds.filter(id => !mapped.some(l => l.locationId === id));
+    if (unknown.length > 0) throw new Error(`Unknown or unmapped location(s): ${unknown.join(', ')}`);
+
+    const { currency } = await this.getProductPriceByLocation(productId);
+    if (!currency) throw new Error('Variation has no price in Square to take its currency from — set it in Square first');
+
+    const allLocations = mapped.every(l => locationIds.includes(l.locationId));
+    await this.squareInventory.setVariationPrice(
+      variationId,
+      priceCents,
+      currency,
+      allLocations ? null : mapped.filter(l => locationIds.includes(l.locationId)).map(l => l.squareLocationId),
+    );
+    if (allLocations) {
+      await this.prisma.catalogMapping.updateMany({
+        where: { productId, squareVariationId: variationId },
+        data: { priceCents: new Prisma.Decimal(priceCents), currency, priceSyncedAt: new Date() },
+      });
+    }
+    this.logger.log(`[SET_PRICE] Product ${productId} → ${priceCents} ${currency} at ${allLocations ? 'all' : locationIds.length} location(s)`);
+    return { success: true };
+  }
+
+  /**
    * Deletes a discontinued product's Square catalog item, and only if that
    * succeeds, deletes the local Product row (and everything referencing it
    * via ON DELETE RESTRICT — CatalogMapping cascades on its own). Order
