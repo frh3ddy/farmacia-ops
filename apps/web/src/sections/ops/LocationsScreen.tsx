@@ -6,7 +6,14 @@ import { useAuth } from "../../lib/auth/AuthContext";
 import { isOwner } from "../../lib/auth/types";
 import type { Location } from "../../lib/types";
 
-type SyncResult = { created: number; updated: number; total: number };
+type SyncResult = {
+  created: number;
+  updated: number;
+  removed: number;
+  deactivated: number;
+  total: number;
+  errors: { locationId: string; error: string }[];
+};
 
 export function LocationsScreen() {
   const { user } = useAuth();
@@ -24,7 +31,11 @@ export function LocationsScreen() {
     try {
       const body = await apiFetch<{ result: SyncResult }>("/locations/sync", { method: "POST" });
       await refetch();
-      setSyncMessage(`Synced: ${body.result.created} created, ${body.result.updated} updated`);
+      const r = body.result;
+      setSyncMessage(
+        `Synced: ${r.created} created, ${r.updated} updated, ${r.removed} removed, ${r.deactivated} deactivated (no longer in Square but has history)`
+      );
+      if (r.errors.length > 0) setSyncError(`${r.errors.length} location(s) failed: ${r.errors.map(e => e.error).join("; ")}`);
     } catch (err) {
       setSyncError(err instanceof ApiError ? err.message : "Failed to sync locations from Square");
     } finally {

@@ -49,7 +49,7 @@ export class LocationsController {
       return {
         success: true,
         result: result,
-        message: `Synced ${result.total} locations: ${result.created} created, ${result.updated} updated`,
+        message: `Synced ${result.total} locations: ${result.created} created, ${result.updated} updated, ${result.removed} removed, ${result.deactivated} deactivated`,
       };
     } catch (error) {
       const errorMessage =
