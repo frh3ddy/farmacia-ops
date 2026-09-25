@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SquareClient, SquareEnvironment } from 'square';
 
@@ -52,12 +53,17 @@ export class LocationsService {
   }
 
   /**
-   * Fetch locations from Square API and sync to database
+   * Fetch locations from Square API and sync to database. Square is the
+   * source of truth: each location's isActive mirrors its Square status, and
+   * local Square-linked locations missing from Square are pruned (see
+   * pruneLocation).
    */
   async syncLocationsFromSquare(): Promise<{
     total: number;
     created: number;
     updated: number;
+    removed: number;
+    deactivated: number;
     errors: Array<{ locationId: string; error: string }>;
   }> {
     const client = this.getSquareClient();
@@ -65,21 +71,25 @@ export class LocationsService {
       total: 0,
       created: 0,
       updated: 0,
+      removed: 0,
+      deactivated: 0,
       errors: [] as Array<{ locationId: string; error: string }>,
     };
+    let squareLocations: any[] = [];
 
     try {
       // Fetch locations from Square
       const response = await client.locations.list();
 
       // Square SDK v40: response.locations contains the array
-      const squareLocations = (response as any).locations || [];
+      squareLocations = (response as any).locations || [];
 
       result.total = squareLocations.length;
 
       for (const squareLocation of squareLocations) {
         try {
           const squareId = squareLocation.id;
+          const isActive = squareLocation.status !== 'INACTIVE';
           const name = squareLocation.name || `Location ${squareId}`;
           const address = squareLocation.address
             ? [
@@ -106,7 +116,7 @@ export class LocationsService {
               data: {
                 name: name,
                 address: address,
-                isActive: true, // Ensure it's active
+                isActive,
               },
             });
             result.updated++;
@@ -117,7 +127,7 @@ export class LocationsService {
                 squareId: squareId,
                 name: name,
                 address: address,
-                isActive: true,
+                isActive,
               },
             });
             result.created++;
@@ -138,7 +148,45 @@ export class LocationsService {
       );
     }
 
+    // An empty list almost certainly means a wrong token/environment, not
+    // that every store closed — never prune everything on that signal.
+    if (squareLocations.length > 0) {
+      const squareIds = squareLocations.map((l) => l.id).filter(Boolean);
+      const stale = await this.prisma.location.findMany({
+        where: { squareId: { not: null, notIn: squareIds } },
+        select: { id: true },
+      });
+      for (const { id } of stale) {
+        try {
+          result[await this.pruneLocation(id)]++;
+        } catch (error) {
+          result.errors.push({
+            locationId: id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+
     return result;
+  }
+
+  /**
+   * Deletes a location that no longer exists in Square — or, if it has any
+   * history (sales, inventory, expenses, cutover locks… every relation but
+   * CatalogMapping is ON DELETE RESTRICT), deactivates it instead so that
+   * history keeps its location. One DELETE statement, so a restrict
+   * violation rolls back the CatalogMapping cascade too.
+   */
+  private async pruneLocation(id: string): Promise<'removed' | 'deactivated'> {
+    try {
+      await this.prisma.location.delete({ where: { id } });
+      return 'removed';
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2003') throw error;
+      await this.prisma.location.update({ where: { id }, data: { isActive: false } });
+      return 'deactivated';
+    }
   }
 
   /**
