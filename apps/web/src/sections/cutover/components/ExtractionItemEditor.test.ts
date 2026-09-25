@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveMedicineName } from "./ExtractionItemEditor";
+import { deriveMedicineName, giveSelectedLatestDate } from "./ExtractionItemEditor";
 
 const ingredient = (name: string, value: number | null = null, unit: string | null = null) => ({
   name,
@@ -76,5 +76,32 @@ describe("deriveMedicineName", () => {
     expect(deriveMedicineName([ingredient("Alopurinol", 300, "mg")], "TABLET", "Caja con 1 tableta")).toBe(
       "Alopurinol 300mg 1 Tableta",
     );
+  });
+});
+
+describe("giveSelectedLatestDate", () => {
+  const entry = (supplier: string, date: string, isSelected = false) => ({
+    supplier,
+    amount: 1,
+    originalLine: "",
+    confidence: "HIGH" as const,
+    editedEffectiveDate: date,
+    isSelected,
+  });
+  const summarize = (entries: ReturnType<typeof entry>[]) => entries.map(e => `${e.supplier}:${e.editedEffectiveDate}`);
+
+  it("moves the newest date to an older selected entry and shifts the newer ones down", () => {
+    const entries = [entry("A", "2024-01-10"), entry("B", "2024-06-01", true), entry("C", "2025-03-05"), entry("D", "2026-02-01")];
+    expect(summarize(giveSelectedLatestDate(entries, "2026-09-01") as ReturnType<typeof entry>[])).toEqual([
+      "A:2024-01-10",
+      "B:2026-02-01",
+      "C:2024-06-01",
+      "D:2025-03-05",
+    ]);
+  });
+
+  it("leaves entries untouched when the selected one is already the newest", () => {
+    const entries = [entry("A", "2024-01-10"), entry("B", "2025-06-01", true)];
+    expect(giveSelectedLatestDate(entries, "2026-09-01")).toBe(entries);
   });
 });

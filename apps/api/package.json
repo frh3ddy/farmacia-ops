@@ -8,6 +8,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "reset-cutover-data": "ts-node --transpile-only scripts/reset-cutover-data.ts",
+    "fix-selected-cost-history-dates": "ts-node --transpile-only scripts/fix-selected-cost-history-dates.ts",
     "test": "jest"
   },
   "dependencies": {

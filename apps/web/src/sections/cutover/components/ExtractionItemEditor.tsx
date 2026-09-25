@@ -182,6 +182,38 @@ function computeExtractedDate(entry: ExtractedCostEntry, cutoverDate: string): s
   return date.toISOString().split("T")[0];
 }
 
+// Same fallback chain the Date column displays.
+function entryDate(entry: ExtractedCostEntry, cutoverDate: string): string {
+  return (
+    entry.editedEffectiveDate ||
+    computeExtractedDate(entry, cutoverDate) ||
+    cutoverDate ||
+    new Date().toISOString().split("T")[0]
+  );
+}
+
+// Approval writes each entry as a SupplierCostHistory row at its date, and
+// cost history is read newest-first — so the selected entry must carry the
+// most recent date or an older pick reads as superseded. Keeps the same set
+// of dates: the selected entry takes the newest one and the entries that were
+// newer than it each shift down one slot, preserving their relative order.
+export function giveSelectedLatestDate(entries: ExtractedCostEntry[], cutoverDate: string): ExtractedCostEntry[] {
+  const selIdx = entries.findIndex(e => e.isSelected);
+  if (selIdx === -1) return entries;
+  const dates = entries.map(e => entryDate(e, cutoverDate));
+  const sortedDates = [...dates].sort();
+  if (dates[selIdx] === sortedDates[sortedDates.length - 1]) return entries;
+  // Stable sort by date, then move the selected entry to the end.
+  const order = entries.map((_, i) => i).sort((a, b) => dates[a].localeCompare(dates[b]));
+  order.splice(order.indexOf(selIdx), 1);
+  order.push(selIdx);
+  const next = [...entries];
+  order.forEach((entryIdx, rank) => {
+    next[entryIdx] = { ...entries[entryIdx], editedEffectiveDate: sortedDates[rank] };
+  });
+  return next;
+}
+
 type ExtractionItemEditorProps = {
   result: CostExtractionResult | undefined;
   extractingItems: CostExtractionResult[];
@@ -341,7 +373,10 @@ export function ExtractionItemEditor({
   const selectEntry = (idx: number) => {
     setEditedResults(prev => {
       const base = prev[result.productId] ?? result;
-      const entries = (base.extractedEntries ?? result.extractedEntries ?? []).map((e, i) => ({ ...e, isSelected: i === idx }));
+      const entries = giveSelectedLatestDate(
+        (base.extractedEntries ?? result.extractedEntries ?? []).map((e, i) => ({ ...e, isSelected: i === idx })),
+        cutoverDate,
+      );
       const sel = entries[idx];
       return {
         ...prev,
@@ -423,7 +458,7 @@ export function ExtractionItemEditor({
         ...prev,
         [result.productId]: {
           ...base,
-          extractedEntries: entries,
+          extractedEntries: giveSelectedLatestDate(entries, cutoverDate),
           selectedSupplierName: newEntrySupplier,
           selectedSupplierId: newEntrySupplierId,
           selectedCost: amount,
@@ -746,11 +781,7 @@ export function ExtractionItemEditor({
                       const entries = edited.extractedEntries ?? [];
                       const selIdx = entries.findIndex(e => e.isSelected);
                       const isSelectedRow = idx === (selIdx === -1 ? entries.length - 1 : selIdx);
-                      const displayDate =
-                        entry.editedEffectiveDate ||
-                        computeExtractedDate(entry, cutoverDate) ||
-                        cutoverDate ||
-                        new Date().toISOString().split("T")[0];
+                      const displayDate = entryDate(entry, cutoverDate);
                       return (
                         <tr key={idx} className={isSelectedRow ? "bg-(--color-accent)/5" : "border-t border-(--color-border-subtle)"}>
                           <td className="p-0 text-center">
