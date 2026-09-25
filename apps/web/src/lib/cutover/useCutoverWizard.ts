@@ -438,7 +438,10 @@ export function useCutoverWizard() {
     async (result: CostExtractionResult) => {
       if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
 
-      const edited = editedResults[result.productId] ?? result;
+      // The editor passes its edited copy — possibly with a filled-in draft
+      // entry committed on the fly (see ExtractionItemEditor's withDraftEntry),
+      // which isn't in editedResults yet.
+      const edited = result;
       const hasExtraction = (edited.extractedEntries?.length ?? 0) > 0;
       const selectedEntry = edited.extractedEntries?.find(e => e.isSelected) ?? edited.extractedEntries?.at(-1) ?? null;
       const cost = edited.selectedCost ?? (selectedEntry ? selectedEntry.editedCost ?? selectedEntry.amount : null);
@@ -542,7 +545,7 @@ export function useCutoverWizard() {
         setHideProductImageForTransition(false);
       }
     },
-    [cutoverId, editedResults, collectInitialsToLearn, updateItemStatus, advanceAfterAction]
+    [cutoverId, collectInitialsToLearn, updateItemStatus, advanceAfterAction]
   );
 
   // --- Migration ---

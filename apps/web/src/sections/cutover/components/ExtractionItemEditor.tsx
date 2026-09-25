@@ -361,6 +361,13 @@ export function ExtractionItemEditor({
 
   const hasExtraction = (edited.extractedEntries?.length ?? 0) > 0;
 
+  // A draft row with both supplier and cost filled in is treated as the
+  // selected cost: previewed in the header/radio now, committed on Approve.
+  const draftCost = parseFloat(newEntryCost) || 0;
+  const draftReady = !!newEntrySupplier.trim() && draftCost > 0;
+  const shownCost = draftReady ? draftCost : displayCost;
+  const shownSupplier = draftReady ? newEntrySupplier : displaySupplier;
+
   const updateEntry = (idx: number, patch: Partial<ExtractedCostEntry>) => {
     setEditedResults(prev => {
       const base = prev[result.productId] ?? result;
@@ -447,38 +454,54 @@ export function ExtractionItemEditor({
   // original/edited entries by array index, so a tail-appended entry safely
   // falls outside the original array's bounds; inserting anywhere else
   // would desync that diff.
-  const addManualEntry = () => {
-    const amount = parseFloat(newEntryCost) || 0;
-    if (!newEntrySupplier.trim() || amount <= 0) return setError("Enter a supplier and a cost greater than 0");
-    setEditedResults(prev => {
-      const base = prev[result.productId] ?? result;
-      const entries = (base.extractedEntries ?? []).map(e => ({ ...e, isSelected: false }));
-      entries.push({
-        supplier: newEntrySupplier,
-        amount,
-        originalLine: "Manually added",
-        confidence: "LOW",
-        supplierId: newEntrySupplierId,
-        editedSupplierName: newEntrySupplier,
-        editedCost: amount,
-        editedEffectiveDate: newEntryDate,
-        isSelected: true,
-      });
-      return {
-        ...prev,
-        [result.productId]: {
-          ...base,
-          extractedEntries: giveSelectedLatestDate(entries, cutoverDate),
-          selectedSupplierName: newEntrySupplier,
-          selectedSupplierId: newEntrySupplierId,
-          selectedCost: amount,
-        },
-      };
+  const withDraftEntry = (base: CostExtractionResult): CostExtractionResult => {
+    const entries = (base.extractedEntries ?? []).map(e => ({ ...e, isSelected: false }));
+    entries.push({
+      supplier: newEntrySupplier,
+      amount: draftCost,
+      originalLine: "Manually added",
+      confidence: "LOW",
+      supplierId: newEntrySupplierId,
+      editedSupplierName: newEntrySupplier,
+      editedCost: draftCost,
+      editedEffectiveDate: newEntryDate,
+      isSelected: true,
     });
+    return {
+      ...base,
+      extractedEntries: giveSelectedLatestDate(entries, cutoverDate),
+      selectedSupplierName: newEntrySupplier,
+      selectedSupplierId: newEntrySupplierId,
+      selectedCost: draftCost,
+    };
+  };
+
+  const clearDraft = () => {
     setNewEntrySupplier("");
     setNewEntrySupplierId(null);
     setNewEntryCost("");
     setNewEntryDate(cutoverDate);
+  };
+
+  const addManualEntry = () => {
+    if (!draftReady) return setError("Enter a supplier and a cost greater than 0");
+    setEditedResults(prev => ({ ...prev, [result.productId]: withDraftEntry(prev[result.productId] ?? result) }));
+    clearDraft();
+  };
+
+  // Picking an existing row while a draft is filled in keeps the draft as
+  // history (added, then deselected) rather than silently dropping it.
+  const handleSelectEntry = (idx: number) => {
+    if (draftReady) addManualEntry();
+    selectEntry(idx);
+  };
+
+  const handleApprove = () => {
+    if (!draftReady) return onApprove(edited);
+    const next = withDraftEntry(edited);
+    setEditedResults(prev => ({ ...prev, [result.productId]: next }));
+    clearDraft();
+    onApprove(next);
   };
 
   const handleRegenerate = async () => {
@@ -502,9 +525,9 @@ export function ExtractionItemEditor({
 
   const priceGuardWarning = (() => {
     const minCents = result.sellingPrice?.priceCents;
-    if (minCents == null || displayCost == null) return result.priceGuard?.isCostTooHigh ? result.priceGuard.message : null;
-    const costCents = Math.round(displayCost * 100);
-    return costCents >= minCents ? `Cost ($${displayCost.toFixed(2)}) is ≥ min selling price ($${(minCents / 100).toFixed(2)})` : null;
+    if (minCents == null || shownCost == null) return result.priceGuard?.isCostTooHigh ? result.priceGuard.message : null;
+    const costCents = Math.round(shownCost * 100);
+    return costCents >= minCents ? `Cost ($${shownCost.toFixed(2)}) is ≥ min selling price ($${(minCents / 100).toFixed(2)})` : null;
   })();
 
   // Compresses the old always-visible sentence ("Detected from name —
@@ -692,12 +715,12 @@ export function ExtractionItemEditor({
                     <div>
                       <p className="text-xs font-medium text-(--color-accent)">Base cost</p>
                       <p className="tabular text-xl font-bold text-(--color-accent)">
-                        ${displayCost != null ? displayCost.toFixed(2) : "0.00"}
+                        ${shownCost != null ? shownCost.toFixed(2) : "0.00"}
                       </p>
                     </div>
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-(--color-accent)">Current supplier</p>
-                      <p className="truncate text-xl font-bold text-(--color-ink)">{displaySupplier || "Not selected"}</p>
+                      <p className="truncate text-xl font-bold text-(--color-ink)">{shownSupplier || "Not selected"}</p>
                     </div>
                     <div>
                       <p className="text-xs text-(--color-ink-tertiary)">Stock</p>
@@ -814,7 +837,7 @@ export function ExtractionItemEditor({
                     {(edited.extractedEntries ?? []).map((entry, idx) => {
                       const entries = edited.extractedEntries ?? [];
                       const selIdx = entries.findIndex(e => e.isSelected);
-                      const isSelectedRow = idx === (selIdx === -1 ? entries.length - 1 : selIdx);
+                      const isSelectedRow = !draftReady && idx === (selIdx === -1 ? entries.length - 1 : selIdx);
                       const displayDate = entryDate(entry, cutoverDate);
                       return (
                         <tr key={idx} className={isSelectedRow ? "bg-(--color-accent)/5" : "border-t border-(--color-border-subtle)"}>
@@ -824,7 +847,7 @@ export function ExtractionItemEditor({
                                 type="radio"
                                 name={`selected-entry-${result.productId}`}
                                 checked={isSelectedRow}
-                                onChange={() => selectEntry(idx)}
+                                onChange={() => handleSelectEntry(idx)}
                                 aria-label="Use this entry as the cost"
                                 className="h-4 w-4 accent-(--color-accent)"
                               />
@@ -865,8 +888,19 @@ export function ExtractionItemEditor({
                         </tr>
                       );
                     })}
-                    <tr className="border-t border-(--color-border-subtle)">
-                      <td className="px-2 py-2" />
+                    <tr className={draftReady ? "bg-(--color-accent)/5" : "border-t border-(--color-border-subtle)"}>
+                      {/* Display-only: fills in once supplier + cost are set,
+                          previewing that Approve will use this row. */}
+                      <td className="px-2 py-2 text-center">
+                        <input
+                          type="radio"
+                          checked={draftReady}
+                          readOnly
+                          disabled={!draftReady}
+                          aria-label="New entry will be used as the cost"
+                          className="h-4 w-4 accent-(--color-accent) disabled:opacity-40"
+                        />
+                      </td>
                       <td className="px-4 py-2">
                         <SupplierAutocompleteInput
                           value={newEntrySupplier}
@@ -1071,7 +1105,7 @@ export function ExtractionItemEditor({
               Discard
             </button>
             <button
-              onClick={() => onApprove(edited)}
+              onClick={handleApprove}
               className="rounded-sm bg-(--color-success) px-4 py-2 text-sm font-medium text-(--color-accent-contrast)"
             >
               Approve
