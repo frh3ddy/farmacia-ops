@@ -230,8 +230,8 @@ type ExtractionItemEditorProps = {
   setEditedResults: React.Dispatch<React.SetStateAction<Record<string, CostExtractionResult>>>;
   getSupplierSuggestions: (input: string) => SupplierSuggestion[];
   cutoverDate: string;
-  onApprove: (result: CostExtractionResult) => void;
-  onDiscard: (productId: string) => void;
+  onApprove: (result: CostExtractionResult) => void | Promise<void>;
+  onDiscard: (productId: string) => void | Promise<void>;
   onMarkDiscontinued: (productId: string) => Promise<void>;
   onZeroStock: (productId: string, locationIds: string[]) => Promise<boolean>;
   onSetPrice: (productId: string, priceCents: number, currency: string, locationIds: string[]) => Promise<boolean>;
@@ -279,6 +279,12 @@ export function ExtractionItemEditor({
   const [newIngredientName, setNewIngredientName] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [skuOpen, setSkuOpen] = useState(false);
+  // Double-click guard for Approve/Discard, which both advance to the next
+  // item: busy while the action runs, settling for a beat after a new item
+  // appears so the second click of a double-click can't land on it.
+  const [actionBusy, setActionBusy] = useState(false);
+  const [settling, setSettling] = useState(true);
+  const actionsLocked = actionBusy || settling;
 
   // Preload the next 10 product images so Next navigation feels instant.
   useEffect(() => {
@@ -347,6 +353,14 @@ export function ExtractionItemEditor({
     setEditingName(false);
     setSkuOpen(false);
   }, [result?.productId, cutoverDate]);
+
+  // ponytail: 400ms sits just under the typical OS double-click window
+  // (~500ms) — raise it if double-clicks still slip through.
+  useEffect(() => {
+    setSettling(true);
+    const t = setTimeout(() => setSettling(false), 400);
+    return () => clearTimeout(t);
+  }, [result?.productId]);
 
   useEffect(() => {
     if (!viewingImage) return;
@@ -496,13 +510,24 @@ export function ExtractionItemEditor({
     selectEntry(idx);
   };
 
-  const handleApprove = () => {
-    if (!draftReady) return onApprove(edited);
-    const next = withDraftEntry(edited);
-    setEditedResults(prev => ({ ...prev, [result.productId]: next }));
-    clearDraft();
-    onApprove(next);
+  const runLocked = async (action: () => void | Promise<void>) => {
+    if (actionsLocked) return;
+    setActionBusy(true);
+    try {
+      await action();
+    } finally {
+      setActionBusy(false);
+    }
   };
+
+  const handleApprove = () =>
+    runLocked(() => {
+      if (!draftReady) return onApprove(edited);
+      const next = withDraftEntry(edited);
+      setEditedResults(prev => ({ ...prev, [result.productId]: next }));
+      clearDraft();
+      return onApprove(next);
+    });
 
   const handleRegenerate = async () => {
     setRegenerating(true);
@@ -1099,14 +1124,16 @@ export function ExtractionItemEditor({
           </button>
           <div className="flex gap-3">
             <button
-              onClick={() => onDiscard(result.productId)}
-              className="rounded-sm border border-(--color-destructive) px-4 py-2 text-sm font-medium text-(--color-destructive) hover:bg-(--color-destructive-bg)"
+              onClick={() => runLocked(() => onDiscard(result.productId))}
+              disabled={actionsLocked}
+              className="rounded-sm border border-(--color-destructive) px-4 py-2 text-sm font-medium text-(--color-destructive) hover:bg-(--color-destructive-bg) disabled:cursor-not-allowed disabled:opacity-50"
             >
               Discard
             </button>
             <button
               onClick={handleApprove}
-              className="rounded-sm bg-(--color-success) px-4 py-2 text-sm font-medium text-(--color-accent-contrast)"
+              disabled={actionsLocked}
+              className="rounded-sm bg-(--color-success) px-4 py-2 text-sm font-medium text-(--color-accent-contrast) disabled:cursor-not-allowed disabled:opacity-50"
             >
               Approve
             </button>
