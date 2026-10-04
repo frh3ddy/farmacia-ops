@@ -440,7 +440,7 @@ export class InventoryMigrationController {
         success: false,
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'At least one location must be specified',
+          message: 'Debes indicar al menos una sucursal',
           userMessage: 'Please select a location before starting extraction.',
           recoveryAction: 'Select a location from the dropdown and try again.',
           canRetry: true,
@@ -526,7 +526,7 @@ export class InventoryMigrationController {
             canRetry: true,
             canResume: !!body.extractionSessionId,
           },
-          message: `Cost extraction failed: ${errorMessage}`,
+          message: `Falló la extracción de costos: ${errorMessage}`,
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -575,7 +575,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Batch approval failed: ${error}` },
+        { success: false, message: `Falló la aprobación del bloque: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -601,7 +601,7 @@ export class InventoryMigrationController {
       return result;
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to regenerate extraction: ${error}` },
+        { success: false, message: `No se pudo regenerar la extracción: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -627,7 +627,7 @@ export class InventoryMigrationController {
       return result;
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to mark product discontinued: ${error}` },
+        { success: false, message: `No se pudo marcar el producto como descontinuado: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -640,7 +640,7 @@ export class InventoryMigrationController {
       return { locations: await this.migrationService.getProductStockByLocation(productId) };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to fetch stock by location: ${error}` },
+        { success: false, message: `No se pudieron obtener las existencias por sucursal: ${error}` },
         HttpStatus.BAD_GATEWAY,
       );
     }
@@ -652,7 +652,7 @@ export class InventoryMigrationController {
       return await this.migrationService.zeroProductStock(body.productId, body.locationIds ?? []);
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to set stock to 0: ${error}` },
+        { success: false, message: `No se pudieron poner las existencias en 0: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -665,7 +665,7 @@ export class InventoryMigrationController {
       return await this.migrationService.getProductPriceByLocation(productId);
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to fetch price by location: ${error}` },
+        { success: false, message: `No se pudo obtener el precio por sucursal: ${error}` },
         HttpStatus.BAD_GATEWAY,
       );
     }
@@ -677,7 +677,7 @@ export class InventoryMigrationController {
       return await this.migrationService.setProductPrice(body.productId, body.priceCents, body.locationIds ?? []);
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to set price: ${error}` },
+        { success: false, message: `No se pudo actualizar el precio: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -703,7 +703,7 @@ export class InventoryMigrationController {
       return result;
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to discard item: ${error}` },
+        { success: false, message: `No se pudo descartar el producto: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -716,7 +716,7 @@ export class InventoryMigrationController {
       return result;
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to restore item: ${error}` },
+        { success: false, message: `No se pudo restaurar el producto: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -779,7 +779,7 @@ export class InventoryMigrationController {
       return result;
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to approve item: ${error}` },
+        { success: false, message: `No se pudo aprobar el producto: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -802,7 +802,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to reuse previous approvals: ${error}` },
+        { success: false, message: `No se pudieron reutilizar las aprobaciones anteriores: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -818,7 +818,7 @@ export class InventoryMigrationController {
       return result;
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to update batch size: ${error}` },
+        { success: false, message: `No se pudo cambiar el tamaño del bloque: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -831,7 +831,7 @@ export class InventoryMigrationController {
       
       if (!session) {
         throw new HttpException(
-          { success: false, message: 'Extraction session not found' },
+          { success: false, message: 'No se encontró la sesión de extracción' },
           HttpStatus.NOT_FOUND,
         );
       }
@@ -856,7 +856,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to get extraction session: ${error}` },
+        { success: false, message: `No se pudo obtener la sesión de extracción: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -882,7 +882,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to get approvals summary: ${error}` },
+        { success: false, message: `No se pudo obtener el resumen de aprobaciones: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -902,7 +902,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to list extraction sessions: ${error}` },
+        { success: false, message: `No se pudieron listar las sesiones de extracción: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -949,7 +949,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Cost approval failed: ${error}` },
+        { success: false, message: `Falló la aprobación de costos: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -1009,7 +1009,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Cutover failed: ${error}` },
+        { success: false, message: `Falló el corte: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -1023,7 +1023,7 @@ export class InventoryMigrationController {
       where: { id: body.cutoverId },
     });
     if (!cutoverRecord) {
-      throw new HttpException({ success: false, message: 'Cutover not found' }, HttpStatus.NOT_FOUND);
+      throw new HttpException({ success: false, message: 'No se encontró el corte' }, HttpStatus.NOT_FOUND);
     }
 
     // Resolve approved costs (Prioritize JSON snapshot, fallback to DB table)
@@ -1057,7 +1057,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Failed to continue migration: ${error}` },
+        { success: false, message: `No se pudo continuar la migración: ${error}` },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -1095,7 +1095,7 @@ export class InventoryMigrationController {
       };
     } catch (error) {
       throw new HttpException(
-        { success: false, message: `Preview failed: ${error}` },
+        { success: false, message: `Falló la vista previa: ${error}` },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

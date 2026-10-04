@@ -403,8 +403,8 @@ export class InventoryMigrationService {
         error: {
           code: 'SESSION_INVALID_STATE',
           message: 'Cannot reset a completed session',
-          userMessage: 'This session has already been completed successfully.',
-          recoveryAction: 'Start a new extraction session if you need to re-extract.',
+          userMessage: 'Esta sesión ya se completó correctamente.',
+          recoveryAction: 'Inicia una nueva sesión de extracción si necesitas volver a extraer.',
           canRetry: false,
           canResume: false,
         },
@@ -1224,7 +1224,7 @@ export class InventoryMigrationService {
       );
       if (queue.remainingProductIds.length > 0) {
         throw new CutoverValidationError(
-          `Extraction not finished: ${queue.remainingProductIds.length} of ${queue.totalProducts} products still need review`,
+          `La extracción no ha terminado: faltan ${queue.remainingProductIds.length} de ${queue.totalProducts} productos por revisar`,
           [],
         );
       }

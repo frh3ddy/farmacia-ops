@@ -91,20 +91,20 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
           <div className="flex gap-2">
             <span className="rounded-full bg-(--color-accent)/10 px-2.5 py-0.5 text-xs font-medium text-(--color-accent)">
-              Batch total: {batchTotal}
+              Total del bloque: {batchTotal}
             </span>
             <span className="rounded-full bg-(--color-warning-bg) px-2.5 py-0.5 text-xs font-medium text-(--color-warning)">
-              Batch remaining: {pendingCount}
+              Pendientes del bloque: {pendingCount}
             </span>
           </div>
           <div className="h-4 w-px shrink-0 bg-(--color-border-standard)" />
           {locationTotal != null && (
             <div className="flex gap-2">
               <span className="rounded-full border border-(--color-border-standard) px-2.5 py-0.5 text-xs font-medium text-(--color-ink-secondary)">
-                Location total: {locationTotal}
+                Total de la sucursal: {locationTotal}
               </span>
               <span className="rounded-full border border-(--color-border-standard) px-2.5 py-0.5 text-xs font-medium text-(--color-ink-secondary)">
-                Location remaining: {locationRemaining}
+                Pendientes de la sucursal: {locationRemaining}
               </span>
             </div>
           )}
@@ -118,14 +118,14 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
                 disabled={loading}
                 className="rounded-sm bg-(--color-success) px-3 py-1.5 text-sm font-medium text-(--color-accent-contrast) disabled:opacity-50"
               >
-                Reuse {reusable.length} previous approval{reusable.length !== 1 ? "s" : ""}
+                Reutilizar {reusable.length} aprobaci{reusable.length !== 1 ? "ones anteriores" : "ón anterior"}
               </button>
             )}
             <button
               onClick={() => setPhase("configuring")}
               className="rounded-sm border border-(--color-border-standard) px-3 py-1.5 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"
             >
-              Back to setup
+              Volver a la configuración
             </button>
           </div>
         </div>
@@ -134,9 +134,9 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
           <div className="flex gap-1">
             {(
               [
-                ["extracting", `Extracting`],
-                ["approved", `Approved (${counts.approved})`],
-                ["discarded", `Discarded (${counts.skipped})`],
+                ["extracting", `Pendientes`],
+                ["approved", `Aprobados (${counts.approved})`],
+                ["discarded", `Descartados (${counts.skipped})`],
               ] as const
             ).map(([tab, label]) => (
               <button
@@ -163,17 +163,17 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
                 disabled={currentExtractingIndex === 0}
                 className="rounded-sm bg-(--color-accent) px-3 py-1 text-xs font-medium text-(--color-accent-contrast) disabled:cursor-not-allowed disabled:opacity-40"
               >
-                ← Previous
+                ← Anterior
               </button>
               <span className="whitespace-nowrap text-xs font-medium text-(--color-ink-secondary)">
-                Item {currentExtractingIndex + 1} of {pendingCount}
+                Producto {currentExtractingIndex + 1} de {pendingCount}
               </span>
               <button
                 onClick={() => setCurrentExtractingIndex(prev => Math.min(pendingCount - 1, prev + 1))}
                 disabled={currentExtractingIndex >= pendingCount - 1}
                 className="rounded-sm bg-(--color-accent) px-3 py-1 text-xs font-medium text-(--color-accent-contrast) disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Next →
+                Siguiente →
               </button>
             </div>
           )}
@@ -261,7 +261,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
             disabled={loading}
             className="rounded-sm bg-(--color-success) px-6 py-2 font-medium text-(--color-accent-contrast) disabled:opacity-50"
           >
-            {loading ? "Starting migration…" : "Start migration"}
+            {loading ? "Iniciando migración…" : "Iniciar migración"}
           </button>
         </div>
       )}
@@ -276,7 +276,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
             disabled={loading}
             className="rounded-sm bg-(--color-accent) px-6 py-2 text-sm font-medium text-(--color-accent-contrast) disabled:opacity-50"
           >
-            {loading ? "Loading…" : "Continue extraction"}
+            {loading ? "Cargando…" : "Continuar extracción"}
           </button>
         </div>
       )}

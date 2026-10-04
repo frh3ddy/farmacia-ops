@@ -27,7 +27,7 @@ export function SupplierAutocompleteInput({
   onChange,
   onSelectSuggestion,
   getLocalSuggestions,
-  placeholder = "Enter supplier name",
+  placeholder = "Nombre del proveedor",
   highlighted = false,
   matchedByInitialLabel,
 }: SupplierAutocompleteInputProps) {
@@ -114,10 +114,10 @@ export function SupplierAutocompleteInput({
           // tiny box sized to the icon, not the input), throwing off
           // top-1/2's vertical centering against the input's real height.
           <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
-            <Tooltip label={`Matched by initial: ${matchedByInitialLabel}`}>
+            <Tooltip label={`Coincide por inicial: ${matchedByInitialLabel}`}>
               <span
                 tabIndex={0}
-                aria-label={`Matched by initial: ${matchedByInitialLabel}`}
+                aria-label={`Coincide por inicial: ${matchedByInitialLabel}`}
                 className="flex h-4 w-4 items-center justify-center rounded-full bg-(--color-accent)/15 text-[10px] font-semibold text-(--color-accent) focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
               >
                 i

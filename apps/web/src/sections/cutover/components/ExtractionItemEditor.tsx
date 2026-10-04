@@ -454,8 +454,8 @@ export function ExtractionItemEditor({
 
   const handleCostBlur = (idx: number, e: React.FocusEvent<HTMLInputElement>) => {
     const newCost = parseFloat(e.target.value) || 0;
-    if (newCost < 0) return setError("Cost cannot be negative");
-    if (newCost === 0 && !window.confirm("Cost is zero. Are you sure?")) {
+    if (newCost < 0) return setError("El costo no puede ser negativo");
+    if (newCost === 0 && !window.confirm("El costo es cero. ¿Estás seguro?")) {
       e.target.focus();
       return; // keep the draft so the refocused field still shows what they typed
     }
@@ -498,7 +498,7 @@ export function ExtractionItemEditor({
   };
 
   const addManualEntry = () => {
-    if (!draftReady) return setError("Enter a supplier and a cost greater than 0");
+    if (!draftReady) return setError("Ingresa un proveedor y un costo mayor a 0");
     setEditedResults(prev => ({ ...prev, [result.productId]: withDraftEntry(prev[result.productId] ?? result) }));
     clearDraft();
   };
@@ -552,7 +552,7 @@ export function ExtractionItemEditor({
     const minCents = result.sellingPrice?.priceCents;
     if (minCents == null || shownCost == null) return result.priceGuard?.isCostTooHigh ? result.priceGuard.message : null;
     const costCents = Math.round(shownCost * 100);
-    return costCents >= minCents ? `Cost ($${shownCost.toFixed(2)}) is ≥ min selling price ($${(minCents / 100).toFixed(2)})` : null;
+    return costCents >= minCents ? `El costo ($${shownCost.toFixed(2)}) es ≥ al precio de venta mínimo ($${(minCents / 100).toFixed(2)})` : null;
   })();
 
   // Compresses the old always-visible sentence ("Detected from name —
@@ -561,9 +561,9 @@ export function ExtractionItemEditor({
   const confidencePill =
     edited.parseConfidence && (edited.ingredients?.length ?? 0) > 0
       ? edited.parseConfidence === "LOW"
-        ? { label: "Guessed — please verify", tone: "warning" as const }
-        : { label: "Detected from name", tone: "accent" as const }
-      : { label: "Not detected", tone: "muted" as const };
+        ? { label: "Estimado, verifícalo", tone: "warning" as const }
+        : { label: "Detectado del nombre", tone: "accent" as const }
+      : { label: "No detectado", tone: "muted" as const };
   const pillClasses = {
     accent: "bg-(--color-accent)/10 text-(--color-accent)",
     warning: "bg-(--color-warning-bg) text-(--color-warning)",
@@ -605,7 +605,7 @@ export function ExtractionItemEditor({
           <button
             type="button"
             onClick={() => setEditingName(v => !v)}
-            aria-label="Edit product name"
+            aria-label="Editar nombre del producto"
             className="ml-2 shrink-0 rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-surface-inset) hover:text-(--color-ink)"
           >
             <PencilIcon className="h-4 w-4" />
@@ -617,8 +617,8 @@ export function ExtractionItemEditor({
                 updateManualField({ productName: deriveMedicineName(edited.ingredients ?? [], edited.form, edited.presentation)! });
                 setEditingName(true);
               }}
-              aria-label="Autofill name from detected info"
-              title="Autofill from detected info"
+              aria-label="Autocompletar nombre con la información detectada"
+              title="Autocompletar con la información detectada"
               className="ml-1 shrink-0 rounded-sm p-1 text-(--color-accent) hover:bg-(--color-accent)/10"
             >
               <SparkleIcon className="h-4 w-4" />
@@ -630,7 +630,7 @@ export function ExtractionItemEditor({
                 type="button"
                 onClick={() => setSkuOpen(v => !v)}
                 onBlur={() => setSkuOpen(false)}
-                aria-label="Show SKU"
+                aria-label="Mostrar SKU"
                 aria-expanded={skuOpen}
                 className="rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-surface-inset) hover:text-(--color-ink)"
               >
@@ -664,13 +664,13 @@ export function ExtractionItemEditor({
                       type="button"
                       onClick={() => setViewingImage(true)}
                       className="h-28 w-28 cursor-zoom-in rounded-sm focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
-                      aria-label="View full-size image"
+                      aria-label="Ver imagen en tamaño completo"
                     >
                       <img src={result.imageUrl} alt={result.productName} className="h-full w-full object-contain" />
                     </button>
                   ) : (
                     <span className="px-2 text-center text-xs text-(--color-ink-muted)">
-                      {hideProductImageForTransition ? "Loading…" : "No image"}
+                      {hideProductImageForTransition ? "Cargando…" : "Sin imagen"}
                     </span>
                   )}
                 </div>
@@ -691,10 +691,10 @@ export function ExtractionItemEditor({
                       <button
                         type="button"
                         onClick={() => setViewingImage(false)}
-                        aria-label="Close"
+                        aria-label="Cerrar"
                         className="absolute right-4 top-4 rounded-full bg-black/50 px-3 py-1.5 text-sm font-medium text-white hover:bg-black/70"
                       >
-                        Close
+                        Cerrar
                       </button>
                     </div>,
                     document.body
@@ -703,7 +703,7 @@ export function ExtractionItemEditor({
                 <div className="rounded-md border border-(--color-border-standard) bg-(--color-surface) p-4">
                   <div className="grid grid-cols-4 gap-4">
                     <div>
-                      <p className="text-xs text-(--color-ink-tertiary)">Selling price</p>
+                      <p className="text-xs text-(--color-ink-tertiary)">Precio de venta</p>
                       <div className="flex items-center gap-1">
                         {result.sellingPrice ? (
                           <p className="tabular text-xl font-semibold text-(--color-ink)">
@@ -712,13 +712,13 @@ export function ExtractionItemEditor({
                               : `$${(result.sellingPrice.priceCents / 100).toFixed(2)}`}
                           </p>
                         ) : (
-                          <p className="text-sm text-(--color-ink-muted)">Not set</p>
+                          <p className="text-sm text-(--color-ink-muted)">Sin definir</p>
                         )}
                         <button
                           type="button"
                           onClick={() => setPriceDialogOpen(true)}
-                          aria-label="Edit selling price"
-                          title="Edit selling price"
+                          aria-label="Editar precio de venta"
+                          title="Editar precio de venta"
                           className="rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-surface-inset) hover:text-(--color-ink)"
                         >
                           <PencilIcon className="h-4 w-4" />
@@ -729,7 +729,7 @@ export function ExtractionItemEditor({
                           onClick={() => setShowPriceDetails(v => !v)}
                           className="mt-0.5 text-xs font-medium text-(--color-accent) hover:text-(--color-accent-hover)"
                         >
-                          {showPriceDetails ? "Hide" : "Show"} variations
+                          {showPriceDetails ? "Ocultar" : "Ver"} variaciones
                         </button>
                       )}
                     </div>
@@ -738,24 +738,24 @@ export function ExtractionItemEditor({
                     operative numbers at a glance, not just more page text next
                     to the informational selling price. */}
                     <div>
-                      <p className="text-xs font-medium text-(--color-accent)">Base cost</p>
+                      <p className="text-xs font-medium text-(--color-accent)">Costo base</p>
                       <p className="tabular text-xl font-bold text-(--color-accent)">
                         ${shownCost != null ? shownCost.toFixed(2) : "0.00"}
                       </p>
                     </div>
                     <div className="min-w-0">
-                      <p className="text-xs font-medium text-(--color-accent)">Current supplier</p>
+                      <p className="text-xs font-medium text-(--color-accent)">Proveedor actual</p>
                       <p className="truncate text-xl font-bold text-(--color-ink)">{shownSupplier || "Not selected"}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-(--color-ink-tertiary)">Stock</p>
+                      <p className="text-xs text-(--color-ink-tertiary)">Existencias</p>
                       <div className="flex items-center gap-1">
                         <p className="tabular text-xl font-semibold text-(--color-ink)">{result.stockQuantity ?? 0}</p>
                         <button
                           type="button"
                           onClick={() => setZeroStockOpen(true)}
-                          aria-label="Mark as 0 stock"
-                          title="Mark as 0 stock"
+                          aria-label="Marcar con 0 existencias"
+                          title="Marcar con 0 existencias"
                           className="rounded-sm p-1 text-(--color-ink-tertiary) hover:bg-(--color-destructive-bg) hover:text-(--color-destructive)"
                         >
                           <EmptyStockIcon className="h-4 w-4" />
@@ -772,7 +772,7 @@ export function ExtractionItemEditor({
 
                   <div className="mt-4 grid grid-cols-2 gap-4 border-t border-(--color-border-subtle) pt-4">
                     <div>
-                      <label className="mb-0.5 block text-xs text-(--color-ink-tertiary)">Category</label>
+                      <label className="mb-0.5 block text-xs text-(--color-ink-tertiary)">Categoría</label>
                       <select
                         value={categoryTopId}
                         onChange={e => {
@@ -784,7 +784,7 @@ export function ExtractionItemEditor({
                         }}
                         className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-xs text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
                       >
-                        <option value="">Uncategorized</option>
+                        <option value="">Sin categoría</option>
                         {topCategories.map(c => (
                           <option key={c.id} value={c.id}>
                             {c.name}
@@ -793,7 +793,7 @@ export function ExtractionItemEditor({
                       </select>
                     </div>
                     <div>
-                      <label className="mb-0.5 block text-xs text-(--color-ink-tertiary)">Subcategory</label>
+                      <label className="mb-0.5 block text-xs text-(--color-ink-tertiary)">Subcategoría</label>
                       <select
                         value={categorySubId}
                         onChange={e => {
@@ -806,7 +806,7 @@ export function ExtractionItemEditor({
                         disabled={!categoryTopId || subcategories.length === 0}
                         className="w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-2 py-1 text-xs text-(--color-ink) focus:border-(--color-accent) focus:outline-none disabled:opacity-50"
                       >
-                        <option value="">{categoryTopId ? "None" : "—"}</option>
+                        <option value="">{categoryTopId ? "Ninguna" : "—"}</option>
                         {subcategories.map(c => (
                           <option key={c.id} value={c.id}>
                             {c.name}
@@ -823,7 +823,7 @@ export function ExtractionItemEditor({
                           key={idx}
                           className="flex items-center justify-between rounded-sm border border-(--color-border-subtle) bg-(--color-surface-inset) px-2 py-1 text-sm"
                         >
-                          <span className="font-medium">{price.variationName || `Variation ${idx + 1}`}</span>
+                          <span className="font-medium">{price.variationName || `Variación ${idx + 1}`}</span>
                           <span className="tabular">${(price.priceCents / 100).toFixed(2)}</span>
                         </div>
                       ))}
@@ -833,29 +833,29 @@ export function ExtractionItemEditor({
               </div>
 
               {!hasExtraction && (
-                <p className="text-sm font-medium text-(--color-destructive)">No cost extracted — add one manually below</p>
+                <p className="text-sm font-medium text-(--color-destructive)">No se extrajo ningún costo; agrega uno abajo</p>
               )}
 
               <div className="overflow-hidden rounded-md border border-(--color-border-standard)">
                 <div className="flex items-center justify-between bg-(--color-surface) px-4 py-2.5">
-                  <h4 className="text-sm font-semibold text-(--color-ink)">Supplier history &amp; costs</h4>
+                  <h4 className="text-sm font-semibold text-(--color-ink)">Historial de proveedores y costos</h4>
                   <button
                     type="button"
                     onClick={() => setSourceModalOpen(true)}
                     className="flex items-center gap-1 text-xs font-medium text-(--color-accent) hover:text-(--color-accent-hover)"
                   >
                     <DocumentIcon className="h-3.5 w-3.5" />
-                    Source info
+                    Información de origen
                   </button>
                 </div>
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-t border-(--color-border-standard) bg-(--color-surface) text-xs uppercase text-(--color-ink-tertiary)">
-                      <th className="px-2 py-2 text-center">Use</th>
-                      <th className="min-w-40 px-4 py-2 text-left">Supplier</th>
-                      <th className="w-40 px-4 py-2 text-left">Cost</th>
-                      <th className="w-40 py-2 text-left">Date</th>
-                      <th className="px-4 py-2 text-left">Source</th>
+                      <th className="px-2 py-2 text-center">Usar</th>
+                      <th className="min-w-40 px-4 py-2 text-left">Proveedor</th>
+                      <th className="w-40 px-4 py-2 text-left">Costo</th>
+                      <th className="w-40 py-2 text-left">Fecha</th>
+                      <th className="px-4 py-2 text-left">Origen</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -873,7 +873,7 @@ export function ExtractionItemEditor({
                                 name={`selected-entry-${result.productId}`}
                                 checked={isSelectedRow}
                                 onChange={() => handleSelectEntry(idx)}
-                                aria-label="Use this entry as the cost"
+                                aria-label="Usar esta entrada como costo"
                                 className="h-4 w-4 accent-(--color-accent)"
                               />
                             </label>
@@ -922,7 +922,7 @@ export function ExtractionItemEditor({
                           checked={draftReady}
                           readOnly
                           disabled={!draftReady}
-                          aria-label="New entry will be used as the cost"
+                          aria-label="La nueva entrada se usará como costo"
                           className="h-4 w-4 accent-(--color-accent) disabled:opacity-40"
                         />
                       </td>
@@ -935,7 +935,7 @@ export function ExtractionItemEditor({
                             setNewEntrySupplierId(s.id ?? null);
                           }}
                           getLocalSuggestions={getSupplierSuggestions}
-                          placeholder="Add supplier"
+                          placeholder="Agregar proveedor"
                         />
                       </td>
                       <td className="px-4 py-2">
@@ -945,7 +945,7 @@ export function ExtractionItemEditor({
                           min="0"
                           value={newEntryCost}
                           onChange={e => setNewEntryCost(e.target.value)}
-                          placeholder="Cost"
+                          placeholder="Costo"
                           className="w-full rounded-sm border border-(--color-border-standard) px-2 py-1 text-sm tabular focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
                         />
                       </td>
@@ -962,7 +962,7 @@ export function ExtractionItemEditor({
                           onClick={addManualEntry}
                           className="rounded-sm border border-(--color-border-standard) px-3 py-1 text-sm font-medium text-(--color-ink-secondary) hover:bg-(--color-surface)"
                         >
-                          + Add entry
+                          + Agregar entrada
                         </button>
                       </td>
                     </tr>
@@ -977,7 +977,7 @@ export function ExtractionItemEditor({
             >
               <div className="flex items-center gap-1.5">
                 <SparkleIcon className="h-3.5 w-3.5 text-(--color-accent)" />
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-ink-tertiary)">Detected info</h4>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-(--color-ink-tertiary)">Información detectada</h4>
               </div>
               <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${pillClasses}`}>{confidencePill.label}</span>
 
@@ -1120,7 +1120,7 @@ export function ExtractionItemEditor({
             onClick={() => setConfirmingDiscontinue(true)}
             className="text-xs font-medium text-(--color-destructive) hover:underline"
           >
-            Mark as no longer for sale
+            Ya no se vende
           </button>
           <div className="flex gap-3">
             <button
@@ -1128,26 +1128,26 @@ export function ExtractionItemEditor({
               disabled={actionsLocked}
               className="rounded-sm border border-(--color-destructive) px-4 py-2 text-sm font-medium text-(--color-destructive) hover:bg-(--color-destructive-bg) disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Discard
+              Descartar
             </button>
             <button
               onClick={handleApprove}
               disabled={actionsLocked}
               className="rounded-sm bg-(--color-success) px-4 py-2 text-sm font-medium text-(--color-accent-contrast) disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Approve
+              Aprobar
             </button>
           </div>
         </div>
       </div>
 
-      <Modal open={sourceModalOpen} onClose={() => setSourceModalOpen(false)} title="Source info">
-        <label className="block text-xs text-(--color-ink-tertiary)">Source description</label>
+      <Modal open={sourceModalOpen} onClose={() => setSourceModalOpen(false)} title="Información de origen">
+        <label className="block text-xs text-(--color-ink-tertiary)">Descripción de origen</label>
         <textarea
           value={edited.originalDescription ?? ""}
           onChange={e => updateManualField({ originalDescription: e.target.value })}
           rows={4}
-          placeholder="No description on file"
+          placeholder="Sin descripción registrada"
           className="mt-0.5 w-full rounded-sm border border-(--color-border-standard) px-2 py-1.5 text-sm text-(--color-ink-secondary) focus:outline-none focus:ring-2 focus:ring-(--color-accent)"
         />
         <button
@@ -1155,15 +1155,15 @@ export function ExtractionItemEditor({
           disabled={regenerating}
           className="mt-2 text-sm font-medium text-(--color-accent) hover:text-(--color-accent-hover) disabled:opacity-50"
         >
-          {regenerating ? "Regenerating…" : "Regenerate from description"}
+          {regenerating ? "Regenerando…" : "Regenerar desde la descripción"}
         </button>
       </Modal>
 
       <ConfirmDialog
         open={confirmingDiscontinue}
-        title="Mark as no longer for sale?"
-        description={`"${result.productName}" will be permanently removed from Square's catalog once migration runs, and excluded from inventory in this and all future cutover sessions.`}
-        confirmLabel={discontinuing ? "Marking…" : "Mark discontinued"}
+        title="¿Marcar como que ya no se vende?"
+        description={`"${result.productName}" se eliminará definitivamente del catálogo de Square cuando corra la migración, y quedará fuera del inventario en este y en todos los cortes futuros.`}
+        confirmLabel={discontinuing ? "Marcando…" : "Marcar como descontinuado"}
         destructive
         onConfirm={handleConfirmDiscontinue}
         onCancel={() => setConfirmingDiscontinue(false)}

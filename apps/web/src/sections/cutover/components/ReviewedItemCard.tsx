@@ -54,9 +54,9 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
 
   const handleSave = async () => {
     const numericCost = parseFloat(cost) || 0;
-    if (!numericCost || numericCost <= 0) return setError("Please enter a valid cost");
-    if (!supplierName) return setError("Please enter a supplier name");
-    if (!cutoverId) return setError("Missing cutover ID");
+    if (!numericCost || numericCost <= 0) return setError("Ingresa un costo válido");
+    if (!supplierName) return setError("Ingresa el nombre del proveedor");
+    if (!cutoverId) return setError("Falta el ID del corte");
 
     setSaving(true);
     try {
@@ -78,7 +78,7 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
       });
       setIsEditing(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : `Failed to ${isApproved ? "update" : "approve"} item`);
+      setError(err instanceof ApiError ? err.message : `No se pudo ${isApproved ? "actualizar" : "aprobar"} el producto`);
     } finally {
       setSaving(false);
     }
@@ -102,22 +102,22 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
           <div>
             <h3 className="font-semibold text-(--color-ink)">{result.productName}</h3>
             <p className="text-sm">
-              Status:{" "}
+              Estado:{" "}
               <span className={isApproved ? "font-medium text-(--color-success)" : "font-medium text-(--color-destructive)"}>
-                {isApproved ? "Approved" : "Discarded"}
+                {isApproved ? "Aprobado" : "Descartado"}
               </span>
             </p>
           </div>
 
           {result.sellingPrice && (
             <div>
-              <label className="text-xs font-medium text-(--color-ink-tertiary)">Selling price</label>
+              <label className="text-xs font-medium text-(--color-ink-tertiary)">Precio de venta</label>
               <p className="mt-0.5 tabular text-sm font-semibold text-(--color-ink)">${(result.sellingPrice.priceCents / 100).toFixed(2)}</p>
             </div>
           )}
 
           <div>
-            <label className="text-xs font-medium text-(--color-ink-tertiary)">Cost</label>
+            <label className="text-xs font-medium text-(--color-ink-tertiary)">Costo</label>
             {isEditing ? (
               <input
                 type="number"
@@ -129,13 +129,13 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
               />
             ) : (
               <p className="tabular mt-0.5 text-sm text-(--color-ink)">
-                {result.selectedCost != null ? `$${result.selectedCost.toFixed(2)}` : "Not specified"}
+                {result.selectedCost != null ? `$${result.selectedCost.toFixed(2)}` : "Sin especificar"}
               </p>
             )}
           </div>
 
           <div>
-            <label className="text-xs font-medium text-(--color-ink-tertiary)">Supplier</label>
+            <label className="text-xs font-medium text-(--color-ink-tertiary)">Proveedor</label>
             {isEditing ? (
               <div className="mt-1">
                 <SupplierAutocompleteInput
@@ -149,7 +149,7 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
                 />
               </div>
             ) : (
-              <p className="mt-0.5 text-sm text-(--color-ink)">{result.selectedSupplierName || "Not specified"}</p>
+              <p className="mt-0.5 text-sm text-(--color-ink)">{result.selectedSupplierName || "Sin especificar"}</p>
             )}
           </div>
         </div>
@@ -161,14 +161,14 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
                 disabled={saving}
                 className="rounded-sm bg-(--color-success) px-3 py-1 text-sm text-(--color-accent-contrast) disabled:opacity-50"
               >
-                {saving ? "Saving…" : isApproved ? "Save" : "Approve"}
+                {saving ? "Guardando…" : isApproved ? "Guardar" : "Aprobar"}
               </button>
               <button
                 onClick={() => setIsEditing(false)}
                 disabled={saving}
                 className="rounded-sm border border-(--color-border-standard) px-3 py-1 text-sm text-(--color-ink-secondary)"
               >
-                Cancel
+                Cancelar
               </button>
             </>
           ) : (
@@ -181,7 +181,7 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
                     : "bg-(--color-accent) text-(--color-accent-contrast)"
                 }`}
               >
-                Edit
+                Editar
               </button>
               {!isApproved && onRestore && (
                 <button
@@ -189,7 +189,7 @@ export function ReviewedItemCard({ result, variant, cutoverId, getSupplierSugges
                   disabled={restoring}
                   className="rounded-sm border border-(--color-border-standard) px-3 py-1 text-sm text-(--color-ink-secondary) disabled:opacity-50"
                 >
-                  {restoring ? "Restoring…" : "Restore"}
+                  {restoring ? "Restaurando…" : "Restaurar"}
                 </button>
               )}
             </>

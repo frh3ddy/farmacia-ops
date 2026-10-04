@@ -27,21 +27,27 @@ export function InventoryMigrationScreen() {
 
       <ConfirmDialog
         open={wizard.confirmingMigration}
-        title="Start migration"
+        title="Iniciar migración"
         description={
           <>
-            This locks historical costs for <strong>{selectedLocation?.name ?? "this location"}</strong> — inventory and costs dated on
-            or before the cutover date can no longer be edited afterward.
+            Esto bloquea los costos históricos de <strong>{selectedLocation?.name ?? "esta sucursal"}</strong>: después ya no se podrán
+            editar el inventario ni los costos con fecha igual o anterior a la fecha de corte.
             {wizard.pendingCount > 0 && (
               <p className="mt-2 text-(--color-warning)">
-                {wizard.pendingCount} item{wizard.pendingCount !== 1 ? "s are" : " is"} still pending and will be excluded from the
-                migration.
+                {wizard.pendingCount} producto{wizard.pendingCount !== 1 ? "s siguen pendientes y quedarán excluidos" : " sigue pendiente y quedará excluido"} de la
+                migración.
               </p>
             )}
           </>
         }
-        confirmPhrase={selectedLocation?.name ?? "CONFIRM"}
-        confirmLabel="Start migration"
+        confirmPhrase={selectedLocation?.name ?? "CONFIRMAR"}
+        confirmLabel="Iniciar migración"
+        cancelLabel="Cancelar"
+        phraseLabel={
+          <>
+            Escribe <span className="tabular text-(--color-ink)">{selectedLocation?.name ?? "CONFIRMAR"}</span> para confirmar
+          </>
+        }
         destructive
         onConfirm={wizard.confirmStartMigration}
         onCancel={wizard.cancelStartMigration}

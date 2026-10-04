@@ -27,7 +27,7 @@ export class CutoverValidationError extends Error {
     message: string,
     public readonly errors: string[],
   ) {
-    super(`Cutover validation error: ${message}`);
+    super(`Error de validación del corte: ${message}`);
     this.name = 'CutoverValidationError';
   }
 }
@@ -143,8 +143,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'SESSION_NOT_FOUND',
       message: `Extraction session ${sessionId} not found`,
-      userMessage: 'The extraction session could not be found. It may have been deleted or expired.',
-      recoveryAction: 'Start a new extraction session',
+      userMessage: 'No se encontró la sesión de extracción. Es posible que se haya eliminado o expirado.',
+      recoveryAction: 'Inicia una nueva sesión de extracción',
       canRetry: false,
       canResume: false,
       details: { sessionId },
@@ -155,8 +155,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'SESSION_EXPIRED',
       message: `Extraction session ${sessionId} has expired (last updated: ${lastUpdated.toISOString()})`,
-      userMessage: 'This extraction session has expired. Please start a new session.',
-      recoveryAction: 'Start a new extraction session',
+      userMessage: 'Esta sesión de extracción expiró. Inicia una nueva sesión.',
+      recoveryAction: 'Inicia una nueva sesión de extracción',
       canRetry: false,
       canResume: false,
       details: { sessionId, lastUpdated: lastUpdated.toISOString() },
@@ -167,10 +167,10 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'SESSION_INVALID_STATE',
       message: `Session ${sessionId} is in ${currentStatus} state, expected ${expectedStatus}`,
-      userMessage: `This session cannot be continued. Current status: ${currentStatus}.`,
+      userMessage: `Esta sesión no se puede continuar. Estado actual: ${currentStatus}.`,
       recoveryAction: currentStatus === 'COMPLETED' 
-        ? 'This session is complete. Start a new session for additional extractions.'
-        : 'Reset the session or start a new one.',
+        ? 'Esta sesión ya terminó. Inicia una nueva sesión para hacer más extracciones.'
+        : 'Reinicia la sesión o inicia una nueva.',
       canRetry: false,
       canResume: currentStatus === 'FAILED',
       details: { sessionId, currentStatus, expectedStatus },
@@ -181,8 +181,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'LOCATION_NOT_FOUND',
       message: `Location ${locationId} not found in database`,
-      userMessage: 'The selected location could not be found.',
-      recoveryAction: 'Refresh the page and select a valid location',
+      userMessage: 'No se encontró la sucursal seleccionada.',
+      recoveryAction: 'Recarga la página y selecciona una sucursal válida',
       canRetry: true,
       canResume: false,
       locationId,
@@ -193,8 +193,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'LOCATION_NO_SQUARE_ID',
       message: `Location ${locationName} (${locationId}) does not have a Square ID configured`,
-      userMessage: `Location "${locationName}" is not connected to Square.`,
-      recoveryAction: 'Connect this location to Square in the admin settings',
+      userMessage: `La sucursal "${locationName}" no está conectada a Square.`,
+      recoveryAction: 'Conecta esta sucursal a Square en la configuración de administración',
       canRetry: false,
       canResume: false,
       locationId,
@@ -207,8 +207,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'SQUARE_INVENTORY_FETCH_FAILED',
       message: `Failed to fetch Square inventory for location ${locationId}: ${errorMessage}`,
-      userMessage: 'Unable to fetch inventory from Square. This may be a temporary issue.',
-      recoveryAction: 'Wait a moment and try again. If the problem persists, check Square API status.',
+      userMessage: 'No se pudo obtener el inventario de Square. Puede ser un problema temporal.',
+      recoveryAction: 'Espera un momento e inténtalo de nuevo. Si el problema continúa, revisa el estado de la API de Square.',
       canRetry: true,
       canResume: true,
       locationId,
@@ -221,8 +221,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'SQUARE_CATALOG_FETCH_FAILED',
       message: `Failed to fetch Square catalog data for ${variationIds.length} variations: ${errorMessage}`,
-      userMessage: 'Unable to fetch product details from Square. Some products may show incomplete information.',
-      recoveryAction: 'Retry the extraction. Product names may be incomplete but you can proceed.',
+      userMessage: 'No se pudieron obtener los detalles de los productos de Square. Algunos productos pueden mostrar información incompleta.',
+      recoveryAction: 'Reintenta la extracción. Los nombres pueden estar incompletos, pero puedes continuar.',
       canRetry: true,
       canResume: true,
       details: { variationCount: variationIds.length, originalError: errorMessage },
@@ -233,8 +233,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'PRODUCT_MAPPING_FAILED',
       message: `${unmappedCount} of ${totalCount} products could not be mapped from Square catalog`,
-      userMessage: `${unmappedCount} products are not linked to Square. These will be skipped.`,
-      recoveryAction: 'Run catalog sync to link missing products, then retry extraction.',
+      userMessage: `${unmappedCount} productos no están vinculados a Square y se omitirán.`,
+      recoveryAction: 'Sincroniza el catálogo para vincular los productos faltantes y reintenta la extracción.',
       canRetry: true,
       canResume: true,
       details: { unmappedCount, totalCount, mappedCount: totalCount - unmappedCount },
@@ -246,8 +246,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'BATCH_PROCESSING_FAILED',
       message: `Failed to process batch ${batchNumber}/${totalBatches}: ${errorMessage}`,
-      userMessage: `Batch ${batchNumber} failed to process. Your progress has been saved.`,
-      recoveryAction: 'Resume the session to retry this batch.',
+      userMessage: `No se pudo procesar el bloque ${batchNumber}. Tu avance quedó guardado.`,
+      recoveryAction: 'Continúa la sesión para reintentar este bloque.',
       canRetry: true,
       canResume: true,
       batchNumber,
@@ -264,8 +264,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'PARTIAL_SUCCESS',
       message: `Processed ${processedCount}/${totalCount} items, ${failedCount} failed`,
-      userMessage: `Extraction completed with ${failedCount} items that need attention.`,
-      recoveryAction: 'Review the failed items and retry or skip them manually.',
+      userMessage: `La extracción terminó con ${failedCount} productos que requieren atención.`,
+      recoveryAction: 'Revisa los productos con error y reinténtalos u omítelos manualmente.',
       canRetry: true,
       canResume: true,
       details: { processedCount, failedCount, totalCount, failures: failures.slice(0, 10) },
@@ -277,8 +277,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'DATABASE_ERROR',
       message: `Database error during ${operation}: ${errorMessage}`,
-      userMessage: 'A database error occurred. Your recent changes may not have been saved.',
-      recoveryAction: 'Wait a moment and try again. If the problem persists, contact support.',
+      userMessage: 'Ocurrió un error de base de datos. Es posible que tus cambios recientes no se hayan guardado.',
+      recoveryAction: 'Espera un momento e inténtalo de nuevo. Si el problema continúa, contacta a soporte.',
       canRetry: true,
       canResume: true,
       details: { operation, originalError: errorMessage },
@@ -289,8 +289,8 @@ export class ExtractionError extends Error {
     return new ExtractionError({
       code: 'VALIDATION_ERROR',
       message: `Validation failed for ${field}: ${constraint}`,
-      userMessage: `Invalid input: ${constraint}`,
-      recoveryAction: 'Correct the input and try again.',
+      userMessage: `Dato no válido: ${constraint}`,
+      recoveryAction: 'Corrige el dato e inténtalo de nuevo.',
       canRetry: true,
       canResume: false,
       details: { field, value, constraint },

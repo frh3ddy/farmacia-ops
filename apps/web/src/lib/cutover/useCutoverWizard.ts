@@ -82,7 +82,7 @@ export function useCutoverWizard() {
   useEffect(() => {
     apiFetch<{ data: Location[] }>("/locations")
       .then(body => setLocations(body.data))
-      .catch((err: unknown) => setError(err instanceof ApiError ? err.message : "Failed to fetch locations"));
+      .catch((err: unknown) => setError(err instanceof ApiError ? err.message : "No se pudieron cargar las sucursales"));
     api.fetchAllSuppliers().then(setAllSuppliers).catch(() => undefined);
     api.fetchCategories().then(setAllCategories).catch(() => undefined);
   }, []);
@@ -177,7 +177,7 @@ export function useCutoverWizard() {
   );
 
   const handleContinueBatch = useCallback(async () => {
-    if (!extractionSessionId) return setError("Missing session ID. Please resume the session first.");
+    if (!extractionSessionId) return setError("Falta el ID de la sesión. Primero continúa la sesión.");
     setBatchComplete(false);
     await runExtractCosts({ continueExtraction: true });
   }, [extractionSessionId, runExtractCosts]);
@@ -185,9 +185,9 @@ export function useCutoverWizard() {
   // --- Session start / resume ---
 
   const handleStartExtraction = useCallback(async () => {
-    if (!selectedLocationId) return setError("Please select a location");
-    if (new Date(cutoverDate) > new Date()) return setError("Cutover date cannot be in the future");
-    if (batchSize < 10 || batchSize > 500) return setError("Batch size must be between 10 and 500");
+    if (!selectedLocationId) return setError("Selecciona una sucursal");
+    if (new Date(cutoverDate) > new Date()) return setError("La fecha de corte no puede ser futura");
+    if (batchSize < 10 || batchSize > 500) return setError("Los productos por bloque deben estar entre 10 y 500");
 
     const sessions = await api.fetchInProgressSessions(selectedLocationId);
     if (sessions.length > 0) {
@@ -212,12 +212,12 @@ export function useCutoverWizard() {
         const body = await apiFetch<{ success: boolean; session: ExtractionSessionSummary }>(
           `/admin/inventory/cutover/extraction-session/${sessionId}`
         );
-        if (!body.success) throw new Error("Failed to load session");
+        if (!body.success) throw new Error("No se pudo cargar la sesión");
         if (body.session.locationIds?.length > 0) setSelectedLocationId(body.session.locationIds[0]);
         if (body.session.learnedSupplierInitials) setSupplierInitialsMap(body.session.learnedSupplierInitials);
         await runExtractCosts({ continueExtraction: true, explicitSessionId: sessionId });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to resume session");
+        setError(err instanceof Error ? err.message : "No se pudo continuar la sesión");
         setLoading(false);
       }
     },
@@ -255,7 +255,7 @@ export function useCutoverWizard() {
 
   const handleDiscardItem = useCallback(
     async (productId: string) => {
-      if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
+      if (!cutoverId) return setError("Falta el ID del corte. Primero inicia la extracción.");
       const item = extractionResults.find(r => r.productId === productId);
       setHideProductImageForTransition(true);
       try {
@@ -269,7 +269,7 @@ export function useCutoverWizard() {
         setSessionItemCounts(prev => (prev ? { ...prev, skipped: prev.skipped + 1 } : prev));
         advanceAfterAction();
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Failed to discard item");
+        setError(err instanceof ApiError ? err.message : "No se pudo descartar el producto");
       } finally {
         setHideProductImageForTransition(false);
       }
@@ -279,13 +279,13 @@ export function useCutoverWizard() {
 
   const handleRestoreItem = useCallback(
     async (productId: string) => {
-      if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
+      if (!cutoverId) return setError("Falta el ID del corte. Primero inicia la extracción.");
       try {
         await api.restoreItem({ cutoverId, productId });
         updateItemStatus(productId, { migrationStatus: "PENDING" });
         setSessionItemCounts(prev => (prev ? { ...prev, skipped: Math.max(0, prev.skipped - 1) } : prev));
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Failed to restore item");
+        setError(err instanceof ApiError ? err.message : "No se pudo restaurar el producto");
       }
     },
     [cutoverId, updateItemStatus]
@@ -296,7 +296,7 @@ export function useCutoverWizard() {
    * backend's markDiscontinued always routes through the same discard logic. */
   const handleMarkDiscontinued = useCallback(
     async (productId: string) => {
-      if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
+      if (!cutoverId) return setError("Falta el ID del corte. Primero inicia la extracción.");
       const item = extractionResults.find(r => r.productId === productId);
       setHideProductImageForTransition(true);
       try {
@@ -310,7 +310,7 @@ export function useCutoverWizard() {
         setSessionItemCounts(prev => (prev ? { ...prev, skipped: prev.skipped + 1 } : prev));
         advanceAfterAction();
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Failed to mark product discontinued");
+        setError(err instanceof ApiError ? err.message : "No se pudo marcar el producto como descontinuado");
       } finally {
         setHideProductImageForTransition(false);
       }
@@ -331,7 +331,7 @@ export function useCutoverWizard() {
         }
         return true;
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Failed to set stock to 0");
+        setError(err instanceof ApiError ? err.message : "No se pudieron poner las existencias en 0");
         return false;
       }
     },
@@ -355,7 +355,7 @@ export function useCutoverWizard() {
         }
         return true;
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Failed to set price");
+        setError(err instanceof ApiError ? err.message : "No se pudo actualizar el precio");
         return false;
       }
     },
@@ -386,18 +386,18 @@ export function useCutoverWizard() {
         const [normalized] = normalizeExtractedEntries([merged], allSuppliers, supplierNameMappings, true);
         setEditedResults(prev => ({ ...prev, [productId]: normalized }));
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Failed to regenerate extraction");
+        setError(err instanceof ApiError ? err.message : "No se pudo regenerar la extracción");
       }
     },
     [extractionResults, editedResults, cutoverDate, allSuppliers, supplierNameMappings]
   );
 
   const handleReusePreviousApprovals = useCallback(async () => {
-    if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
+    if (!cutoverId) return setError("Falta el ID del corte. Primero inicia la extracción.");
     const itemsToReuse = extractionResults.filter(
       r => r.isAlreadyApproved && r.existingApprovedCost != null && r.migrationStatus !== "APPROVED"
     );
-    if (itemsToReuse.length === 0) return setError("No items with previous approvals found to reuse.");
+    if (itemsToReuse.length === 0) return setError("No hay productos con aprobaciones anteriores para reutilizar.");
 
     setLoading(true);
     setError(null);
@@ -413,7 +413,7 @@ export function useCutoverWizard() {
       );
       setSessionItemCounts(prev => (prev ? { ...prev, approved: prev.approved + approvedCount } : prev));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to reuse previous approvals");
+      setError(err instanceof ApiError ? err.message : "No se pudieron reutilizar las aprobaciones anteriores");
     } finally {
       setLoading(false);
     }
@@ -449,7 +449,7 @@ export function useCutoverWizard() {
 
   const handleApproveItem = useCallback(
     async (result: CostExtractionResult) => {
-      if (!cutoverId) return setError("Missing cutover ID. Please start extraction first.");
+      if (!cutoverId) return setError("Falta el ID del corte. Primero inicia la extracción.");
 
       // The editor passes its edited copy — possibly with a filled-in draft
       // entry committed on the fly (see ExtractionItemEditor's withDraftEntry),
@@ -459,8 +459,8 @@ export function useCutoverWizard() {
       const selectedEntry = edited.extractedEntries?.find(e => e.isSelected) ?? edited.extractedEntries?.at(-1) ?? null;
       const cost = edited.selectedCost ?? (selectedEntry ? selectedEntry.editedCost ?? selectedEntry.amount : null);
 
-      if (cost == null || cost <= 0) return setError("Please enter a valid cost");
-      if (!hasExtraction && !edited.selectedSupplierName) return setError("Please enter a supplier name");
+      if (cost == null || cost <= 0) return setError("Ingresa un costo válido");
+      if (!hasExtraction && !edited.selectedSupplierName) return setError("Ingresa el nombre del proveedor");
 
       const supplierName = edited.selectedSupplierName || selectedEntry?.editedSupplierName || selectedEntry?.supplier || "General";
       const supplierId = edited.selectedSupplierId ?? selectedEntry?.supplierId ?? null;
@@ -468,7 +468,7 @@ export function useCutoverWizard() {
       const initialsToAdd = hasExtraction && edited.extractedEntries ? collectInitialsToLearn(result, edited.extractedEntries) : [];
       if (initialsToAdd.length > 0) {
         const list = initialsToAdd.map(i => `"${i.initial}" -> "${i.supplierName}"`).join("\n");
-        if (!window.confirm(`Add the following supplier initials?\n\n${list}\n\nThis will help match similar suppliers in future extractions.`)) {
+        if (!window.confirm(`¿Agregar estas iniciales de proveedor?\n\n${list}\n\nAyudarán a identificar proveedores similares en futuras extracciones.`)) {
           return;
         }
       }
@@ -518,7 +518,7 @@ export function useCutoverWizard() {
         });
 
         if (approveResult.squareNameSynced === false) {
-          setError(`Name saved locally, but syncing to Square failed: ${approveResult.squareNameSyncError ?? "unknown error"}`);
+          setError(`El nombre se guardó aquí, pero no se pudo sincronizar con Square: ${approveResult.squareNameSyncError ?? "error desconocido"}`);
         }
 
         if (initialsToAdd.length > 0) {
@@ -553,7 +553,7 @@ export function useCutoverWizard() {
         setSessionItemCounts(prev => (prev ? { ...prev, approved: prev.approved + 1 } : prev));
         advanceAfterAction();
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Failed to approve item");
+        setError(err instanceof ApiError ? err.message : "No se pudo aprobar el producto");
       } finally {
         setHideProductImageForTransition(false);
       }
@@ -600,10 +600,10 @@ export function useCutoverWizard() {
       } else if (result.cutoverId) {
         await continueMigrationLoop(result.cutoverId);
       } else {
-        setError("Migration initiated but cutoverId not returned. Cannot continue.");
+        setError("La migración inició pero no se recibió el ID del corte. No se puede continuar.");
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Migration failed");
+      setError(err instanceof ApiError ? err.message : "Falló la migración");
       setPhase("extracting");
     } finally {
       setLoading(false);
@@ -624,7 +624,7 @@ export function useCutoverWizard() {
         setTimeout(() => continueMigrationLoop(result.cutoverId || id), 100);
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to continue migration");
+      setError(err instanceof ApiError ? err.message : "No se pudo continuar la migración");
     }
   }, []);
 
