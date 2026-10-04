@@ -60,14 +60,14 @@ describe("ExtractionItemEditor draft entry", () => {
     render(<Harness onApprove={onApprove} />);
     settle();
 
-    fireEvent.change(screen.getByPlaceholderText("Add supplier"), { target: { value: "NEW" } });
-    fireEvent.change(screen.getByPlaceholderText("Cost"), { target: { value: "12.5" } });
+    fireEvent.change(screen.getByPlaceholderText("Agregar proveedor"), { target: { value: "NEW" } });
+    fireEvent.change(screen.getByPlaceholderText("Costo"), { target: { value: "12.5" } });
 
-    expect((screen.getByLabelText("New entry will be used as the cost") as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByLabelText("Use this entry as the cost") as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText("La nueva entrada se usará como costo") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Usar esta entrada como costo") as HTMLInputElement).checked).toBe(false);
     expect(screen.getByText("$12.50")).toBeTruthy();
 
-    fireEvent.click(screen.getByText("Approve"));
+    fireEvent.click(screen.getByText("Aprobar"));
 
     const approved: CostExtractionResult = onApprove.mock.calls[0][0];
     expect(approved.selectedCost).toBe(12.5);
@@ -85,9 +85,9 @@ describe("ExtractionItemEditor double-click guard", () => {
     render(<Harness onApprove={onApprove} />);
     settle();
 
-    fireEvent.click(screen.getByText("Approve"));
-    fireEvent.click(screen.getByText("Approve"));
-    fireEvent.click(screen.getByText("Discard"));
+    fireEvent.click(screen.getByText("Aprobar"));
+    fireEvent.click(screen.getByText("Aprobar"));
+    fireEvent.click(screen.getByText("Descartar"));
 
     expect(onApprove).toHaveBeenCalledTimes(1);
   });
@@ -98,11 +98,11 @@ describe("ExtractionItemEditor double-click guard", () => {
     settle();
 
     rerender(<Harness result={makeItem("p2")} onApprove={onApprove} />);
-    fireEvent.click(screen.getByText("Approve"));
+    fireEvent.click(screen.getByText("Aprobar"));
     expect(onApprove).not.toHaveBeenCalled();
 
     settle();
-    fireEvent.click(screen.getByText("Approve"));
+    fireEvent.click(screen.getByText("Aprobar"));
     expect(onApprove).toHaveBeenCalledTimes(1);
   });
 });
