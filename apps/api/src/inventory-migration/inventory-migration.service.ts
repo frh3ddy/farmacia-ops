@@ -44,6 +44,21 @@ import { findIngredientInText, addLearnedIngredient } from '../products/referenc
 // cutover extraction loop used to run.
 const medicineByVariation = medicineByVariationRaw as Record<string, MedicineEntry>;
 
+/**
+ * Cutover extraction progress from the derived work queue (see getExtractionQueue).
+ * Batch numbers are display-only: the next page is always "the next N unreviewed".
+ */
+export function extractionProgress(totalProducts: number, remainingProducts: number, batchSize: number) {
+  const processedItems = totalProducts - remainingProducts;
+  const totalBatches = Math.max(Math.ceil(totalProducts / batchSize), 1);
+  return {
+    processedItems,
+    currentBatch: Math.min(Math.floor(processedItems / batchSize) + 1, totalBatches),
+    totalBatches,
+    isComplete: remainingProducts === 0,
+  };
+}
+
 @Injectable()
 export class InventoryMigrationService {
   private readonly logger = new Logger(InventoryMigrationService.name);
@@ -485,34 +500,92 @@ export class InventoryMigrationService {
   private async getCutoverItemsForLocations(
     locationIds: string[],
     locationById: Map<string, { id: string; squareId: string | null; name: string }>,
-  ): Promise<{ locationId: string; catalogObjectId: string; quantity: number }[]> {
-    const items: { locationId: string; catalogObjectId: string; quantity: number }[] = [];
+  ): Promise<{ locationId: string; catalogObjectId: string; productId: string; quantity: number }[]> {
+    const items: { locationId: string; catalogObjectId: string; productId: string; quantity: number }[] = [];
 
     for (const locationId of locationIds) {
       const location = locationById.get(locationId);
       if (!location?.squareId) continue;
 
       const [mappings, squareCounts] = await Promise.all([
+        // Stable order is load-bearing: extraction and migration both page
+        // through this list. Yastás service items (employeeId set /
+        // tracksInventory=false) never get FIFO stock, so they're not cutover items.
         this.prisma.catalogMapping.findMany({
-          where: { OR: [{ locationId }, { locationId: null }] },
-          select: { squareVariationId: true },
-          distinct: ['squareVariationId'],
+          where: {
+            OR: [{ locationId }, { locationId: null }],
+            employeeId: null,
+            product: { tracksInventory: true },
+          },
+          select: { squareVariationId: true, productId: true, locationId: true },
+          orderBy: [{ squareVariationId: 'asc' }, { locationId: { sort: 'asc', nulls: 'last' } }],
         }),
         this.squareInventory.fetchSquareInventory(location.squareId),
       ]);
 
       const quantityByVariation = new Map(squareCounts.map((c) => [c.catalogObjectId, c.quantity]));
 
+      // A variation can have both a location-scoped and a global mapping; the
+      // location-scoped one sorts first and wins (same rule as catalogMapper).
+      const seen = new Set<string>();
       for (const mapping of mappings) {
+        if (seen.has(mapping.squareVariationId)) continue;
+        seen.add(mapping.squareVariationId);
         items.push({
           locationId,
           catalogObjectId: mapping.squareVariationId,
+          productId: mapping.productId,
           quantity: quantityByVariation.get(mapping.squareVariationId) ?? 0,
         });
       }
     }
 
     return items;
+  }
+
+  /**
+   * The cutover work queue for one extraction session, derived from saved
+   * state rather than stored counters: every eligible product at these
+   * locations, in stable order, minus the ones this session already approved
+   * or skipped. Nothing positional is persisted, so pausing, closing the app,
+   * changing batch size, or catalog changes can't make it drift.
+   */
+  private async getExtractionQueue(
+    locationIds: string[],
+    locationById: Map<string, { id: string; squareId: string | null; name: string }>,
+    sessionCutoverId: string,
+  ) {
+    const [mergedItems, reviewed] = await Promise.all([
+      this.getCutoverItemsForLocations(locationIds, locationById),
+      this.prisma.costApproval.findMany({
+        where: { cutoverId: sessionCutoverId, migrationStatus: { in: ['APPROVED', 'SKIPPED'] } },
+        select: { productId: true },
+      }),
+    ]);
+
+    const reviewedProductIds = new Set(reviewed.map((a) => a.productId));
+
+    // All of a product's variations travel together, so a page holds whole products.
+    const itemsByProduct = new Map<string, (ItemToProcess & { productId: string })[]>();
+    for (const merged of mergedItems) {
+      const location = locationById.get(merged.locationId)!;
+      if (!itemsByProduct.has(merged.productId)) itemsByProduct.set(merged.productId, []);
+      itemsByProduct.get(merged.productId)!.push({
+        locationId: merged.locationId,
+        locationName: location.name,
+        productId: merged.productId,
+        squareInventoryItem: {
+          catalogObjectId: merged.catalogObjectId,
+          locationId: location.squareId!,
+          quantity: merged.quantity,
+          catalogObject: null,
+        },
+        itemKey: `${merged.locationId}:${merged.catalogObjectId}`,
+      });
+    }
+
+    const remainingProductIds = [...itemsByProduct.keys()].filter((pid) => !reviewedProductIds.has(pid));
+    return { itemsByProduct, totalProducts: itemsByProduct.size, remainingProductIds };
   }
 
   async extractCostsForMigration(
@@ -522,16 +595,11 @@ export class InventoryMigrationService {
     extractionSessionId?: string | null,
     newBatchSize?: number | null,
     cutoverDate?: string | null,
-    recursionDepth: number = 0,
-    cachedItems?: ItemToProcess[]
   ): Promise<CostApprovalRequest> {
     const sessionId = extractionSessionId || this.generateUUID();
     let dbSession = await this.prisma.extractionSession.findUnique({ where: { id: sessionId } });
 
-    // 1) Collect inventory items across selected locations
-    let allItems: ItemToProcess[] = cachedItems || [];
-
-    // Built unconditionally (not just on the cold-fetch path) because step 11 needs it too:
+    // Built unconditionally because step 11 needs it too:
     // Square's location_overrides are keyed by Square's own location id, not our internal
     // Location.id, so resolving a per-location price override requires this translation.
     const locations = await this.prisma.location.findMany({
@@ -539,107 +607,50 @@ export class InventoryMigrationService {
     });
     const locationById = new Map(locations.map((loc) => [loc.id, loc]));
 
-    if (allItems.length === 0) {
-      const mergedItems = await this.getCutoverItemsForLocations(locationIds, locationById);
-      for (const merged of mergedItems) {
-        const location = locationById.get(merged.locationId)!;
-        allItems.push({
-          locationId: merged.locationId,
-          locationName: location.name,
-          squareInventoryItem: {
-            catalogObjectId: merged.catalogObjectId,
-            locationId: location.squareId!,
-            quantity: merged.quantity,
-            catalogObject: null,
-          },
-          itemKey: `${merged.locationId}:${merged.catalogObjectId}`,
-        });
-      }
-    }
+    // 1) Work queue: everything not yet approved/skipped in this session
+    const sessionCutoverId = dbSession?.cutoverId || sessionId;
+    const queue = await this.getExtractionQueue(locationIds, locationById, sessionCutoverId);
 
-    // 2) Create session if not exists
+    // 2) Create session if not exists — one active session per location, so
+    // starting fresh cancels any other in-progress one (its approvals are kept).
     if (!dbSession) {
-      const eff = batchSize && batchSize > 0 ? batchSize : allItems.length;
+      await this.prisma.extractionSession.updateMany({
+        where: { status: 'IN_PROGRESS', locationIds: { hasSome: locationIds } },
+        data: { status: 'CANCELLED' },
+      });
       dbSession = await this.prisma.extractionSession.create({
         data: {
           id: sessionId,
           cutoverId: sessionId,
           locationIds,
-          currentBatch: 1,
-          totalBatches: Math.ceil(allItems.length / eff),
-          totalItems: allItems.length,
-          processedItems: 0,
-          batchSize: eff,
+          totalItems: queue.totalProducts,
+          batchSize: batchSize && batchSize > 0 ? batchSize : Math.max(queue.totalProducts, 1),
           status: 'IN_PROGRESS',
         },
       });
     }
 
-    // 3) Apply new batch size if requested
-    let effectiveBatchSize = dbSession.batchSize;
-    if (newBatchSize && newBatchSize > 0) {
-      effectiveBatchSize = newBatchSize;
-      const remainingItems = dbSession.totalItems - dbSession.processedItems;
-      const newTotalBatches = Math.ceil(remainingItems / effectiveBatchSize);
-      const newCurrentBatch = dbSession.processedItems > 0 ? Math.ceil(dbSession.processedItems / effectiveBatchSize) : 1;
+    // 3) Batch size only sets the page length — there's no position to recompute
+    const effectiveBatchSize = newBatchSize && newBatchSize > 0 ? newBatchSize : dbSession.batchSize;
 
-      await this.prisma.extractionSession.update({
-        where: { id: sessionId },
-        data: { batchSize: effectiveBatchSize, totalBatches: newTotalBatches, currentBatch: newCurrentBatch },
-      });
-      dbSession.batchSize = effectiveBatchSize;
-      dbSession.totalBatches = newTotalBatches;
-      dbSession.currentBatch = newCurrentBatch;
-    }
-
-    // 4) Figure out SKIPPED productIds for this session
-    const skippedProductIds = new Set<string>();
-    {
-      const skippedApprovals = await this.prisma.costApproval.findMany({
-        where: {
-          cutoverId: dbSession.cutoverId || sessionId,
-          migrationStatus: 'SKIPPED',
-        },
-        select: { productId: true },
-      });
-      skippedApprovals.forEach((a) => skippedProductIds.add(a.productId));
-    }
-
-    // 5) Resolve products for this page of inventory items
-    const startIndex = (dbSession.currentBatch - 1) * effectiveBatchSize;
-    const pageItems = allItems.slice(startIndex, startIndex + effectiveBatchSize);
-
-    // OPTIMIZATION: Use batchResolveProductsFromSquareVariations
-    const catalogObjectIds = pageItems.map(item => item.squareInventoryItem.catalogObjectId);
-    // Note: We have items from multiple locations, but batchResolve expects a single location or logic is slightly different.
-    // However, the items loop below processes pageItems, which might be mixed locations.
-    // batchResolveProductsFromSquareVariations takes locationId.
-    // If we have mixed locations, we should probably do it per location or group by location.
-    
-    // Group page items by location for resolution
-    const itemsByLocation = new Map<string, string[]>();
-    for (const item of pageItems) {
-      if (!itemsByLocation.has(item.locationId)) itemsByLocation.set(item.locationId, []);
-      itemsByLocation.get(item.locationId)!.push(item.squareInventoryItem.catalogObjectId);
-    }
-
-    const variationToProductMap = new Map<string, string>();
-    for (const [locId, vars] of itemsByLocation) {
-       const map = await this.catalogMapper.batchResolveProductsFromSquareVariations(vars, locId);
-       map.forEach((pid, vid) => variationToProductMap.set(vid, pid));
-    }
-
-    const resolvedItems = pageItems.map(item => {
-        const pid = variationToProductMap.get(item.squareInventoryItem.catalogObjectId);
-        // If not resolved, we might want to skip or handle error, but original logic threw or returned something.
-        // Original logic: "resolveProductFromSquareVariation" throws UnmappedProductError if not found.
-        // My batch resolve filters them out.
-        // If pid is missing, we can filter it out in the next step.
-        return { ...item, productId: pid };
+    // 4) Progress is derived, then cached on the session row for the session picker
+    const progress = extractionProgress(queue.totalProducts, queue.remainingProductIds.length, effectiveBatchSize);
+    dbSession = await this.prisma.extractionSession.update({
+      where: { id: sessionId },
+      data: {
+        batchSize: effectiveBatchSize,
+        totalItems: queue.totalProducts,
+        processedItems: progress.processedItems,
+        currentBatch: progress.currentBatch,
+        totalBatches: progress.totalBatches,
+        status: progress.isComplete ? 'COMPLETED' : 'IN_PROGRESS',
+      },
     });
 
-    // Filter out skipped products and unresolved products
-    const nonSkipped = resolvedItems.filter((i) => i.productId && !skippedProductIds.has(i.productId)) as (ItemToProcess & { productId: string })[];
+    // 5) This page = the next N unreviewed products, in queue order
+    const nonSkipped = queue.remainingProductIds
+      .slice(0, effectiveBatchSize)
+      .flatMap((pid) => queue.itemsByProduct.get(pid)!);
 
     // 6) Dedup by productId (ONE result per product)
     // Representative item used to fetch Square catalog data
@@ -1031,7 +1042,10 @@ export class InventoryMigrationService {
           imageUrl,
           sku: product.sku,
           stockQuantity: stockQuantityByProduct.get(productId) ?? 0,
-          migrationStatus: (existingApproval as any).migrationStatus || 'PENDING',
+          // Anything on this page is unreviewed in THIS session (reviewed ones are
+          // filtered out of the queue), so an approval from another cutover is only
+          // a prefill — migration reads costs from this session's approvals alone.
+          migrationStatus: 'PENDING',
 
           sellingPrices,
           sellingPrice,
@@ -1084,43 +1098,6 @@ export class InventoryMigrationService {
       }
     }
 
-    // 11) Auto-advance batch if everything in current page is already processed
-    const allItemsProcessed =
-      extractionResults.length > 0 &&
-      extractionResults.every(
-        (r) => r.migrationStatus === 'APPROVED' || r.migrationStatus === 'SKIPPED' || r.isAlreadyApproved === true,
-      );
-
-    if (
-      allItemsProcessed &&
-      dbSession &&
-      recursionDepth < 10 &&
-      (dbSession.totalBatches === null || dbSession.currentBatch < dbSession.totalBatches)
-    ) {
-      const nextBatch = dbSession.currentBatch + 1;
-      await this.prisma.extractionSession.update({
-        where: { id: sessionId },
-        data: {
-          currentBatch: nextBatch,
-          status:
-            dbSession.totalBatches !== null && nextBatch >= dbSession.totalBatches
-              ? 'COMPLETED'
-              : 'IN_PROGRESS',
-        },
-      });
-      dbSession.currentBatch = nextBatch;
-
-      return this.extractCostsForMigration(
-        locationIds,
-        costBasis,
-        null,
-        sessionId,
-        null,
-        cutoverDate ?? null,
-        recursionDepth + 1,
-      );
-    }
-
     // 12) Create / reuse extraction batch record for this batch number
     const existingBatch = await this.prisma.extractionBatch.findFirst({
       where: {
@@ -1129,31 +1106,21 @@ export class InventoryMigrationService {
       },
     });
 
-    if (!existingBatch) {
-      await this.prisma.$transaction([
-        this.prisma.extractionBatch.create({
-          data: {
-            extractionSessionId: sessionId,
-            cutoverId: dbSession.cutoverId || sessionId,
-            batchNumber: dbSession.currentBatch,
-            locationIds,
-            productIds: batchProductIds,
-            totalProducts: extractionResults.length,
-            productsWithExtraction: productsWithExtraction,
-            productsRequiringManualInput: productsRequiringManualInput,
-            status: 'EXTRACTED',
-          },
-        }),
-        this.prisma.extractionSession.update({
-          where: { id: sessionId },
-          data: {
-            status:
-              dbSession.totalBatches !== null && dbSession.currentBatch >= dbSession.totalBatches
-                ? 'COMPLETED'
-                : 'IN_PROGRESS',
-          },
-        }),
-      ]);
+    if (!existingBatch && extractionResults.length > 0) {
+      // Audit log of what each page showed; session status is set in step 4.
+      await this.prisma.extractionBatch.create({
+        data: {
+          extractionSessionId: sessionId,
+          cutoverId: dbSession.cutoverId || sessionId,
+          batchNumber: dbSession.currentBatch,
+          locationIds,
+          productIds: batchProductIds,
+          totalProducts: extractionResults.length,
+          productsWithExtraction: productsWithExtraction,
+          productsRequiringManualInput: productsRequiringManualInput,
+          status: 'EXTRACTED',
+        },
+      });
     }
 
     // 13) Fetch ALL approved and skipped items for this session (across all batches)
@@ -1211,11 +1178,11 @@ export class InventoryMigrationService {
       productsRequiringManualInput: productsRequiringManualInput,
       batchSize: effectiveBatchSize,
       currentBatch: dbSession.currentBatch,
-      totalBatches: dbSession.totalBatches ?? null,
-      processedItems: dbSession.processedItems,
-      totalItems: dbSession.totalItems,
-      isComplete: dbSession.totalBatches !== null && dbSession.currentBatch >= dbSession.totalBatches,
-      canContinue: dbSession.totalBatches === null || dbSession.currentBatch < dbSession.totalBatches,
+      totalBatches: progress.totalBatches,
+      processedItems: progress.processedItems,
+      totalItems: queue.totalProducts,
+      isComplete: progress.isComplete,
+      canContinue: !progress.isComplete,
       extractionSessionId: sessionId,
       // All approved and skipped items across ALL batches in this session
       allApprovedItems,
@@ -1245,6 +1212,23 @@ export class InventoryMigrationService {
     if (!validation.valid) throw new CutoverValidationError('Validation failed', validation.errors);
 
     const approvedCostsMap = new Map(approvedCosts.map(ac => [ac.productId, ac.cost]));
+
+    // Starting a migration locks costs for the location — refuse while the
+    // extraction session still has unreviewed products.
+    if (!cutoverId && extractionSessionId && input.costBasis === 'DESCRIPTION') {
+      const gateLocations = await this.prisma.location.findMany({ where: { id: { in: input.locationIds } } });
+      const queue = await this.getExtractionQueue(
+        input.locationIds,
+        new Map(gateLocations.map((loc) => [loc.id, loc])),
+        extractionSessionId,
+      );
+      if (queue.remainingProductIds.length > 0) {
+        throw new CutoverValidationError(
+          `Extraction not finished: ${queue.remainingProductIds.length} of ${queue.totalProducts} products still need review`,
+          [],
+        );
+      }
+    }
 
     let cutoverRecord = cutoverId
       ? await this.prisma.cutover.findUnique({ where: { id: cutoverId } })
@@ -1513,8 +1497,9 @@ export class InventoryMigrationService {
         
         // Execute Batch Insert
         if (itemsToInsert.length > 0) {
-             // We need to handle potential duplicates (unique constraint on productId, locationId, source)
-             // `createMany` with `skipDuplicates` works if database supports it (Postgres does)
+             // Inventory has no unique key, so skipDuplicates can't dedupe — the
+             // batch cursor advancing in this same transaction (below) is what
+             // keeps a retried batch from inserting opening balances twice.
              await tx.inventory.createMany({
                  data: itemsToInsert.map(i => ({
                      productId: i.productId,
@@ -1532,6 +1517,13 @@ export class InventoryMigrationService {
              result.productsProcessed += itemsToInsert.length;
         }
 
+        await tx.cutover.update({
+          where: { id: cutoverRecord.id },
+          data: {
+            currentBatch: currentBatch + 1,
+            processedItems: (cutoverRecord.processedItems || 0) + batchItems.length,
+          },
+        });
       }, { timeout: 30000 }); // Increase timeout for batch write
 
       // 5b. Best-effort: retire any newly-discontinued products' Square
@@ -2703,15 +2695,14 @@ export class InventoryMigrationService {
       throw new Error('Extraction session not found');
     }
 
-    const remainingItems = session.totalItems - session.processedItems;
-    const newTotalBatches = Math.ceil(remainingItems / newBatchSize);
-    
+    const { currentBatch, totalBatches } = extractionProgress(
+      session.totalItems,
+      session.totalItems - session.processedItems,
+      newBatchSize,
+    );
     await this.prisma.extractionSession.update({
       where: { id: extractionSessionId },
-      data: {
-        batchSize: newBatchSize,
-        totalBatches: session.currentBatch + newTotalBatches - 1,
-      },
+      data: { batchSize: newBatchSize, currentBatch, totalBatches },
     });
 
     return { success: true, batchSize: newBatchSize };
