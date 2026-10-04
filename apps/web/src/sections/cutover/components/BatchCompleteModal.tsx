@@ -34,7 +34,7 @@ export function BatchCompleteModal({ show, loading, onContinue, onReview, onPaus
             onClick={onPause}
             className="w-full rounded-sm border border-(--color-border-standard) py-2 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"
           >
-            Pause & exit
+            Back to setup
           </button>
         </div>
       </div>

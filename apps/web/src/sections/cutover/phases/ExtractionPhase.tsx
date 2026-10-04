@@ -125,7 +125,7 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
               onClick={() => setPhase("configuring")}
               className="rounded-sm border border-(--color-border-standard) px-3 py-1.5 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"
             >
-              Pause & exit
+              Back to setup
             </button>
           </div>
         </div>
