@@ -46,6 +46,16 @@ export function ProductsScreen() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Hooks must stay above the early returns below (React error #310).
+  // Single-column layout puts the panel below every row (~4k, unpaginated) — bring it into view.
+  // Two-column (lg) needs nothing: the panel is sticky.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selectedProductId && !window.matchMedia("(min-width: 64rem)").matches) {
+      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selectedProductId]);
+
   if (loading) return <p className="text-sm text-(--color-ink-tertiary)">Loading products…</p>;
   if (error)
     return (
@@ -56,18 +66,10 @@ export function ProductsScreen() {
 
   const selectedProduct = products.find(p => p.id === selectedProductId) ?? null;
 
-  // Single-column layout puts the panel below every row (~4k, unpaginated) — bring it into view.
-  // Two-column (lg) needs nothing: the panel is sticky.
-  const panelRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (selectedProductId && !window.matchMedia("(min-width: 64rem)").matches) {
-      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [selectedProductId]);
-
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      {/* -top-4/-mt-4/pt-4 cover <main>'s top padding so rows don't show through above the header. */}
+      <div className="sticky -top-4 z-10 -mt-4 mb-4 flex items-center justify-between bg-(--color-surface) pt-4 pb-3">
         <h1 className="text-xl font-semibold text-(--color-ink)">Products ({products.length})</h1>
         {selectedProductId && (
           <button
@@ -89,7 +91,8 @@ export function ProductsScreen() {
         />
 
         {selectedProductId && selectedProduct && (
-          <div ref={panelRef} className="space-y-4 lg:sticky lg:top-0 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
+          // lg:top-14 / 5.5rem assume the sticky header above stays one line (~62px tall).
+          <div ref={panelRef} className="space-y-4 lg:sticky lg:top-14 lg:max-h-[calc(100vh-5.5rem)] lg:self-start lg:overflow-y-auto">
             <SearchAliasesPanel product={selectedProduct} />
             <YastasPanel product={selectedProduct} onUpdated={updated => setProducts(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)))} />
             <ProductSupplierPanel product={selectedProduct} />
