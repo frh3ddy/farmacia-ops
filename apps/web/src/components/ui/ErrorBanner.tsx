@@ -32,7 +32,7 @@ export function ErrorBanner({ error, onRetry, onResume, onDismiss }: ErrorBanner
       <div className="flex items-start justify-between gap-2">
         <strong className={isWarning ? "text-(--color-warning)" : "text-(--color-destructive)"}>{formatted.title}</strong>
         {onDismiss && (
-          <button onClick={onDismiss} aria-label="Dismiss" className="text-(--color-ink-muted) hover:text-(--color-ink)">
+          <button onClick={onDismiss} aria-label="Cerrar" className="text-(--color-ink-muted) hover:text-(--color-ink)">
             ×
           </button>
         )}
@@ -40,7 +40,7 @@ export function ErrorBanner({ error, onRetry, onResume, onDismiss }: ErrorBanner
       <p className="mt-1 text-sm text-(--color-ink)">{formatted.message}</p>
       {formatted.recoveryAction && <p className="mt-1 text-xs italic text-(--color-ink-tertiary)">{formatted.recoveryAction}</p>}
       {formatted.code && formatted.code !== "UNKNOWN_ERROR" && (
-        <p className="mt-1 text-xs text-(--color-ink-muted)">Error code: {formatted.code}</p>
+        <p className="mt-1 text-xs text-(--color-ink-muted)">Código de error: {formatted.code}</p>
       )}
       {(onRetry || onResume) && (
         <div className="mt-3 flex gap-2">
@@ -49,7 +49,7 @@ export function ErrorBanner({ error, onRetry, onResume, onDismiss }: ErrorBanner
               onClick={onRetry}
               className="rounded-sm bg-(--color-accent) px-3 py-1.5 text-sm font-medium text-(--color-accent-contrast) hover:bg-(--color-accent-hover)"
             >
-              Try again
+              Reintentar
             </button>
           )}
           {formatted.canResume && onResume && (
@@ -57,7 +57,7 @@ export function ErrorBanner({ error, onRetry, onResume, onDismiss }: ErrorBanner
               onClick={onResume}
               className="rounded-sm bg-(--color-success) px-3 py-1.5 text-sm font-medium text-(--color-accent-contrast)"
             >
-              Resume session
+              Continuar sesión
             </button>
           )}
         </div>

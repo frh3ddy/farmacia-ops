@@ -7,20 +7,20 @@ import type { CutoverError, StructuredError } from "./types";
  * here and actually used everywhere via <ErrorBanner>.
  */
 const ERROR_TITLES: Record<string, string> = {
-  SESSION_NOT_FOUND: "Session Not Found",
-  SESSION_EXPIRED: "Session Expired",
-  SESSION_INVALID_STATE: "Invalid Session State",
-  LOCATION_NOT_FOUND: "Location Not Found",
-  LOCATION_NO_SQUARE_ID: "Square Not Connected",
-  SQUARE_INVENTORY_FETCH_FAILED: "Square Connection Error",
-  SQUARE_CATALOG_FETCH_FAILED: "Square Catalog Error",
-  PRODUCT_MAPPING_FAILED: "Product Mapping Error",
-  BATCH_PROCESSING_FAILED: "Batch Processing Failed",
-  COST_EXTRACTION_FAILED: "Cost Extraction Failed",
-  DATABASE_ERROR: "Database Error",
-  VALIDATION_ERROR: "Validation Error",
-  PARTIAL_SUCCESS: "Partial Success",
-  NETWORK_ERROR: "Connection Error",
+  SESSION_NOT_FOUND: "Sesión no encontrada",
+  SESSION_EXPIRED: "Sesión expirada",
+  SESSION_INVALID_STATE: "Estado de sesión no válido",
+  LOCATION_NOT_FOUND: "Sucursal no encontrada",
+  LOCATION_NO_SQUARE_ID: "Square no conectado",
+  SQUARE_INVENTORY_FETCH_FAILED: "Error de conexión con Square",
+  SQUARE_CATALOG_FETCH_FAILED: "Error del catálogo de Square",
+  PRODUCT_MAPPING_FAILED: "Error al vincular productos",
+  BATCH_PROCESSING_FAILED: "Falló el procesamiento del bloque",
+  COST_EXTRACTION_FAILED: "Falló la extracción de costos",
+  DATABASE_ERROR: "Error de base de datos",
+  VALIDATION_ERROR: "Error de validación",
+  PARTIAL_SUCCESS: "Éxito parcial",
+  NETWORK_ERROR: "Error de conexión",
   UNKNOWN_ERROR: "Error",
 };
 
@@ -54,8 +54,8 @@ export function networkError(err: unknown, canResume: boolean): StructuredError 
   return {
     code: "NETWORK_ERROR",
     message: err instanceof Error ? err.message : String(err),
-    userMessage: "Unable to connect to the server.",
-    recoveryAction: "Check your internet connection and try again.",
+    userMessage: "No se pudo conectar con el servidor.",
+    recoveryAction: "Revisa tu conexión a internet e inténtalo de nuevo.",
     canRetry: true,
     canResume,
   };

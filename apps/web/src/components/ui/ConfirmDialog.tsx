@@ -6,6 +6,9 @@ type BaseProps = {
   title: string;
   description: ReactNode;
   confirmLabel?: string;
+  cancelLabel?: string;
+  /** Replaces the "Type <phrase> to confirm" prompt (e.g. for a Spanish screen). */
+  phraseLabel?: ReactNode;
   destructive?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -44,6 +47,8 @@ export function ConfirmDialog({
   confirmPhrase,
   mathChallenge = false,
   confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  phraseLabel,
   destructive = false,
   onConfirm,
   onCancel,
@@ -84,9 +89,11 @@ export function ConfirmDialog({
                   to confirm
                 </>
               ) : (
-                <>
-                  Type <span className="tabular text-(--color-ink)">{confirmPhrase}</span> to confirm
-                </>
+                phraseLabel ?? (
+                  <>
+                    Type <span className="tabular text-(--color-ink)">{confirmPhrase}</span> to confirm
+                  </>
+                )
               )}
             </label>
             <input
@@ -104,7 +111,7 @@ export function ConfirmDialog({
             onClick={onCancel}
             className="rounded-sm border border-(--color-border-standard) px-3 py-1.5 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button
             onClick={onConfirm}

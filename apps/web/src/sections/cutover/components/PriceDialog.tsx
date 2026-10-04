@@ -38,7 +38,7 @@ export function PriceDialog({ open, productId, productName, onConfirm, onClose }
         setData(res);
         setChecked(new Set(res.locations.map(l => l.locationId)));
       })
-      .catch(err => !cancelled && setLoadError(err instanceof ApiError ? err.message : "Failed to load prices"));
+      .catch(err => !cancelled && setLoadError(err instanceof ApiError ? err.message : "No se pudieron cargar los precios"));
     return () => {
       cancelled = true;
     };
@@ -70,40 +70,40 @@ export function PriceDialog({ open, productId, productName, onConfirm, onClose }
     <Modal
       open={open}
       onClose={onClose}
-      title="Edit selling price"
+      title="Editar precio de venta"
       footer={
         <>
           <button
             onClick={onClose}
             className="rounded-sm border border-(--color-border-standard) px-3 py-1.5 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"
           >
-            Cancel
+            Cancelar
           </button>
           <button
             onClick={handleConfirm}
             disabled={!editable || !validPrice || checked.size === 0 || saving}
             className="rounded-sm bg-(--color-accent) px-3 py-1.5 text-sm font-medium text-(--color-accent-contrast) hover:bg-(--color-accent-hover) disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? "Updating…" : "Update in Square"}
+            {saving ? "Actualizando…" : "Actualizar en Square"}
           </button>
         </>
       }
     >
-      <p className="text-sm text-(--color-ink-secondary)">Sets the Square selling price for "{productName}" at the checked locations.</p>
+      <p className="text-sm text-(--color-ink-secondary)">Cambia el precio de venta de "{productName}" en Square para las sucursales marcadas.</p>
       {loadError ? (
         <p className="mt-4 text-sm text-(--color-destructive)">{loadError}</p>
       ) : !data ? (
-        <p className="mt-4 text-sm text-(--color-ink-tertiary)">Loading current prices…</p>
+        <p className="mt-4 text-sm text-(--color-ink-tertiary)">Cargando precios actuales…</p>
       ) : data.variationCount !== 1 ? (
         <p className="mt-4 text-sm text-(--color-warning)">
-          This product has {data.variationCount} Square variations — edit its prices in Square.
+          Este producto tiene {data.variationCount} variaciones en Square; edita sus precios directamente en Square.
         </p>
       ) : !data.currency ? (
-        <p className="mt-4 text-sm text-(--color-warning)">This product has no price in Square yet — set one in Square first.</p>
+        <p className="mt-4 text-sm text-(--color-warning)">Este producto aún no tiene precio en Square; primero asígnale uno en Square.</p>
       ) : (
         <>
           <label htmlFor="price-dialog-input" className="mt-4 block text-xs font-medium text-(--color-ink-tertiary)">
-            New price ({data.currency})
+            Nuevo precio ({data.currency})
           </label>
           <input
             id="price-dialog-input"

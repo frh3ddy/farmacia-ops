@@ -67,7 +67,7 @@ export function buildSessionPlaceholders(result: ExtractCostsResult): CostExtrac
   for (const item of result.allApprovedItems ?? []) {
     placeholders.push({
       productId: item.productId,
-      productName: item.productName ?? "Unknown Product",
+      productName: item.productName ?? "Producto desconocido",
       originalDescription: "",
       imageUrl: item.imageUrl,
       selectedCost: item.approvedCost,
@@ -84,7 +84,7 @@ export function buildSessionPlaceholders(result: ExtractCostsResult): CostExtrac
   for (const item of result.allSkippedItems ?? []) {
     placeholders.push({
       productId: item.productId,
-      productName: item.productName ?? "Unknown Product",
+      productName: item.productName ?? "Producto desconocido",
       originalDescription: "",
       imageUrl: item.imageUrl,
       migrationStatus: "SKIPPED",

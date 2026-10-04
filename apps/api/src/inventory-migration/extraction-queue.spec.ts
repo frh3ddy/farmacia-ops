@@ -86,6 +86,6 @@ describe('executeInventoryMigration gate', () => {
         null,
         's1',
       ),
-    ).rejects.toThrow('2 of 3 products still need review');
+    ).rejects.toThrow('faltan 2 de 3 productos por revisar');
   });
 });

@@ -11,9 +11,9 @@ export function SupplierInitialsPanel({ supplierInitialsMap, onClear, onRemove }
   return (
     <div className="rounded-md border border-(--color-accent) bg-(--color-accent)/5 p-4">
       <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-(--color-accent)">Supplier initials learned ({entries.length})</h4>
+        <h4 className="text-sm font-semibold text-(--color-accent)">Iniciales de proveedor aprendidas ({entries.length})</h4>
         <button onClick={onClear} className="text-xs font-medium text-(--color-accent) hover:text-(--color-accent-hover)">
-          Clear all
+          Borrar todo
         </button>
       </div>
       <div className="space-y-2">
@@ -27,12 +27,12 @@ export function SupplierInitialsPanel({ supplierInitialsMap, onClear, onRemove }
               <span className="text-(--color-ink-secondary)">{initials.join(", ")}</span>
             </div>
             <button onClick={() => onRemove(supplierName)} className="ml-2 text-xs text-(--color-destructive) hover:opacity-80">
-              Remove
+              Quitar
             </button>
           </div>
         ))}
       </div>
-      <p className="mt-2 text-xs text-(--color-accent)">These will be saved when you approve items, to help match suppliers in future extractions.</p>
+      <p className="mt-2 text-xs text-(--color-accent)">Se guardarán al aprobar productos, para identificar proveedores en futuras extracciones.</p>
     </div>
   );
 }

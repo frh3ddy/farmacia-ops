@@ -7,10 +7,10 @@ import type { CostBasis } from "../../../lib/cutover/types";
 type ConfigurationPhaseProps = { wizard: ReturnType<typeof useCutoverWizard> };
 
 const COST_METHODS: { value: CostBasis; label: string }[] = [
-  { value: "DESCRIPTION", label: "Description extraction" },
-  { value: "SQUARE_COST", label: "Square cost" },
-  { value: "MANUAL_INPUT", label: "Manual input" },
-  { value: "AVERAGE_COST", label: "Average cost" },
+  { value: "DESCRIPTION", label: "Extraer de la descripción" },
+  { value: "SQUARE_COST", label: "Costo en Square" },
+  { value: "MANUAL_INPUT", label: "Captura manual" },
+  { value: "AVERAGE_COST", label: "Costo promedio" },
 ];
 
 export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
@@ -53,14 +53,14 @@ export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h2 className="text-2xl font-bold text-(--color-ink)">Inventory Migration — Configuration</h2>
+      <h2 className="text-2xl font-bold text-(--color-ink)">Corte de inventario — Configuración</h2>
 
       <ErrorBanner error={error} onRetry={handleStartExtraction} onDismiss={() => setError(null)} />
 
       <div className="space-y-6">
         <div>
           <label className="mb-2 block text-sm font-medium text-(--color-ink-secondary)">
-            Location <span className="text-(--color-destructive)">*</span>
+            Sucursal <span className="text-(--color-destructive)">*</span>
           </label>
           <div className="space-y-2">
             {locations.map(loc => (
@@ -83,7 +83,7 @@ export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
 
         <div>
           <label className="mb-2 block text-sm font-medium text-(--color-ink-secondary)">
-            Cutover date <span className="text-(--color-destructive)">*</span>
+            Fecha de corte <span className="text-(--color-destructive)">*</span>
           </label>
           <input
             type="date"
@@ -96,7 +96,7 @@ export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
 
         <div>
           <label className="mb-2 block text-sm font-medium text-(--color-ink-secondary)">
-            Cost method <span className="text-(--color-destructive)">*</span>
+            Método de costeo <span className="text-(--color-destructive)">*</span>
           </label>
           <select
             value={costBasis}
@@ -112,7 +112,7 @@ export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
         </div>
 
         <div>
-          <label className="mb-2 block text-sm font-medium text-(--color-ink-secondary)">Batch quantity</label>
+          <label className="mb-2 block text-sm font-medium text-(--color-ink-secondary)">Productos por bloque</label>
           <input
             type="number"
             min={10}
@@ -122,7 +122,7 @@ export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
             onBlur={handleBatchSizeBlur}
             className="tabular w-full rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-3 py-2 text-sm text-(--color-ink) focus:border-(--color-accent) focus:outline-none"
           />
-          <p className="mt-1 text-xs text-(--color-ink-tertiary)">Between 10 and 500 items per batch.</p>
+          <p className="mt-1 text-xs text-(--color-ink-tertiary)">Entre 10 y 500 productos por bloque.</p>
         </div>
 
         <button
@@ -130,7 +130,7 @@ export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
           disabled={loading || !selectedLocationId}
           className="w-full rounded-sm bg-(--color-accent) py-2.5 text-sm font-medium text-(--color-accent-contrast) hover:bg-(--color-accent-hover) disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? "Starting…" : "Start extraction session"}
+          {loading ? "Iniciando…" : "Iniciar sesión de extracción"}
         </button>
       </div>
 

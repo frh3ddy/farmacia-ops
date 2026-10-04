@@ -35,7 +35,7 @@ export function ZeroStockDialog({ open, productId, productName, onConfirm, onClo
         setLocations(locs);
         setChecked(new Set(locs.map(l => l.locationId)));
       })
-      .catch(err => !cancelled && setLoadError(err instanceof ApiError ? err.message : "Failed to load stock"));
+      .catch(err => !cancelled && setLoadError(err instanceof ApiError ? err.message : "No se pudieron cargar las existencias"));
     return () => {
       cancelled = true;
     };
@@ -62,34 +62,34 @@ export function ZeroStockDialog({ open, productId, productName, onConfirm, onClo
     <Modal
       open={open}
       onClose={onClose}
-      title="Mark as 0 stock?"
+      title="¿Marcar con 0 existencias?"
       footer={
         <>
           <button
             onClick={onClose}
             className="rounded-sm border border-(--color-border-standard) px-3 py-1.5 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"
           >
-            Cancel
+            Cancelar
           </button>
           <button
             onClick={handleConfirm}
             disabled={!locations || checked.size === 0 || saving}
             className="rounded-sm bg-(--color-destructive) px-3 py-1.5 text-sm font-medium text-(--color-accent-contrast) disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? "Updating…" : "Set to 0 in Square"}
+            {saving ? "Actualizando…" : "Poner en 0 en Square"}
           </button>
         </>
       }
     >
       <p className="text-sm text-(--color-ink-secondary)">
-        Sets Square's count for "{productName}" to 0 at the checked locations. The migration reads this count, so it
-        starts at 0 stock.
+        Pone en 0 las existencias de "{productName}" en Square para las sucursales marcadas. La migración usa este conteo,
+        así que el producto empezará con 0 existencias.
       </p>
       <div className="mt-4 space-y-1.5">
         {loadError ? (
           <p className="text-sm text-(--color-destructive)">{loadError}</p>
         ) : !locations ? (
-          <p className="text-sm text-(--color-ink-tertiary)">Loading current stock…</p>
+          <p className="text-sm text-(--color-ink-tertiary)">Cargando existencias actuales…</p>
         ) : (
           locations.map(loc => (
             <label
