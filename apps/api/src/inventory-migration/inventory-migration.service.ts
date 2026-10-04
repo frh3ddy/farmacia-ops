@@ -1036,7 +1036,7 @@ export class InventoryMigrationService {
           extractionErrors: [],
           requiresManualReview: guard.isCostTooHigh ? true : false,
           isAlreadyApproved: true,
-          existingApprovedCost: existingApproval.approvedCost,
+          existingApprovedCost: existingApproval.approvedCost.toNumber(),
           existingApprovalDate: existingApproval.approvedAt,
           existingCutoverId: existingApproval.cutoverId,
           imageUrl,
