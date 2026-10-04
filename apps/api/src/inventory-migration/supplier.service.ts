@@ -51,6 +51,22 @@ export class SupplierService {
     const trimmed = name.trim();
     const normalized = this.normalizeSupplierName(trimmed);
 
+    // A typed abbreviation ("Fc", "Ga") is an existing supplier's initial, not a
+    // new supplier — creating one here is how duplicates like "Fc" next to
+    // "Center" appeared. Only used when no supplier has that exact name and
+    // exactly one active supplier claims the initial.
+    const byName = await this.prisma.supplier.findUnique({ where: { normalizedName: normalized } });
+    if (!byName) {
+      const byInitial = await this.prisma.$queryRaw<
+        { id: string; name: string; initials: string[]; contactInfo: string | null; isActive: boolean }[]
+      >`
+        SELECT id, name, initials, "contactInfo", "isActive" FROM "Supplier"
+        WHERE "isActive" AND EXISTS (SELECT 1 FROM unnest(initials) i WHERE lower(i) = lower(${trimmed}))
+        LIMIT 2
+      `;
+      if (byInitial.length === 1) return byInitial[0];
+    }
+
     // Upsert by normalizedName - atomic and race-free
     const supplier = await this.prisma.supplier.upsert({
       where: {
