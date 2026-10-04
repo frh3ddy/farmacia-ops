@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "../apiFetch";
 import type { Location } from "../types";
 import * as api from "./api";
-import { buildSessionPlaceholders, fetchSessionExtras, mergeBatchResults, normalizeExtractedEntries } from "./extractionBatch";
+import { buildSessionPlaceholders, fetchSessionExtras, loadDrafts, mergeBatchResults, normalizeExtractedEntries, saveDrafts } from "./extractionBatch";
 import { networkError } from "./errorFormat";
 import { findAutoSelectMatch, getSupplierSuggestions, type SupplierNameMapping } from "./supplierMatching";
 import type {
@@ -129,6 +129,9 @@ export function useCutoverWizard() {
         );
         const placeholders = buildSessionPlaceholders(result);
         const merged = opts.continueExtraction ? mergeBatchResults(normalized, placeholders, true) : normalized;
+        // Read before any setState: the session-id update below renders (across the
+        // fetchSessionExtras await) before this page's results land.
+        const drafts = result.extractionSessionId ? loadDrafts(result.extractionSessionId) : {};
 
         if (result.extractionSessionId) {
           setExtractionSessionId(result.extractionSessionId);
@@ -147,7 +150,7 @@ export function useCutoverWizard() {
         setEditedResults(prev => {
           const keep = new Set(normalized.map(r => r.productId));
           const filtered: typeof prev = {};
-          for (const id of keep) if (prev[id]) filtered[id] = prev[id];
+          for (const id of keep) if (prev[id] ?? drafts[id]) filtered[id] = prev[id] ?? drafts[id];
           return filtered;
         });
         setExtractionResults(merged);
@@ -239,6 +242,16 @@ export function useCutoverWizard() {
   useEffect(() => {
     extractionResultsRef.current = extractionResults;
   }, [extractionResults]);
+
+  // Mirror unapproved edits so closing the app doesn't lose them (see saveDrafts)
+  useEffect(() => {
+    // An empty page means results haven't landed yet — saving would wipe the drafts.
+    if (!extractionSessionId || extractionResults.length === 0) return;
+    const pendingIds = new Set(
+      extractionResults.filter(r => !r.migrationStatus || r.migrationStatus === "PENDING").map(r => r.productId)
+    );
+    saveDrafts(extractionSessionId, editedResults, pendingIds);
+  }, [extractionSessionId, extractionResults, editedResults]);
 
   const handleDiscardItem = useCallback(
     async (productId: string) => {

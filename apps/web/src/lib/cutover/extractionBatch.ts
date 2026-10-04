@@ -145,3 +145,29 @@ export async function fetchSessionExtras(sessionId: string): Promise<SessionExtr
     return { currentBatchId: null, learnedSupplierInitials: null, itemsByStatus: null };
   }
 }
+
+/** Unapproved edits survive closing the app: every edit lands in
+ * editedResults, which is mirrored to localStorage per session and merged
+ * back when that session's page loads again. Approve/skip already persist
+ * server-side, so only still-pending items are kept.
+ * ponytail: browser-local, so drafts resume on the same device only —
+ * move to a server-side draft column if reviews hop between devices. */
+const draftsKey = (sessionId: string) => `cutover-drafts:${sessionId}`;
+
+export function loadDrafts(sessionId: string): Record<string, CostExtractionResult> {
+  try {
+    return JSON.parse(localStorage.getItem(draftsKey(sessionId)) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function saveDrafts(sessionId: string, edited: Record<string, CostExtractionResult>, pendingIds: Set<string>) {
+  const drafts = Object.fromEntries(Object.entries(edited).filter(([id]) => pendingIds.has(id)));
+  try {
+    if (Object.keys(drafts).length === 0) localStorage.removeItem(draftsKey(sessionId));
+    else localStorage.setItem(draftsKey(sessionId), JSON.stringify(drafts));
+  } catch {
+    // Storage blocked/full — drafts just won't survive a reload, same as before.
+  }
+}
