@@ -93,7 +93,7 @@ export interface CostExtractionResult {
   migrationStatus?: MigrationStatus; // Migration status: PENDING, APPROVED, SKIPPED
   // Already approved cost metadata
   isAlreadyApproved?: boolean; // Whether this product already has an approved cost
-  existingApprovedCost?: Prisma.Decimal; // The existing approved cost amount
+  existingApprovedCost?: number; // The existing approved cost amount (a number: a Decimal serializes to a string)
   existingApprovalDate?: Date; // When the cost was approved
   existingCutoverId?: string; // Which cutover the approval is from
 }
