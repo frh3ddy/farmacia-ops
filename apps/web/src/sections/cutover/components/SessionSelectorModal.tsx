@@ -13,11 +13,12 @@ function projectBatches(session: ExtractionSessionSummary, newBatchSize: number)
   if (!newBatchSize || newBatchSize === session.batchSize) {
     return { currentBatch: session.currentBatch, totalBatches: session.totalBatches, batchSize: session.batchSize };
   }
+  // Same formula as the API's extractionProgress: batches count from the start of the catalog.
   const processed = session.processedItems ?? 0;
-  const remaining = (session.totalItems ?? 0) - processed;
+  const totalBatches = Math.max(Math.ceil((session.totalItems ?? 0) / newBatchSize), 1);
   return {
-    currentBatch: processed > 0 ? Math.ceil(processed / newBatchSize) : 1,
-    totalBatches: Math.ceil(remaining / newBatchSize),
+    currentBatch: Math.min(Math.floor(processed / newBatchSize) + 1, totalBatches),
+    totalBatches,
     batchSize: newBatchSize,
   };
 }
