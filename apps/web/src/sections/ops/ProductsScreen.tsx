@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Table, type Column } from "../../components/ui/Table";
 import { apiFetch, ApiError } from "../../lib/apiFetch";
 import type { Employee, Product, ProductSupplier, ProductSupplierCostHistoryGroup } from "../../lib/ops/types";
@@ -56,6 +56,15 @@ export function ProductsScreen() {
 
   const selectedProduct = products.find(p => p.id === selectedProductId) ?? null;
 
+  // Single-column layout puts the panel below every row (~4k, unpaginated) — bring it into view.
+  // Two-column (lg) needs nothing: the panel is sticky.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selectedProductId && !window.matchMedia("(min-width: 64rem)").matches) {
+      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selectedProductId]);
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
@@ -80,7 +89,7 @@ export function ProductsScreen() {
         />
 
         {selectedProductId && selectedProduct && (
-          <div className="space-y-4">
+          <div ref={panelRef} className="space-y-4 lg:sticky lg:top-0 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
             <SearchAliasesPanel product={selectedProduct} />
             <YastasPanel product={selectedProduct} onUpdated={updated => setProducts(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)))} />
             <ProductSupplierPanel product={selectedProduct} />
