@@ -695,8 +695,12 @@ export class InventoryAdjustmentService {
     return this.prisma.inventoryAdjustment.findMany({
       where: {
         locationId,
-        ...(options?.startDate && { adjustedAt: { gte: options.startDate } }),
-        ...(options?.endDate && { adjustedAt: { lte: options.endDate } }),
+        ...((options?.startDate || options?.endDate) && {
+          adjustedAt: {
+            ...(options?.startDate && { gte: options.startDate }),
+            ...(options?.endDate && { lte: options.endDate }),
+          },
+        }),
         ...(options?.type && { type: options.type }),
       },
       include: {

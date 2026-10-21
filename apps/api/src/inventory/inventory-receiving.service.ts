@@ -444,8 +444,12 @@ export class InventoryReceivingService {
     return this.prisma.inventoryReceiving.findMany({
       where: {
         locationId,
-        ...(options?.startDate && { receivedAt: { gte: options.startDate } }),
-        ...(options?.endDate && { receivedAt: { lte: options.endDate } }),
+        ...((options?.startDate || options?.endDate) && {
+          receivedAt: {
+            ...(options?.startDate && { gte: options.startDate }),
+            ...(options?.endDate && { lte: options.endDate }),
+          },
+        }),
         ...(options?.supplierId && { supplierId: options.supplierId }),
         ...(options?.productId && { productId: options.productId }),
       },
