@@ -403,10 +403,16 @@ export function useCutoverWizard() {
     setError(null);
     try {
       const productIds = itemsToReuse.map(r => r.productId);
-      const { approvedCount } = await api.reusePreviousApprovals(cutoverId, productIds);
+      const { approvedCount, products } = await api.reusePreviousApprovals(cutoverId, productIds);
+      // Mark only what the server actually copied — anything it skipped is
+      // still pending there, and would reappear on the next batch.
+      const reused = new Set(products);
+      if (reused.size < productIds.length) {
+        setError(`${productIds.length - reused.size} producto(s) no se pudieron reutilizar; revísalos manualmente.`);
+      }
       setExtractionResults(prev =>
         prev.map(r =>
-          productIds.includes(r.productId)
+          reused.has(r.productId)
             ? { ...r, migrationStatus: "APPROVED", selectedCost: r.existingApprovedCost ?? r.selectedCost, isAlreadyApproved: false }
             : r
         )
@@ -635,10 +641,8 @@ export function useCutoverWizard() {
   };
 
   useEffect(() => {
-    if (phase !== "extracting" || loading) {
-      if (loading) setBatchComplete(false);
-      return;
-    }
+    // Leaving extraction (e.g. "Revisar e iniciar migración") must close the modal too.
+    if (phase !== "extracting" || loading) return setBatchComplete(false);
     if (extractionResults.length === 0) return setBatchComplete(false);
     const stillExtracting = extractionResults.filter(r => r.migrationStatus !== "SKIPPED" && r.migrationStatus !== "APPROVED");
     setBatchComplete(stillExtracting.length === 0);
