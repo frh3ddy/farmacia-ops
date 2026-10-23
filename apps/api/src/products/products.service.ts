@@ -5,6 +5,7 @@ import { Prisma, PackagingType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { deriveName, derivePresentation, type Substance } from './derived-naming';
 import { normalizeSearchAliases } from './catalog-search';
+import { findSearchMatchIds, sortByIdOrder } from './product-search';
 
 // Currency constant - must match Square merchant account currency
 // Square merchant is configured with USD
@@ -1116,6 +1117,11 @@ export class ProductsService {
     return { imageId, imageUrl };
   }
 
+  /** Ranked product ids for a free-text search — see product-search.ts. */
+  private findSearchMatchIds(search: string, locationId?: string): Promise<string[]> {
+    return findSearchMatchIds(search, (sql) => this.prisma.$queryRaw<{ id: string }[]>(sql), locationId);
+  }
+
   /**
    * Get products with optional pagination and search
    *
@@ -1163,6 +1169,11 @@ export class ProductsService {
     // Build a `where` clause for optional search
     let where: any = {};
     let exactMatch = false;
+    // Ids of a text search, already in relevance order (null = not a text
+    // search). Ranking has to happen in SQL — see product-search.ts — so the
+    // requested page is sliced out of this list and `findMany` only hydrates
+    // those rows, keeping the order via sortByIdOrder below.
+    let rankedIds: string[] | null = null;
 
     if (search && exact) {
       // EXACT mode: first try exact SKU match (case-insensitive)
@@ -1177,37 +1188,34 @@ export class ProductsService {
         where = exactWhere;
         exactMatch = true;
       } else {
-        // Fallback to contains search across all fields
-        where.OR = [
-          { name: { contains: search, mode: 'insensitive' } },
-          { squareProductName: { contains: search, mode: 'insensitive' } },
-          { sku: { contains: search, mode: 'insensitive' } },
-        ];
+        // Misread/partial barcode — fall back to the same ranked fuzzy search
+        // the product list uses, so the scanner's candidate list is useful.
+        rankedIds = await this.findSearchMatchIds(search, locationId);
         exactMatch = false;
       }
     } else if (search) {
-      // Normal contains search (existing behavior)
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { squareProductName: { contains: search, mode: 'insensitive' } },
-        { sku: { contains: search, mode: 'insensitive' } },
-      ];
+      rankedIds = await this.findSearchMatchIds(search, locationId);
+    }
+
+    if (rankedIds) {
+      where = { id: { in: rankedIds.slice(skip, skip + limit) } };
     }
 
     // Fetch total count and page of products in parallel
     const [totalCount, products] = await Promise.all([
-      this.prisma.product.count({ where }),
+      rankedIds ? Promise.resolve(rankedIds.length) : this.prisma.product.count({ where }),
       this.prisma.product.findMany({
         where,
         include: includeBlock,
         orderBy: { createdAt: 'desc' },
-        skip,
+        // The page was already sliced out of rankedIds above.
+        skip: rankedIds ? 0 : skip,
         take: limit,
       }),
     ]);
 
     // Transform products to include computed fields
-    const transformedProducts = products.map((product) => {
+    const transformedProducts = (rankedIds ? sortByIdOrder(products, rankedIds) : products).map((product) => {
       // Prefer location-specific mapping, fall back to global
       const mapping = locationId 
         ? (product.catalogMappings.find(m => m.locationId === locationId) 
