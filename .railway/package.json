@@ -1,0 +1,9 @@
+{
+  "name": "farmacia-ops-railway-iac",
+  "private": true,
+  "type": "module",
+  "description": "Railway IaC SDK for railway.ts — kept out of the app workspaces so it never enters an app build.",
+  "devDependencies": {
+    "railway": "3.16.0"
+  }
+}
