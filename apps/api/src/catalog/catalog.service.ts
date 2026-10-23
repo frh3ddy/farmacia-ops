@@ -51,6 +51,18 @@ export function mappingPriceFields(priceCents: number | null | undefined, curren
   return { priceCents: new Prisma.Decimal(priceCents), currency: currency || 'USD', priceSyncedAt: new Date() };
 }
 
+/**
+ * Variation -> product across mapping scopes, preferring the global mapping
+ * (locationId null) over a location-scoped one.
+ */
+export function productByVariation<P>(mappings: { squareVariationId: string; locationId: string | null; product: P }[]) {
+  const byVariation = new Map<string, P>();
+  for (const m of [...mappings].sort((a, b) => Number(a.locationId !== null) - Number(b.locationId !== null))) {
+    if (!byVariation.has(m.squareVariationId)) byVariation.set(m.squareVariationId, m.product);
+  }
+  return byVariation;
+}
+
 export function isPlaceholderProductName(name: string | null | undefined): boolean {
   return !name || PLACEHOLDER_NAMES.has(name.trim().toLowerCase());
 }
@@ -323,6 +335,17 @@ export class CatalogService {
     });
     const mappingMap = new Map(existingMappings.map((m) => [m.squareVariationId, m]));
 
+    // The same variation mapped in any scope (global, or another location)
+    // already has its product. Without this, a location sync found no mapping
+    // for that location and, for a SKU-less variation, created a duplicate.
+    // Unfiltered by scope on purpose: the in-scope mapping is checked first.
+    const anyScopeProductMap = productByVariation(
+      await this.prisma.catalogMapping.findMany({
+        where: { squareVariationId: { in: variationIds } },
+        include: { product: true },
+      }),
+    );
+
     // Fetch Products by SKU
     const skus = variations
       .map((v) => v.itemVariationData?.sku)
@@ -338,7 +361,7 @@ export class CatalogService {
     
     // Helper to get cached product
     const getCachedProduct = (varId: string, sku: string | null) => {
-        let p = mappingMap.get(varId)?.product || null;
+        let p = mappingMap.get(varId)?.product || anyScopeProductMap.get(varId) || null;
         if (!p && sku) p = productBySkuMap.get(sku) || null;
         return p;
     };
