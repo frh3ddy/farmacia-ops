@@ -41,6 +41,16 @@ interface CatalogData {
  */
 const PLACEHOLDER_NAMES = new Set(['regular', 'sin variación', 'sin variacion', 'no variation', 'unknown']);
 
+/**
+ * Price columns for a CatalogMapping write. Empty when Square gave no price
+ * (e.g. the item-detail fetch failed): a resync must keep the cached price,
+ * not overwrite it with null.
+ */
+export function mappingPriceFields(priceCents: number | null | undefined, currency: string | null | undefined) {
+  if (priceCents == null || !Number.isFinite(priceCents)) return {};
+  return { priceCents: new Prisma.Decimal(priceCents), currency: currency || 'USD', priceSyncedAt: new Date() };
+}
+
 export function isPlaceholderProductName(name: string | null | undefined): boolean {
   return !name || PLACEHOLDER_NAMES.has(name.trim().toLowerCase());
 }
@@ -445,17 +455,8 @@ export class CatalogService {
             }
 
             // B. UPSERT MAPPING (with price data)
-            const hasPrice = catalogData.priceCents !== null && catalogData.priceCents !== undefined && Number.isFinite(catalogData.priceCents);
-            const priceData = {
-              priceCents: hasPrice && catalogData.priceCents !== null
-                ? new Prisma.Decimal(catalogData.priceCents) 
-                : null,
-              currency: catalogData.currency || 'USD',
-              priceSyncedAt: hasPrice ? new Date() : null,
-            };
-            
-            // Log when saving price for debugging
-            if (hasPrice && catalogData.priceCents !== null) {
+            const priceData = mappingPriceFields(catalogData.priceCents, catalogData.currency);
+            if (priceData.priceCents) {
               this.logger.debug(`[CATALOG_SYNC] Saving price for variation ${variationId}: ${catalogData.priceCents} cents (${priceData.currency})`);
             }
 
