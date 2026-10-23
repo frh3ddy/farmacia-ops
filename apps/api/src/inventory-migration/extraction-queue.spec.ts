@@ -1,4 +1,4 @@
-import { InventoryMigrationService, extractionProgress } from './inventory-migration.service';
+import { InventoryMigrationService, extractionProgress, latestApprovedByProduct } from './inventory-migration.service';
 
 // One location; p1 has two variations (one with both a location-scoped and a
 // global mapping), p2 and p3 one each. p2 was already approved in session s1.
@@ -87,5 +87,19 @@ describe('executeInventoryMigration gate', () => {
         's1',
       ),
     ).rejects.toThrow('faltan 2 de 3 productos por revisar');
+  });
+});
+
+describe('latestApprovedByProduct', () => {
+  it('offers only approved costs for reuse, never a discarded product', () => {
+    // Newest first, as the extraction query orders them.
+    const reusable = latestApprovedByProduct([
+      { productId: 'regular', migrationStatus: 'SKIPPED', cutoverId: 's3' },
+      { productId: 'jarabe', migrationStatus: 'SKIPPED', cutoverId: 's3' },
+      { productId: 'jarabe', migrationStatus: 'APPROVED', cutoverId: 's2' },
+      { productId: 'jarabe', migrationStatus: 'APPROVED', cutoverId: 's1' },
+    ]);
+    expect([...reusable.keys()]).toEqual(['jarabe']);
+    expect(reusable.get('jarabe')!.cutoverId).toBe('s2');
   });
 });
