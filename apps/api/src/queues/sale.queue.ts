@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 
+export const FAILED_JOB_RETENTION_SECONDS = 30 * 24 * 60 * 60;
+
 @Injectable()
 export class SaleQueue {
   private readonly logger = new Logger(SaleQueue.name);
@@ -16,7 +18,11 @@ export class SaleQueue {
         attempts: 5,
         backoff: { type: 'exponential', delay: 5000 },
         removeOnComplete: true,
-        removeOnFail: true, // Remove failed jobs so they don't block retries with same jobId
+        // Keep failed sales for 30 days so they can be inspected and replayed
+        // (job.retry()). `true` deleted them after the last attempt, losing the
+        // sale with no record. While kept, a re-delivered event with the same
+        // jobId is a no-op add — replay the failed job instead.
+        removeOnFail: { age: FAILED_JOB_RETENTION_SECONDS },
       },
     });
   }
