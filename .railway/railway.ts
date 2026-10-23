@@ -15,7 +15,7 @@ export default defineRailway(() => {
   const postgresVolume = volume("postgres-volume", { alerts: { usage: { "100": {}, "80": {}, "95": {} } }, allowOnlineResize: true, region: "us-west2", sizeMB: 500 });
   const api = service("api", {
     source: farmaciaOps,
-    build: { buildCommand: "npm run build:web && npm run build:api", buildEnvironment: "V3", builder: "RAILPACK", watchPatterns: ["/apps/api/**", "/apps/web/**", "**/*.toml"] },
+    build: { buildCommand: "npm run build:web && npm run build:api", buildEnvironment: "V3", builder: "RAILPACK", watchPatterns: ["/apps/api/**", "/apps/web/**"] },
     start: "npm run start:api",
     replicas: { "us-west2": 1 },
   });
