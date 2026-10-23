@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { deriveName, derivePresentation, type Substance } from './derived-naming';
 import { normalizeSearchAliases } from './catalog-search';
 import { findSearchMatchIds, sortByIdOrder } from './product-search';
+import { productsWithoutCostSql, type ProductWithoutCost } from './products-without-cost';
 
 // Currency constant - must match Square merchant account currency
 // Square merchant is configured with USD
@@ -1115,6 +1116,11 @@ export class ProductsService {
       (catalogImage as any)?.imageData?.url || null;
 
     return { imageId, imageUrl };
+  }
+
+  /** Square-synced products with no cost yet — see products-without-cost.ts. */
+  async findWithoutCost(): Promise<{ success: true; data: ProductWithoutCost[] }> {
+    return { success: true, data: await this.prisma.$queryRaw<ProductWithoutCost[]>(productsWithoutCostSql) };
   }
 
   /** Ranked product ids for a free-text search — see product-search.ts. */

@@ -542,6 +542,18 @@ export class ProductsController {
   }
 
   /**
+   * Square-synced products that never got a cost (no inventory batches)
+   * GET /products/without-cost
+   * Roles: OWNER, MANAGER
+   * NOTE: Must be BEFORE @Get(':id') so "without-cost" is not captured as an id param.
+   */
+  @Get('without-cost')
+  @Roles('OWNER', 'MANAGER')
+  async getProductsWithoutCost() {
+    return this.productsService.findWithoutCost();
+  }
+
+  /**
    * Lightweight stock/margin alert counts for a location
    * GET /products/counts?locationId=...
    * Roles: All authenticated users

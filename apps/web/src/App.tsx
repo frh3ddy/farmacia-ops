@@ -4,6 +4,7 @@ import { NAV_SECTIONS } from "./lib/navigation";
 import { LocationsScreen } from "./sections/ops/LocationsScreen";
 import { ProductsScreen } from "./sections/ops/ProductsScreen";
 import { AddProductScreen } from "./sections/ops/AddProductScreen";
+import { ProductsWithoutCostScreen } from "./sections/ops/ProductsWithoutCostScreen";
 import { BreakBulkScreen } from "./sections/ops/BreakBulkScreen";
 import { TransfersScreen } from "./sections/ops/TransfersScreen";
 import { CatalogSearchScreen } from "./sections/ops/CatalogSearchScreen";
@@ -23,6 +24,7 @@ const SCREENS: Record<string, ComponentType> = {
   locations: LocationsScreen,
   products: ProductsScreen,
   "add-product": AddProductScreen,
+  "products-without-cost": ProductsWithoutCostScreen,
   "break-bulk": BreakBulkScreen,
   transfers: TransfersScreen,
   "catalog-search": CatalogSearchScreen,
