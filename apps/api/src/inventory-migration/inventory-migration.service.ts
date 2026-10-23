@@ -45,6 +45,19 @@ import { findIngredientInText, addLearnedIngredient } from '../products/referenc
 const medicineByVariation = medicineByVariationRaw as Record<string, MedicineEntry>;
 
 /**
+ * Most recent APPROVED cost per product (input newest-first), offered as a
+ * reusable prefill. A discarded (SKIPPED) row is not a cost: counting it made
+ * the UI offer "reuse" for products reusePreviousApprovals would never copy.
+ */
+export function latestApprovedByProduct<T extends { productId: string; migrationStatus: string }>(approvals: T[]) {
+  const byProduct = new Map<string, T>();
+  for (const a of approvals) {
+    if (a.migrationStatus === 'APPROVED' && !byProduct.has(a.productId)) byProduct.set(a.productId, a);
+  }
+  return byProduct;
+}
+
+/**
  * Cutover extraction progress from the derived work queue (see getExtractionQueue).
  * Batch numbers are display-only: the next page is always "the next N unreviewed".
  */
@@ -730,10 +743,7 @@ export class InventoryMigrationService {
     ]);
 
     const productMap = new Map(products.map((p) => [p.id, p]));
-    const approvalMap = new Map<string, any>();
-    approvals.forEach((a) => {
-      if (!approvalMap.has(a.productId)) approvalMap.set(a.productId, a);
-    });
+    const approvalMap = latestApprovedByProduct(approvals);
 
     // 8) Load cached prices from CatalogMapping first
     const allVariationIds = new Set<string>();

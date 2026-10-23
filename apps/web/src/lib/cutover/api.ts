@@ -146,7 +146,7 @@ export function setPrice(payload: { productId: string; priceCents: number; locat
 }
 
 export async function reusePreviousApprovals(cutoverId: string, productIds: string[]) {
-  return apiFetch<{ approvedCount: number }>(`${BASE}/reuse-previous-approvals`, {
+  return apiFetch<{ approvedCount: number; products: string[] }>(`${BASE}/reuse-previous-approvals`, {
     method: "POST",
     body: JSON.stringify({ cutoverId, productIds }),
   });
