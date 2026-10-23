@@ -1286,7 +1286,7 @@ export class ProductsService {
       -- Same mapping preference as getProducts: location-specific over global,
       -- deterministic tie-breaker for duplicate mappings of the same class
       mapping AS (
-        SELECT DISTINCT ON ("productId") "productId", "priceCents", "squareVariationId"
+        SELECT DISTINCT ON ("productId") "productId", "priceCents", "squareVariationId", "locationId"
         FROM "CatalogMapping"
         WHERE "locationId" = ${locationId} OR "locationId" IS NULL
         ORDER BY "productId", "locationId" DESC NULLS LAST, "createdAt" DESC
@@ -1303,7 +1303,9 @@ export class ProductsService {
                 / NULLIF(m."priceCents" / 100.0, 0) * 100 < 10
         )::bigint AS low_margin,
         COUNT(*) FILTER (WHERE m."squareVariationId" IS NOT NULL AND NOT m."squareVariationId" LIKE 'local_%')::bigint AS synced,
-        COUNT(*) FILTER (WHERE m."squareVariationId" IS NULL OR m."squareVariationId" LIKE 'local_%')::bigint AS local
+        -- Must match what syncUnsyncedProducts can push: location-scoped local_ mappings only.
+        -- Unmapped products have no price to send, so they are not "pending sync".
+        COUNT(*) FILTER (WHERE m."locationId" IS NOT NULL AND m."squareVariationId" LIKE 'local_%')::bigint AS local
       FROM "Product" p
       LEFT JOIN inv ON inv."productId" = p.id
       LEFT JOIN mapping m ON m."productId" = p.id
