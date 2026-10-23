@@ -46,3 +46,4 @@ Runs the api, web, and worker workspace test suites. Must pass before push.
   Because: prose docs drift; the graph is regenerated from the AST.
 - Don't commit files over 256 KB into a path Claude reads (e.g. `data/*.json`). Instead keep large datasets out of the read path or split them.
   Because: Claude Code cannot open files that large.
+  Exception: `package-lock.json` is committed despite its size — builds need it, nobody needs to read it.
