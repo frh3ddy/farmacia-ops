@@ -22,8 +22,7 @@ if (result.error && !process.env.DATABASE_URL) {
   config();
 }
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
+if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is not set");
 }
 
@@ -35,35 +34,9 @@ async function bootstrap() {
   const isLocal = process.env.NODE_ENV !== "production";
   console.log(`🚀 Starting Farmacia Ops API on port ${port}...`);
 
-  // Run Prisma migrations before starting the app (ensures migrations run in Railway)
-  try {
-    const { execSync } = require("child_process");
-    const { resolve } = require("path");
-    if (!isLocal) {
-      console.log("🔄 Running database migrations...");
-
-      // Ensure we're in the project root for Prisma commands
-      const projectRoot = resolve(__dirname, "../../..");
-      execSync("npx prisma migrate deploy", {
-        stdio: "inherit",
-        env: { ...process.env, DATABASE_URL: connectionString },
-        cwd: projectRoot,
-      });
-      console.log("✅ Database migrations completed");
-    } else {
-      console.log(
-        '🛠️ Skipping auto-migrations. Run "npx prisma migrate dev" manually.'
-      );
-    }
-  } catch (error) {
-    console.error("❌ Migration error:", error);
-    // In production, fail fast if migrations fail
-    if (process.env.NODE_ENV === "production") {
-      throw error;
-    }
-    // In development, continue (migrations might have already run)
-    console.warn("⚠️ Continuing despite migration error (dev mode)");
-  }
+  // Migrations are not run here: on Railway they run as the api's
+  // pre-deploy command (.railway/railway.ts), before this process starts.
+  // Locally: npm run prisma:migrate:dev.
 
   // Pass the NestExpressApplication type generic
   app = await NestFactory.create<NestExpressApplication>(AppModule, {
