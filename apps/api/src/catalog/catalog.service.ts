@@ -33,6 +33,18 @@ interface CatalogData {
   currency: string | null;     // Currency code (e.g., "USD")
 }
 
+/**
+ * Labels that end up where a product name should be: Square's default
+ * variation names, and this sync's own fallback when a variation has none.
+ * Exact match on purpose — "Insulina Regular" is a real name. Must stay in
+ * sync with the placeholder-name data migration (20261024120000).
+ */
+const PLACEHOLDER_NAMES = new Set(['regular', 'sin variación', 'sin variacion', 'no variation', 'unknown']);
+
+export function isPlaceholderProductName(name: string | null | undefined): boolean {
+  return !name || PLACEHOLDER_NAMES.has(name.trim().toLowerCase());
+}
+
 @Injectable()
 export class CatalogService {
   private readonly logger = new Logger(CatalogService.name);
@@ -397,7 +409,8 @@ export class CatalogService {
               try {
                 product = await tx.product.create({
                   data: {
-                    name: variationName,
+                    // The item name, not the variation label ("Regular"/"Sin variación").
+                    name: squareProductName ?? variationName,
                     sku: variationSku,
                     squareProductName: squareProductName,
                     squareDescription: catalogData.productDescription,
@@ -420,6 +433,8 @@ export class CatalogService {
               product = await tx.product.update({
                 where: { id: product.id },
                 data: {
+                  // Repair a name still stuck on a placeholder label; never touch a real one.
+                  ...(squareProductName && isPlaceholderProductName(product.name) ? { name: squareProductName } : {}),
                   squareProductName: squareProductName,
                   squareDescription: catalogData.productDescription,
                   squareImageUrl: catalogData.imageUrl,
