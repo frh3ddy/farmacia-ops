@@ -16,13 +16,22 @@ export default defineRailway(() => {
   const api = service("api", {
     source: farmaciaOps,
     build: { buildCommand: "npm run build:web && npm run build:api", buildEnvironment: "V3", builder: "RAILPACK", watchPatterns: ["/apps/api/**", "/apps/web/**"] },
-    start: "npm run start:api",
+    // node directly, not `npm run start:api`: the npm chain kept two npm
+    // processes resident. The heap cap makes V8 collect and shrink instead of
+    // growing toward the 8 GB container limit; raise it on "heap out of memory".
+    start: "node --max-old-space-size=512 apps/api/dist/main",
+    // Migrations run once per deploy in their own container, before the new api
+    // starts — not at boot, where `npx` added memory during deploy overlap and
+    // a failed migration crashed the new container instead of stopping the deploy.
+    preDeploy: "npx prisma migrate deploy",
+    // Switch traffic only once Nest is listening (GET / is public).
+    healthcheck: "/",
     replicas: { "us-west2": 1 },
   });
   const worker = service("worker", {
     source: farmaciaOps,
     build: { buildCommand: "npm run build:worker", buildEnvironment: "V3", builder: "RAILPACK", watchPatterns: ["/apps/worker/**", "/package.json", "/package-lock.json"] },
-    start: "npm run start:worker",
+    start: "node --max-old-space-size=256 apps/worker/dist/worker.js",
     replicas: { "us-west2": 1 },
     networking: { privateNetworkEndpoint: "giving-creation" },
   });
