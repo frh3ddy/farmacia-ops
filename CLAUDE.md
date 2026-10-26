@@ -8,6 +8,21 @@ Data: PostgreSQL via Prisma (`prisma/schema.prisma`, shared by api + worker), Re
 
 > Global rules live in `~/dev/CLAUDE.md` and `~/CLAUDE.md`. This file is project-specific only.
 
+## AIDD framework
+
+@AGENTS.md
+@aidd-custom/AGENTS.md
+
+`ai/` is the AIDD framework (`npx aidd`). Its commands are linked into `.claude/commands/`
+as `/aidd-discover`, `/aidd-plan`, `/aidd-task`, `/aidd-execute`, `/aidd-commit`,
+`/aidd-user-test`, `/aidd-run-test`, `/aidd-help` (prefixed so they don't shadow built-ins
+like `/review`); its skills are linked into `.claude/skills/` (`/aidd-review`, `/aidd-tdd`,
+`/aidd-fix`, `/aidd-churn`, `/aidd-log`, …). Skills for stacks this repo doesn't use are
+left unlinked: aidd-stack, aidd-autodux, aidd-lit, aidd-ecs, aidd-observe,
+aidd-javascript-io-effects, aidd-error-causes, aidd-timing-safe-compare. After
+`npx aidd --force` adds new files, link the new ones too. Regenerate `ai/**/index.md`
+with `npx aidd --index` (no pre-commit hook is installed).
+
 ## Session checklist — if working on X, read Y
 
 - **Architecture / domain model / "where does X live"** → `graphify query "<question>"` (graph at `graphify-out/`), then `graphify-out/wiki/index.md`. Don't browse raw source blind.
