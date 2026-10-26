@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { useCutoverWizard } from "./useCutoverWizard";
 
@@ -14,17 +14,15 @@ vi.mock("./api", () => ({
   fetchCategories: vi.fn().mockResolvedValue([]),
   fetchInProgressSessions: vi.fn().mockResolvedValue([]),
   extractCosts: vi.fn(),
-  reusePreviousApprovals: vi.fn(),
+  discardItem: vi.fn().mockResolvedValue({ success: true }),
 }));
 
-// One product left in the batch, offered for reuse from an earlier session.
-const reusable = {
+// One product left in the batch.
+const pending = {
   productId: "regular",
   productName: "Regular",
   extractedEntries: [],
   selectedCost: null,
-  isAlreadyApproved: true,
-  existingApprovedCost: 12,
   migrationStatus: "PENDING",
 };
 
@@ -32,7 +30,7 @@ async function startExtraction() {
   vi.mocked(api.extractCosts).mockResolvedValue({
     cutoverId: "s1",
     extractionSessionId: "s1",
-    extractionResults: [reusable],
+    extractionResults: [pending],
     isComplete: false,
   } as never);
   const hook = renderHook(() => useCutoverWizard());
@@ -42,25 +40,11 @@ async function startExtraction() {
   return hook;
 }
 
-beforeEach(() => vi.mocked(api.reusePreviousApprovals).mockReset());
-
-describe("reuse previous approvals", () => {
-  it("leaves a product pending when the server did not copy its approval", async () => {
+describe("batch-complete modal", () => {
+  it("closes when switching to review", async () => {
     const { result } = await startExtraction();
-    vi.mocked(api.reusePreviousApprovals).mockResolvedValue({ approvedCount: 0, products: [] });
 
-    await act(() => result.current.handleReusePreviousApprovals());
-
-    expect(result.current.groupedResults.extracting.map(r => r.productId)).toEqual(["regular"]);
-    expect(result.current.batchComplete).toBe(false);
-    expect(result.current.error).toMatch(/no se pudieron reutilizar/);
-  });
-
-  it("closes the batch-complete modal when switching to review", async () => {
-    const { result } = await startExtraction();
-    vi.mocked(api.reusePreviousApprovals).mockResolvedValue({ approvedCount: 1, products: ["regular"] });
-
-    await act(() => result.current.handleReusePreviousApprovals());
+    await act(() => result.current.handleDiscardItem("regular"));
     await waitFor(() => expect(result.current.batchComplete).toBe(true));
 
     act(() => result.current.setPhase("reviewing"));
