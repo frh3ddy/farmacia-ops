@@ -16,3 +16,7 @@ when they disagree. In particular:
   the unlinked `aidd-timing-safe-compare` skill's SHA3 rule does not apply here.
 - Stack is NestJS + React 19 (Vite) + Prisma — not Next.js/Redux/shadcn; skip stack
   advice that assumes those.
+- Tests: api and web run Vitest; write new api tests with Riteway
+  (`import { assert } from 'riteway/vitest'`, `describe` = unit, `test` = scenario,
+  `assert({ given, should, actual, expected })`). Vitest globals are on in the api.
+  The worker still runs Jest.

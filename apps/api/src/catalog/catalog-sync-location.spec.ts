@@ -5,29 +5,29 @@ import { CatalogService, productByVariation } from './catalog.service';
 function setup() {
   const existing = { id: 'p-aspirina', name: 'Aspirina', sku: null, squareDataSyncedAt: new Date() };
   const tx = {
-    product: { create: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
-    catalogMapping: { create: jest.fn(), update: jest.fn() },
+    product: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn() },
+    catalogMapping: { create: vi.fn(), update: vi.fn() },
   };
   const prisma = {
-    location: { findUnique: jest.fn().mockResolvedValue({ id: 'loc-norte', name: 'Norte' }) },
+    location: { findUnique: vi.fn().mockResolvedValue({ id: 'loc-norte', name: 'Norte' }) },
     catalogMapping: {
-      findMany: jest
+      findMany: vi
         .fn()
         // 1st: mappings scoped to this location — none yet.
         .mockResolvedValueOnce([])
         // 2nd: the same variation in any scope — the global mapping.
         .mockResolvedValueOnce([{ squareVariationId: 'v1', locationId: null, product: existing }]),
     },
-    product: { findMany: jest.fn().mockResolvedValue([]) },
-    $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
+    product: { findMany: vi.fn().mockResolvedValue([]) },
+    $transaction: vi.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
   };
   const service = new CatalogService(prisma as any);
-  jest.spyOn(service as any, 'getSquareClient').mockReturnValue({
+  vi.spyOn(service as any, 'getSquareClient').mockReturnValue({
     catalog: {
-      search: jest.fn().mockResolvedValue({
+      search: vi.fn().mockResolvedValue({
         objects: [{ id: 'v1', type: 'ITEM_VARIATION', itemVariationData: { name: 'Regular', itemId: 'i1' } }],
       }),
-      batchGet: jest.fn().mockResolvedValue({ objects: [], relatedObjects: [] }),
+      batchGet: vi.fn().mockResolvedValue({ objects: [], relatedObjects: [] }),
     },
   });
   return { service, tx };

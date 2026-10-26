@@ -4,15 +4,15 @@ import { LocationsService } from './locations.service';
 function setup(squareLocations: any[], stale: { id: string }[] = []) {
   const prisma = {
     location: {
-      findUnique: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockResolvedValue({}),
-      update: jest.fn().mockResolvedValue({}),
-      delete: jest.fn().mockResolvedValue({}),
-      findMany: jest.fn().mockResolvedValue(stale),
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue(stale),
     },
   };
   const service = new LocationsService(prisma as any);
-  (service as any).squareClient = { locations: { list: jest.fn().mockResolvedValue({ locations: squareLocations }) } };
+  (service as any).squareClient = { locations: { list: vi.fn().mockResolvedValue({ locations: squareLocations }) } };
   return { service, prisma };
 }
 

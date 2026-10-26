@@ -1,16 +1,17 @@
+import type { Mock } from 'vitest';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { InventoryReceivingService } from './inventory-receiving.service';
 
 const startDate = new Date('2026-03-01');
 const endDate = new Date('2026-03-31');
 
-function whereOf(findMany: jest.Mock) {
+function whereOf(findMany: Mock) {
   return findMany.mock.calls[0][0].where;
 }
 
 describe('getAdjustmentsByLocation date range', () => {
   function setup() {
-    const findMany = jest.fn().mockResolvedValue([]);
+    const findMany = vi.fn().mockResolvedValue([]);
     const service = new InventoryAdjustmentService({ inventoryAdjustment: { findMany } } as any);
     return { service, findMany };
   }
@@ -42,7 +43,7 @@ describe('getAdjustmentsByLocation date range', () => {
 
 describe('getReceivingsByLocation date range', () => {
   function setup() {
-    const findMany = jest.fn().mockResolvedValue([]);
+    const findMany = vi.fn().mockResolvedValue([]);
     const service = new InventoryReceivingService({ inventoryReceiving: { findMany } } as any);
     return { service, findMany };
   }

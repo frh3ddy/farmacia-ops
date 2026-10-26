@@ -5,27 +5,27 @@ import { InventoryMigrationService } from './inventory-migration.service';
 function setup() {
   const prisma = {
     location: {
-      findMany: jest.fn().mockResolvedValue([
+      findMany: vi.fn().mockResolvedValue([
         { id: 'loc-centro', name: 'Centro', squareId: 'sq-centro' },
         { id: 'loc-norte', name: 'Norte', squareId: 'sq-norte' },
       ]),
     },
     catalogMapping: {
-      findMany: jest.fn().mockResolvedValue([
+      findMany: vi.fn().mockResolvedValue([
         { squareVariationId: 'v-global', locationId: null },
         { squareVariationId: 'v-centro', locationId: 'loc-centro' },
       ]),
     },
   };
   const squareInventory = {
-    fetchCounts: jest.fn().mockResolvedValue([
+    fetchCounts: vi.fn().mockResolvedValue([
       { catalogObjectId: 'v-global', locationId: 'sq-centro', quantity: 2 },
       { catalogObjectId: 'v-centro', locationId: 'sq-centro', quantity: 1 },
       { catalogObjectId: 'v-global', locationId: 'sq-norte', quantity: 4 },
       // Not mapped at Norte — must not leak into Norte's total.
       { catalogObjectId: 'v-centro', locationId: 'sq-norte', quantity: 9 },
     ]),
-    zeroCounts: jest.fn().mockResolvedValue(undefined),
+    zeroCounts: vi.fn().mockResolvedValue(undefined),
   };
   const service = new InventoryMigrationService(prisma as any, squareInventory as any, {} as any, {} as any, {} as any, {} as any);
   return { service, squareInventory };

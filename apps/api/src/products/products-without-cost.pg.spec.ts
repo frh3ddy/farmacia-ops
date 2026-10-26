@@ -5,7 +5,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { productsWithoutCostSql } from './products-without-cost';
 
-jest.setTimeout(60_000);
+
 
 let db: PGlite;
 

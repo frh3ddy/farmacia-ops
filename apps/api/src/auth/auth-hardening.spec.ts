@@ -19,7 +19,7 @@ describe('password hashing', () => {
 describe('device activation lockout', () => {
   it('locks an email after 5 failed passwords, even with the right one', async () => {
     const employee = { id: 'e1', isActive: true, passwordHash: hashPassword('correcta'), assignments: [] };
-    const prisma = { employee: { findUnique: jest.fn().mockResolvedValue(employee) } };
+    const prisma = { employee: { findUnique: vi.fn().mockResolvedValue(employee) } };
     const auth = new AuthService(prisma as any);
     const attempt = (password: string) =>
       auth.activateDevice({ email: 'Owner@x.mx', password, deviceName: 'caja' } as any).catch((e) => e.getStatus());

@@ -24,7 +24,7 @@ describe('carryOverDecisions', () => {
   it('fills only unreviewed products and always skips discontinued ones', async () => {
     const prisma = {
       costApproval: {
-        findMany: jest
+        findMany: vi
           .fn()
           // rows already in this session: "restaurado" was restored (PENDING)
           .mockResolvedValueOnce([{ productId: 'restaurado' }])
@@ -34,10 +34,10 @@ describe('carryOverDecisions', () => {
             { productId: 'jarabe', cutoverId: 'elsewhere', migrationStatus: 'APPROVED', approvedCost: 12, source: 'MANUAL' },
             { productId: 'baja', cutoverId: 'elsewhere', migrationStatus: 'APPROVED', approvedCost: 3, source: 'MANUAL' },
           ]),
-        createMany: jest.fn().mockResolvedValue({ count: 2 }),
+        createMany: vi.fn().mockResolvedValue({ count: 2 }),
       },
-      extractionSession: { findMany: jest.fn().mockResolvedValue([{ id: 'old', cutoverId: 'old' }]) },
-      product: { findMany: jest.fn().mockResolvedValue([{ id: 'baja' }]) },
+      extractionSession: { findMany: vi.fn().mockResolvedValue([{ id: 'old', cutoverId: 'old' }]) },
+      product: { findMany: vi.fn().mockResolvedValue([{ id: 'baja' }]) },
     };
     const service = new InventoryMigrationService(prisma as any, {} as any, {} as any, {} as any, {} as any, {} as any);
 

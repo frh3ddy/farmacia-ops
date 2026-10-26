@@ -5,10 +5,10 @@ const simi = { id: 'sup-simi', name: 'Simi', initials: ['Simi', 'S'], contactInf
 function setup({ byName = null as any, byInitial = [] as any[] } = {}) {
   const prisma = {
     supplier: {
-      findUnique: jest.fn().mockResolvedValue(byName),
-      upsert: jest.fn().mockImplementation(({ create }) => ({ id: 'sup-new', initials: [], contactInfo: null, ...create })),
+      findUnique: vi.fn().mockResolvedValue(byName),
+      upsert: vi.fn().mockImplementation(({ create }) => ({ id: 'sup-new', initials: [], contactInfo: null, ...create })),
     },
-    $queryRaw: jest.fn().mockResolvedValue(byInitial),
+    $queryRaw: vi.fn().mockResolvedValue(byInitial),
   };
   return { service: new SupplierService(prisma as any), prisma };
 }

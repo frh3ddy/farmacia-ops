@@ -1,7 +1,7 @@
 import { WebhooksHelper } from 'square';
 import { SquareWebhookController } from './square.controller';
 
-jest.mock('square', () => ({ WebhooksHelper: { verifySignature: jest.fn() } }));
+vi.mock('square', () => ({ WebhooksHelper: { verifySignature: vi.fn() } }));
 
 describe('SquareWebhookController', () => {
   // Regression: an in-memory "pause" switch (meant for test webhooks) also
@@ -10,9 +10,9 @@ describe('SquareWebhookController', () => {
   it('always enqueues a verified payment.created event', async () => {
     process.env.SQUARE_WEBHOOK_SECRET = 'key';
     process.env.SQUARE_WEBHOOK_NOTIFICATION_URL = 'https://example.test/webhooks/square';
-    jest.mocked(WebhooksHelper.verifySignature).mockResolvedValue(true as never);
-    const saleQueue = { enqueue: jest.fn().mockResolvedValue({ id: 'evt-1' }) };
-    const res = { status: jest.fn().mockReturnThis(), send: jest.fn() };
+    vi.mocked(WebhooksHelper.verifySignature).mockResolvedValue(true as never);
+    const saleQueue = { enqueue: vi.fn().mockResolvedValue({ id: 'evt-1' }) };
+    const res = { status: vi.fn().mockReturnThis(), send: vi.fn() };
     const event = { type: 'payment.created', event_id: 'evt-1', data: {} };
 
     await new SquareWebhookController(saleQueue as any).handle(
