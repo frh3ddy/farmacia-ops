@@ -60,7 +60,6 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Dev Tools",
     description: "Testing and seeding — not production actions",
     items: [
-      { id: "webhook-test", label: "Webhook Test", status: "ready" },
       { id: "sales-test", label: "Sales Test", status: "ready" },
       { id: "test-inventory", label: "Test Inventory", status: "ready" },
     ],
