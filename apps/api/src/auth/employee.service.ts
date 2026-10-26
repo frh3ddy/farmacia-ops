@@ -2,6 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmployeeRole } from '@prisma/client';
 import { AuthService } from './auth.service';
+import { hashPassword } from './password';
 import * as crypto from 'crypto';
 
 // ============================================================================
@@ -51,13 +52,6 @@ export class EmployeeService {
   // Password Hashing (for owner/manager accounts)
   // --------------------------------------------------------------------------
 
-  private hashPassword(password: string): string {
-    const salt = crypto.randomBytes(32).toString('hex');
-    const hash = crypto
-      .pbkdf2Sync(password, salt, 10000, 64, 'sha512')
-      .toString('hex');
-    return `${salt}:${hash}`; // Store salt with hash
-  }
 
   // --------------------------------------------------------------------------
   // Create Employee
@@ -108,7 +102,7 @@ export class EmployeeService {
           HttpStatus.BAD_REQUEST
         );
       }
-      passwordHash = this.hashPassword(password);
+      passwordHash = hashPassword(password);
     }
 
     // Hash PIN if provided
@@ -536,7 +530,7 @@ export class EmployeeService {
       );
     }
 
-    const passwordHash = this.hashPassword(password);
+    const passwordHash = hashPassword(password);
 
     await this.prisma.employee.update({
       where: { id: employeeId },
@@ -866,7 +860,7 @@ export class EmployeeService {
       }
 
       // 2. Create owner employee
-      const passwordHash = this.hashPassword(input.ownerPassword);
+      const passwordHash = hashPassword(input.ownerPassword);
       const pinSalt = crypto.randomBytes(16).toString('hex');
       const pinHash = this.authService.hashPIN(input.ownerPin, pinSalt);
 

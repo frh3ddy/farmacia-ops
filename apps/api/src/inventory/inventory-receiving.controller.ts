@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { InventoryReceivingService } from './inventory-receiving.service';
 import { ProductsService } from '../products/products.service';
-import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, RoleGuard, LocationGuard, Roles, scopedLocationId } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -264,10 +264,11 @@ export class InventoryReceivingController {
   @Get('product/:productId')
   @Roles('OWNER', 'MANAGER')
   async getReceivingsByProduct(
+    @Req() req: any,
     @Param('productId') productId: string,
     @Query('locationId') locationId?: string
   ) {
-    const receivings = await this.receivingService.getReceivingsByProduct(productId, locationId);
+    const receivings = await this.receivingService.getReceivingsByProduct(productId, scopedLocationId(req, locationId));
     return {
       success: true,
       count: receivings.length,

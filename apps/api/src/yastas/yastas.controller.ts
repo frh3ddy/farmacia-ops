@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { YastasOperationDirection } from '@prisma/client';
 import { YastasService } from './yastas.service';
-import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, RoleGuard, LocationGuard, Roles, assertLocationAccess, scopedLocationId } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -97,6 +97,8 @@ export class YastasController {
         HttpStatus.BAD_REQUEST,
       );
     }
+    // LocationGuard only reads `locationId`; moving money out needs access to the source.
+    assertLocationAccess(req, body.fromLocationId);
 
     const transfer = await this.yastasService.createWalletTransfer({
       fromLocationId: body.fromLocationId,
@@ -140,12 +142,16 @@ export class YastasController {
 
   @Patch('settlements/:id')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async updateSettlement(@Param('id') id: string, @Body() body: UpdateSettlementDto) {
-    const settlement = await this.yastasService.updateSettlement(id, {
-      status: body.status,
-      reportedAt: body.reportedAt ? new Date(body.reportedAt) : undefined,
-      paidAt: body.paidAt ? new Date(body.paidAt) : undefined,
-    });
+  async updateSettlement(@Param('id') id: string, @Body() body: UpdateSettlementDto, @Req() req: any) {
+    const settlement = await this.yastasService.updateSettlement(
+      id,
+      {
+        status: body.status,
+        reportedAt: body.reportedAt ? new Date(body.reportedAt) : undefined,
+        paidAt: body.paidAt ? new Date(body.paidAt) : undefined,
+      },
+      (locationId) => assertLocationAccess(req, locationId),
+    );
 
     return { success: true, data: settlement };
   }
@@ -178,6 +184,7 @@ export class YastasController {
 
   @Get('operations')
   async listOperations(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('employeeId') employeeId?: string,
     @Query('direction') direction?: YastasOperationDirection,
@@ -185,7 +192,7 @@ export class YastasController {
     @Query('endDate') endDate?: string,
   ) {
     const operations = await this.yastasService.listOperations({
-      locationId,
+      locationId: scopedLocationId(req, locationId),
       employeeId,
       direction,
       startDate: startDate ? new Date(startDate) : undefined,
@@ -196,8 +203,8 @@ export class YastasController {
   }
 
   @Get('settlements')
-  async listSettlements(@Query('locationId') locationId?: string) {
-    const settlements = await this.yastasService.listSettlements(locationId);
+  async listSettlements(@Req() req: any, @Query('locationId') locationId?: string) {
+    const settlements = await this.yastasService.listSettlements(scopedLocationId(req, locationId));
     return { success: true, count: settlements.length, data: settlements };
   }
 }
