@@ -2,6 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmployeeRole } from '@prisma/client';
 import * as crypto from 'crypto';
+import { hashPassword, verifyPassword } from './password';
 
 // ============================================================================
 // Types
@@ -47,28 +48,35 @@ const SESSION_TOKEN_PREFIX = 'st_';
 
 @Injectable()
 export class AuthService {
+  private readonly failedLogins = new Map<string, { count: number; since: number }>();
+  static readonly MAX_FAILED_LOGINS = 5;
+  static readonly LOGIN_LOCK_MS = 15 * 60 * 1000;
+
   constructor(private readonly prisma: PrismaService) {}
 
-  // --------------------------------------------------------------------------
-  // Password Hashing (for device activation)
-  // --------------------------------------------------------------------------
-  
-  private hashPassword(password: string, salt: string): string {
-    return crypto
-      .pbkdf2Sync(password, salt, 10000, 64, 'sha512')
-      .toString('hex');
+  // Failed device-activation logins per email, in a 15-min window. 5 misses
+  // lock it until the window ends, so a password can't be guessed online
+  // (PIN login has its own DB lockout).
+  // ponytail: in-memory, per api instance and reset on restart; move to Redis
+  // or the Employee row if the api ever runs more than one replica.
+  private assertLoginNotLocked(key: string) {
+    const entry = this.failedLogins.get(key);
+    if (entry && Date.now() - entry.since >= AuthService.LOGIN_LOCK_MS) this.failedLogins.delete(key);
+    else if (entry && entry.count >= AuthService.MAX_FAILED_LOGINS) {
+      throw new HttpException(
+        { success: false, message: 'Too many failed attempts. Try again in 15 minutes.' },
+        HttpStatus.TOO_MANY_REQUESTS
+      );
+    }
   }
 
-  private generateSalt(): string {
-    return crypto.randomBytes(32).toString('hex');
-  }
-
-  private verifyPassword(password: string, hash: string, salt: string): boolean {
-    const computedHash = this.hashPassword(password, salt);
-    return crypto.timingSafeEqual(
-      Buffer.from(computedHash),
-      Buffer.from(hash)
-    );
+  private recordFailedLogin(key: string) {
+    // Bound memory against random-email spam: drop windows that have ended.
+    if (this.failedLogins.size > 1000) {
+      for (const [k, e] of this.failedLogins) if (Date.now() - e.since >= AuthService.LOGIN_LOCK_MS) this.failedLogins.delete(k);
+    }
+    const entry = this.failedLogins.get(key);
+    this.failedLogins.set(key, { count: (entry?.count ?? 0) + 1, since: entry?.since ?? Date.now() });
   }
 
   // --------------------------------------------------------------------------
@@ -107,6 +115,8 @@ export class AuthService {
 
   async activateDevice(input: DeviceActivationInput) {
     const { email, password, deviceName, locationId: requestedLocationId, deviceType = 'FIXED' } = input;
+    const loginKey = email.trim().toLowerCase();
+    this.assertLoginNotLocked(loginKey);
 
     // Find employee by email
     const employee = await this.prisma.employee.findUnique({
@@ -120,6 +130,7 @@ export class AuthService {
     });
 
     if (!employee) {
+      this.recordFailedLogin(loginKey);
       throw new HttpException(
         { success: false, message: 'Invalid email or password' },
         HttpStatus.UNAUTHORIZED
@@ -141,13 +152,17 @@ export class AuthService {
       );
     }
 
-    // For password verification, we store salt in the hash (format: salt:hash)
-    const [storedSalt, storedHash] = employee.passwordHash.split(':');
-    if (!storedSalt || !storedHash || !this.verifyPassword(password, storedHash, storedSalt)) {
+    const { valid, needsRehash } = verifyPassword(password, employee.passwordHash);
+    if (!valid) {
+      this.recordFailedLogin(loginKey);
       throw new HttpException(
         { success: false, message: 'Invalid email or password' },
         HttpStatus.UNAUTHORIZED
       );
+    }
+    this.failedLogins.delete(loginKey);
+    if (needsRehash) {
+      await this.prisma.employee.update({ where: { id: employee.id }, data: { passwordHash: hashPassword(password) } });
     }
 
     // Find valid location assignment (OWNER or MANAGER only)
