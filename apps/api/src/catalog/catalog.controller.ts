@@ -5,7 +5,9 @@ import {
   HttpCode,
   HttpStatus,
   HttpException,
+  UseGuards,
 } from '@nestjs/common';
+import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
 import { CatalogService, CatalogSyncResult } from './catalog.service';
 
 interface SyncCatalogDto {
@@ -20,6 +22,8 @@ interface SyncCatalogResponse {
 }
 
 @Controller('admin/square/catalog')
+@UseGuards(AuthGuard, RoleGuard)
+@Roles('OWNER', 'MANAGER')
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
 
@@ -28,9 +32,6 @@ export class CatalogController {
   async syncCatalog(
     @Body() body: SyncCatalogDto,
   ): Promise<SyncCatalogResponse> {
-    // TODO: Add authentication/authorization guard
-    // Authentication is required (admin only) per specification
-    
     try {
       const locationId = body.locationId || null;
       const forceResync = body.forceResync || false;

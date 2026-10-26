@@ -5,10 +5,14 @@ import {
   Query,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
+import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
 import { InventoryAgingService } from './inventory-aging.service';
 
 @Controller('inventory/aging')
+@UseGuards(AuthGuard, RoleGuard)
+@Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
 export class InventoryAgingController {
   constructor(
     private readonly inventoryAgingService: InventoryAgingService,

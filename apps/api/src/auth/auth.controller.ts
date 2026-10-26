@@ -413,8 +413,13 @@ export class AuthController {
       );
     }
 
-    // Validate session
-    await this.authService.validateSession(sessionToken);
+    const { currentLocation } = await this.authService.validateSession(sessionToken);
+    if (currentLocation?.role !== 'OWNER') {
+      throw new HttpException(
+        { success: false, message: 'Only owners can view audit logs' },
+        HttpStatus.FORBIDDEN
+      );
+    }
 
     const logs = await this.authService.getAuditLogs({
       locationId,

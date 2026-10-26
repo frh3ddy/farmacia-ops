@@ -362,6 +362,7 @@ export class DataController {
   }
 
   @Post('inventory/test')
+  @Roles('OWNER')
   async createTestInventory(@Body() body: { squareVariationIds?: string[] }) {
     // Create test inventory for specified products
     // If squareVariationIds provided, find products via catalog mapping
