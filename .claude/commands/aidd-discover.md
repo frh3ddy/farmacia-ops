@@ -1,0 +1,1 @@
+../../ai/commands/discover.md
