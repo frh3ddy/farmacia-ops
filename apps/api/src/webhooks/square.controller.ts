@@ -18,7 +18,6 @@ import {
   import { Request, Response } from 'express';
   import { WebhooksHelper } from 'square';
   import { SaleQueue } from '../queues/sale.queue';
-  import { WebhookTestService } from './webhook-test.service';
   import { SalesTestService, CreateTestSaleInput } from './sales-test.service';
   import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
 
@@ -28,7 +27,6 @@ import {
 
     constructor(
       private readonly saleQueue: SaleQueue,
-      private readonly webhookTestService: WebhookTestService,
     ) {}
   
     @Get()
@@ -106,118 +104,12 @@ import {
         return res.status(HttpStatus.OK).send('Ignored');
       }
 
-      // Check if webhook processing is paused
-      if (this.webhookTestService.isWebhookPaused()) {
-        this.logger.warn('Webhook processing is paused, ignoring event');
-        return res.status(HttpStatus.OK).send('Paused - Not Processed');
-      }
-
       await this.saleQueue.enqueue(event);
       this.logger.debug(`Event ${event.event_id} enqueued`);
 
       return res.status(HttpStatus.OK).send('Accepted');
     }
   
-  }
-
-  @Controller('api/webhooks/square')
-  export class WebhookTestController {
-    constructor(
-      private readonly saleQueue: SaleQueue,
-      private readonly webhookTestService: WebhookTestService,
-      private readonly salesTestService: SalesTestService,
-    ) {}
-    
-    @Get('test/status')
-    getStatus() {
-      return {
-        success: true,
-        ...this.webhookTestService.getStatus(),
-      };
-    }
-
-    @Post('test/pause')
-    pause() {
-      // Only updates state - does NOT call enqueue
-      this.webhookTestService.pause();
-      return {
-        success: true,
-        message: 'Webhook testing paused',
-        paused: true,
-      };
-    }
-
-    @Post('test/resume')
-    resume() {
-      // Only updates state - does NOT call enqueue
-      this.webhookTestService.resume();
-      return {
-        success: true,
-        message: 'Webhook testing resumed',
-        paused: false,
-      };
-    }
-    
-    @Post('test')
-    @HttpCode(200)
-    async testWebhook(@Req() req: Request) {
-      // Check if webhook testing is paused - if so, return early without calling enqueue
-      if (this.webhookTestService.isWebhookPaused()) {
-        return {
-          success: false,
-          message: 'Webhook testing is paused. Please resume to send test webhooks.',
-          paused: true,
-        };
-      }
-
-      // Test endpoint to simulate Square webhook without signature verification
-      // Useful for testing sale processing
-      const body = req.body;
-      
-      // Create a mock Square webhook event structure
-      const mockEvent = {
-        type: 'payment.created',
-        event_id: `test_${Date.now()}`,
-        data: body.data || {
-          type: 'payment',
-          id: body.paymentId || `test_payment_${Date.now()}`,
-          object: {
-            payment: {
-              id: body.paymentId || `test_payment_${Date.now()}`,
-              location_id: body.locationId || 'L60AMVPDZJ48F',
-              order_id: body.orderId || `test_order_${Date.now()}`,
-              created_at: new Date().toISOString(),
-              status: 'APPROVED',
-              amount_money: {
-                amount: body.amount || 100,
-                currency: 'USD',
-              },
-              total_money: {
-                amount: body.amount || 100,
-                currency: 'USD',
-              },
-            },
-          },
-        },
-      };
-      
-      console.log('[DEBUG] [WEBHOOK_TEST] Simulating webhook event:', mockEvent.event_id);
-      
-      try {
-        // Only reaches here if NOT paused - enqueue the test webhook
-        await this.saleQueue.enqueue(mockEvent);
-        return {
-          success: true,
-          message: 'Test webhook enqueued successfully',
-          eventId: mockEvent.event_id,
-        };
-      } catch (error) {
-        return {
-          success: false,
-          message: `Failed to enqueue test webhook: ${error instanceof Error ? error.message : String(error)}`,
-        };
-      }
-    }
   }
 
   // ============================================================================
