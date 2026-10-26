@@ -73,7 +73,6 @@ export class SquareApiError extends Error {
  */
 export type ExtractionErrorCode =
   | 'SESSION_NOT_FOUND'
-  | 'SESSION_EXPIRED'
   | 'SESSION_INVALID_STATE'
   | 'LOCATION_NOT_FOUND'
   | 'LOCATION_NO_SQUARE_ID'
@@ -148,18 +147,6 @@ export class ExtractionError extends Error {
       canRetry: false,
       canResume: false,
       details: { sessionId },
-    });
-  }
-
-  static sessionExpired(sessionId: string, lastUpdated: Date): ExtractionError {
-    return new ExtractionError({
-      code: 'SESSION_EXPIRED',
-      message: `Extraction session ${sessionId} has expired (last updated: ${lastUpdated.toISOString()})`,
-      userMessage: 'Esta sesión de extracción expiró. Inicia una nueva sesión.',
-      recoveryAction: 'Inicia una nueva sesión de extracción',
-      canRetry: false,
-      canResume: false,
-      details: { sessionId, lastUpdated: lastUpdated.toISOString() },
     });
   }
 

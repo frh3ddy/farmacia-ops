@@ -25,7 +25,6 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
     handleSetPrice,
     handleRegenerateExtraction,
     handleRestoreItem,
-    handleReusePreviousApprovals,
     handleContinueBatch,
     requestStartMigration,
     setExtractionResults,
@@ -75,10 +74,6 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
         ? ((batchTotal - pendingCount) / batchTotal) * 100
         : 0;
 
-  const reusable = groupedResults.extracting.filter(
-    r => r.isAlreadyApproved && r.existingApprovedCost != null && r.migrationStatus !== "APPROVED"
-  );
-
   const onSavedReviewedItem = (productId: string, updates: Partial<(typeof groupedResults.approved)[number]>) => {
     setExtractionResults(prev => prev.map(r => (r.productId === productId ? { ...r, ...updates } : r)));
   };
@@ -112,15 +107,6 @@ export function ExtractionPhase({ wizard }: ExtractionPhaseProps) {
             <div className="h-full rounded-full bg-(--color-accent) transition-all" style={{ width: `${progress}%` }} />
           </div>
           <div className="flex gap-2">
-            {reusable.length > 0 && (
-              <button
-                onClick={handleReusePreviousApprovals}
-                disabled={loading}
-                className="rounded-sm bg-(--color-success) px-3 py-1.5 text-sm font-medium text-(--color-accent-contrast) disabled:opacity-50"
-              >
-                Reutilizar {reusable.length} aprobaci{reusable.length !== 1 ? "ones anteriores" : "ón anterior"}
-              </button>
-            )}
             <button
               onClick={() => setPhase("configuring")}
               className="rounded-sm border border-(--color-border-standard) px-3 py-1.5 text-sm text-(--color-ink-secondary) hover:bg-(--color-surface)"

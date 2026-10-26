@@ -8,7 +8,6 @@ import type { CutoverError, StructuredError } from "./types";
  */
 const ERROR_TITLES: Record<string, string> = {
   SESSION_NOT_FOUND: "Sesión no encontrada",
-  SESSION_EXPIRED: "Sesión expirada",
   SESSION_INVALID_STATE: "Estado de sesión no válido",
   LOCATION_NOT_FOUND: "Sucursal no encontrada",
   LOCATION_NO_SQUARE_ID: "Square no conectado",
