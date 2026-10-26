@@ -392,39 +392,6 @@ export function useCutoverWizard() {
     [extractionResults, editedResults, cutoverDate, allSuppliers, supplierNameMappings]
   );
 
-  const handleReusePreviousApprovals = useCallback(async () => {
-    if (!cutoverId) return setError("Falta el ID del corte. Primero inicia la extracción.");
-    const itemsToReuse = extractionResults.filter(
-      r => r.isAlreadyApproved && r.existingApprovedCost != null && r.migrationStatus !== "APPROVED"
-    );
-    if (itemsToReuse.length === 0) return setError("No hay productos con aprobaciones anteriores para reutilizar.");
-
-    setLoading(true);
-    setError(null);
-    try {
-      const productIds = itemsToReuse.map(r => r.productId);
-      const { approvedCount, products } = await api.reusePreviousApprovals(cutoverId, productIds);
-      // Mark only what the server actually copied — anything it skipped is
-      // still pending there, and would reappear on the next batch.
-      const reused = new Set(products);
-      if (reused.size < productIds.length) {
-        setError(`${productIds.length - reused.size} producto(s) no se pudieron reutilizar; revísalos manualmente.`);
-      }
-      setExtractionResults(prev =>
-        prev.map(r =>
-          reused.has(r.productId)
-            ? { ...r, migrationStatus: "APPROVED", selectedCost: r.existingApprovedCost ?? r.selectedCost, isAlreadyApproved: false }
-            : r
-        )
-      );
-      setSessionItemCounts(prev => (prev ? { ...prev, approved: prev.approved + approvedCount } : prev));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudieron reutilizar las aprobaciones anteriores");
-    } finally {
-      setLoading(false);
-    }
-  }, [cutoverId, extractionResults]);
-
   /** The initials-learning flow: when a user edits an extracted entry's
    * supplier name to something longer/different than what was extracted,
    * offer to remember that abbreviation for future extractions (matches
@@ -705,7 +672,6 @@ export function useCutoverWizard() {
     handleZeroStock,
     handleSetPrice,
     handleRegenerateExtraction,
-    handleReusePreviousApprovals,
     handleApproveItem,
     requestStartMigration,
     confirmStartMigration,

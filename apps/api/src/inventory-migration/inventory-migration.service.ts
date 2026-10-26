@@ -46,13 +46,33 @@ const medicineByVariation = medicineByVariationRaw as Record<string, MedicineEnt
 
 /**
  * Most recent APPROVED cost per product (input newest-first), offered as a
- * reusable prefill. A discarded (SKIPPED) row is not a cost: counting it made
- * the UI offer "reuse" for products reusePreviousApprovals would never copy.
+ * reusable prefill. A discarded (SKIPPED) row is not a cost to prefill.
  */
 export function latestApprovedByProduct<T extends { productId: string; migrationStatus: string }>(approvals: T[]) {
   const byProduct = new Map<string, T>();
   for (const a of approvals) {
     if (a.migrationStatus === 'APPROVED' && !byProduct.has(a.productId)) byProduct.set(a.productId, a);
+  }
+  return byProduct;
+}
+
+/**
+ * The earlier decision to carry into a new extraction session, per product
+ * (history newest-first, other sessions only). An approved cost carries from
+ * any location — cost is per product. A discard carries only from a session
+ * at the same location: skipping is about that location's stock, and the
+ * product may well be on the shelf elsewhere.
+ */
+export function decisionsToCarryOver<T extends { productId: string; cutoverId: string; migrationStatus: string }>(
+  history: T[],
+  sameLocationCutoverIds: Set<string>,
+) {
+  const byProduct = new Map<string, T>();
+  for (const a of history) {
+    if (byProduct.has(a.productId)) continue;
+    if (a.migrationStatus === 'APPROVED' || (a.migrationStatus === 'SKIPPED' && sameLocationCutoverIds.has(a.cutoverId))) {
+      byProduct.set(a.productId, a);
+    }
   }
   return byProduct;
 }
@@ -367,19 +387,8 @@ export class InventoryMigrationService {
       };
     }
 
-    // Check for expired sessions (older than 7 days with no activity)
-    const SESSION_EXPIRY_DAYS = 7;
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() - SESSION_EXPIRY_DAYS);
-
-    if (session.updatedAt < expiryDate && session.status === 'IN_PROGRESS') {
-      return {
-        valid: false,
-        error: ExtractionError.sessionExpired(sessionId, session.updatedAt).toJSON(),
-      };
-    }
-
-    // Only IN_PROGRESS sessions can be resumed
+    // No inactivity expiry: starting a new session already cancels this one,
+    // so expiring it only threw away progress. Only IN_PROGRESS can resume.
     if (session.status !== 'IN_PROGRESS') {
       return {
         valid: false,
@@ -601,6 +610,71 @@ export class InventoryMigrationService {
     return { itemsByProduct, totalProducts: itemsByProduct.size, remainingProductIds };
   }
 
+  /**
+   * Copies earlier decisions into this session for products it hasn't
+   * reviewed, so a new session (an expired one replaced, or a new location)
+   * doesn't start from zero — see decisionsToCarryOver for the rule. "No
+   * longer for sale" is product-wide, so those are always skipped here;
+   * the migration then deletes them from Square as before. Any row already
+   * in this session wins, including a Restore's PENDING.
+   */
+  private async carryOverDecisions(cutoverId: string, locationIds: string[], productIds: string[]): Promise<Set<string>> {
+    if (productIds.length === 0) return new Set();
+
+    const [existing, history, sameLocationSessions, discontinued] = await Promise.all([
+      this.prisma.costApproval.findMany({
+        where: { cutoverId, productId: { in: productIds } },
+        select: { productId: true },
+      }),
+      this.prisma.costApproval.findMany({
+        where: {
+          cutoverId: { not: cutoverId },
+          productId: { in: productIds },
+          migrationStatus: { in: ['APPROVED', 'SKIPPED'] },
+        },
+        orderBy: { approvedAt: 'desc' },
+      }),
+      this.prisma.extractionSession.findMany({
+        where: { locationIds: { hasSome: locationIds } },
+        select: { id: true, cutoverId: true },
+      }),
+      this.prisma.product.findMany({
+        where: { id: { in: productIds }, isDiscontinued: true },
+        select: { id: true },
+      }),
+    ]);
+
+    const inSession = new Set(existing.map((a) => a.productId));
+    const sameLocationCutoverIds = new Set(sameLocationSessions.flatMap((s) => [s.id, s.cutoverId ?? s.id]));
+    const carried = decisionsToCarryOver(history, sameLocationCutoverIds);
+
+    const rows: Prisma.CostApprovalCreateManyInput[] = [];
+    for (const { id: productId } of discontinued) {
+      if (inSession.has(productId)) continue;
+      const prev = carried.get(productId);
+      rows.push({
+        cutoverId, productId, approvedCost: new Prisma.Decimal(0), source: 'SKIPPED', migrationStatus: 'SKIPPED',
+        sellingPriceCents: prev?.sellingPriceCents, sellingPriceCurrency: prev?.sellingPriceCurrency,
+        sellingPriceRangeMinCents: prev?.sellingPriceRangeMinCents, sellingPriceRangeMaxCents: prev?.sellingPriceRangeMaxCents,
+      });
+      inSession.add(productId);
+    }
+    for (const prev of carried.values()) {
+      if (inSession.has(prev.productId)) continue;
+      rows.push({
+        cutoverId, productId: prev.productId, approvedCost: prev.approvedCost, source: prev.source,
+        migrationStatus: prev.migrationStatus, notes: prev.notes, approvedBy: prev.approvedBy,
+        sellingPriceCents: prev.sellingPriceCents, sellingPriceCurrency: prev.sellingPriceCurrency,
+        sellingPriceRangeMinCents: prev.sellingPriceRangeMinCents, sellingPriceRangeMaxCents: prev.sellingPriceRangeMaxCents,
+      });
+    }
+    if (rows.length === 0) return new Set();
+
+    await this.prisma.costApproval.createMany({ data: rows, skipDuplicates: true });
+    this.logger.log(`[EXTRACTION] Carried ${rows.length} earlier decision(s) into session ${cutoverId}`);
+    return new Set(rows.map((r) => r.productId));
+  }
+
   async extractCostsForMigration(
     locationIds: string[],
     costBasis: 'DESCRIPTION',
@@ -623,6 +697,8 @@ export class InventoryMigrationService {
     // 1) Work queue: everything not yet approved/skipped in this session
     const sessionCutoverId = dbSession?.cutoverId || sessionId;
     const queue = await this.getExtractionQueue(locationIds, locationById, sessionCutoverId);
+    const carried = await this.carryOverDecisions(sessionCutoverId, locationIds, queue.remainingProductIds);
+    queue.remainingProductIds = queue.remainingProductIds.filter((pid) => !carried.has(pid));
 
     // 2) Create session if not exists — one active session per location, so
     // starting fresh cancels any other in-progress one (its approvals are kept).
@@ -2554,119 +2630,6 @@ export class InventoryMigrationService {
       return { success: true };
     } catch (error) {
       this.logger.error(`Failed to approve item ${productId}: ${error}`);
-      throw error;
-    }
-  }
-
-  async reusePreviousApprovals(
-    cutoverId: string,
-    productIds?: string[],
-  ): Promise<{ success: boolean; approvedCount: number; products: string[] }> {
-    try {
-      return await this.prisma.$transaction(async (tx) => {
-        const whereClause: any = {
-          cutoverId: { not: cutoverId }, 
-          migrationStatus: 'APPROVED', 
-        };
-
-        if (productIds && productIds.length > 0) {
-          whereClause.productId = { in: productIds };
-        }
-
-        const previousApprovals = await tx.costApproval.findMany({
-          where: whereClause,
-          orderBy: { approvedAt: 'desc' },
-          select: {
-            id: true,
-            productId: true,
-            cutoverId: true,
-            migrationStatus: true,
-            approvedCost: true,
-            source: true,
-            notes: true,
-            approvedAt: true,
-            approvedBy: true,
-            sellingPriceCents: true,
-            sellingPriceCurrency: true,
-            sellingPriceRangeMinCents: true,
-            sellingPriceRangeMaxCents: true,
-          },
-        });
-
-        if (previousApprovals.length === 0) {
-          return { success: true, approvedCount: 0, products: [] };
-        }
-
-        const existingApprovals = await tx.costApproval.findMany({
-          where: {
-            cutoverId,
-            productId: { in: previousApprovals.map((a) => a.productId) },
-          },
-          select: { productId: true },
-        });
-
-        const existingProductIds = new Set(existingApprovals.map((a) => a.productId));
-
-        const approvalsByProduct = new Map<string, typeof previousApprovals[0]>();
-        for (const approval of previousApprovals) {
-          if (!approvalsByProduct.has(approval.productId)) {
-            approvalsByProduct.set(approval.productId, approval);
-          }
-        }
-
-        const approvalsToCreate: typeof previousApprovals = [];
-        for (const [productId, approval] of approvalsByProduct.entries()) {
-          if (!existingProductIds.has(productId)) {
-            approvalsToCreate.push(approval);
-          }
-        }
-
-        if (approvalsToCreate.length === 0) {
-          return { success: true, approvedCount: 0, products: [] };
-        }
-
-        const createdProducts: string[] = [];
-        for (const approval of approvalsToCreate) {
-          await tx.costApproval.create({
-            data: {
-              cutoverId,
-              productId: approval.productId,
-              approvedCost: approval.approvedCost,
-              source: approval.source,
-              migrationStatus: 'APPROVED',
-              notes: approval.notes,
-              approvedAt: new Date(),
-              approvedBy: approval.approvedBy,
-            },
-          });
-          createdProducts.push(approval.productId);
-        }
-
-        const session = await tx.extractionSession.findFirst({
-          where: {
-            OR: [{ id: cutoverId }, { cutoverId: cutoverId }],
-          },
-        });
-
-        if (session) {
-          await tx.extractionSession.update({
-            where: { id: session.id },
-            data: {
-              processedItems: {
-                increment: approvalsToCreate.length,
-              },
-            },
-          });
-        }
-
-        return {
-          success: true,
-          approvedCount: approvalsToCreate.length,
-          products: createdProducts,
-        };
-      });
-    } catch (error) {
-      this.logger.error(`Failed to reuse previous approvals: ${error}`);
       throw error;
     }
   }

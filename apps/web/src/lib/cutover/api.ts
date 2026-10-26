@@ -145,13 +145,6 @@ export function setPrice(payload: { productId: string; priceCents: number; locat
   return apiFetch(`${BASE}/set-price`, { method: "POST", body: JSON.stringify(payload) });
 }
 
-export async function reusePreviousApprovals(cutoverId: string, productIds: string[]) {
-  return apiFetch<{ approvedCount: number; products: string[] }>(`${BASE}/reuse-previous-approvals`, {
-    method: "POST",
-    body: JSON.stringify({ cutoverId, productIds }),
-  });
-}
-
 export function addSupplierInitial(supplierName: string, initial: string) {
   return apiFetch(`${BASE}/suppliers/add-initial`, {
     method: "POST",

@@ -785,29 +785,6 @@ export class InventoryMigrationController {
     }
   }
 
-  @Post('reuse-previous-approvals')
-  async reusePreviousApprovals(
-    @Body() body: { cutoverId: string; productIds?: string[] },
-  ) {
-    try {
-      const result = await this.migrationService.reusePreviousApprovals(
-        body.cutoverId,
-        body.productIds || undefined,
-      );
-      return {
-        success: true,
-        approvedCount: result.approvedCount,
-        products: result.products,
-        message: `Successfully reused ${result.approvedCount} previous approval(s)`,
-      };
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: `No se pudieron reutilizar las aprobaciones anteriores: ${error}` },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
   @Post('update-batch-size')
   async updateBatchSize(@Body() body: { extractionSessionId: string; newBatchSize: number }) {
     try {
