@@ -17,7 +17,7 @@ import { SupplierService } from './supplier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { findOrCreateLaboratory } from '../products/laboratory';
 import { Prisma, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
-import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, RoleGuard, LocationGuard, Roles, scopedLocationId } from '../auth/guards/auth.guard';
 import {
   CutoverInput,
   CostApprovalRequest,
@@ -866,9 +866,9 @@ export class InventoryMigrationController {
   }
 
   @Get('extraction-sessions')
-  async listExtractionSessions(@Query('locationId') locationId?: string) {
+  async listExtractionSessions(@Req() req: any, @Query('locationId') locationId?: string) {
     try {
-      const sessions = await this.migrationService.listExtractionSessions(locationId);
+      const sessions = await this.migrationService.listExtractionSessions(scopedLocationId(req, locationId));
       return {
         success: true,
         sessions: sessions.map(session => ({
@@ -1079,8 +1079,8 @@ export class InventoryMigrationController {
   }
 
   @Get('status')
-  async getCutoverStatus(@Query('locationId') locationId?: string) {
-    const status = await this.migrationService.getCutoverStatus(locationId);
+  async getCutoverStatus(@Req() req: any, @Query('locationId') locationId?: string) {
+    const status = await this.migrationService.getCutoverStatus(scopedLocationId(req, locationId));
     return {
       ...status,
       cutoverDate: status.cutoverDate?.toISOString() || null,

@@ -6,12 +6,13 @@ import {
   HttpException,
   HttpStatus,
   UseGuards,
+  Req,
 } from '@nestjs/common';
-import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, RoleGuard, LocationGuard, Roles, scopedLocationId } from '../auth/guards/auth.guard';
 import { InventoryAgingService } from './inventory-aging.service';
 
 @Controller('inventory/aging')
-@UseGuards(AuthGuard, RoleGuard)
+@UseGuards(AuthGuard, RoleGuard, LocationGuard)
 @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
 export class InventoryAgingController {
   constructor(
@@ -20,12 +21,13 @@ export class InventoryAgingController {
 
   @Get('summary')
   async getAgingSummary(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('categoryId') categoryId?: string,
   ) {
     try {
       // Normalize empty strings to undefined
-      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedLocationId = scopedLocationId(req, locationId?.trim() || undefined);
       const normalizedCategoryId = categoryId?.trim() || undefined;
 
       // Filters are now pushed to the database query for efficiency
@@ -69,6 +71,7 @@ export class InventoryAgingController {
 
   @Get('products')
   async getProductAging(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('categoryId') categoryId?: string,
     @Query('riskLevel') riskLevel?: string,
@@ -77,7 +80,7 @@ export class InventoryAgingController {
   ) {
     try {
       // Normalize empty strings to undefined
-      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedLocationId = scopedLocationId(req, locationId?.trim() || undefined);
       const normalizedCategoryId = categoryId?.trim() || undefined;
       const normalizedRiskLevel = riskLevel?.trim() || undefined;
       const validRiskLevels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
@@ -155,10 +158,10 @@ export class InventoryAgingController {
   }
 
   @Get('location')
-  async getLocationAging(@Query('locationId') locationId?: string) {
+  async getLocationAging(@Req() req: any, @Query('locationId') locationId?: string) {
     try {
       // Normalize empty strings to undefined
-      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedLocationId = scopedLocationId(req, locationId?.trim() || undefined);
 
       // Filter pushed to database query for efficiency
       const agedBatches =
@@ -204,7 +207,7 @@ export class InventoryAgingController {
   }
 
   @Get('category')
-  async getCategoryAging(@Query('categoryId') categoryId?: string) {
+  async getCategoryAging(@Req() req: any, @Query('categoryId') categoryId?: string) {
     try {
       // Normalize empty strings to undefined
       const normalizedCategoryId = categoryId?.trim() || undefined;
@@ -212,7 +215,7 @@ export class InventoryAgingController {
       // Filter pushed to database query for efficiency
       const agedBatches =
         await this.inventoryAgingService.classifyInventoryAging(
-          undefined, // locationId
+          scopedLocationId(req), // all locations for an OWNER only
           normalizedCategoryId,
         );
 
@@ -255,6 +258,7 @@ export class InventoryAgingController {
 
   @Get('signals')
   async getActionableSignals(
+    @Req() req: any,
     @Query('severity') severity?: string,
     @Query('type') type?: string,
     @Query('limit') limit?: string,
@@ -265,7 +269,7 @@ export class InventoryAgingController {
       // Normalize empty strings to undefined
       const normalizedSeverity = severity?.trim() || undefined;
       const normalizedType = type?.trim() || undefined;
-      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedLocationId = scopedLocationId(req, locationId?.trim() || undefined);
       const normalizedCategoryId = categoryId?.trim() || undefined;
       const validSeverities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
       const validTypes = ['AT_RISK', 'SLOW_MOVING_EXPENSIVE', 'OVERSTOCKED_CATEGORY'];
@@ -345,12 +349,13 @@ export class InventoryAgingController {
 
   @Get('expiring')
   async getExpiringProducts(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('withinDays') withinDays?: string,
     @Query('includeExpired') includeExpired?: string,
   ) {
     try {
-      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedLocationId = scopedLocationId(req, locationId?.trim() || undefined);
       const days = withinDays ? parseInt(withinDays, 10) : 90;
       const expired = includeExpired !== 'false'; // default true
 
@@ -413,11 +418,12 @@ export class InventoryAgingController {
 
   @Post('clear-cache')
   async clearCache(
+    @Req() req: any,
     @Query('locationId') locationId?: string,
     @Query('categoryId') categoryId?: string,
   ) {
     try {
-      const normalizedLocationId = locationId?.trim() || undefined;
+      const normalizedLocationId = scopedLocationId(req, locationId?.trim() || undefined);
       const normalizedCategoryId = categoryId?.trim() || undefined;
 
       this.inventoryAgingService.clearAgingCache(

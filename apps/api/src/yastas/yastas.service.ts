@@ -209,6 +209,7 @@ export class YastasService {
   async updateSettlement(
     id: string,
     updates: { status?: 'PROVISIONAL' | 'CONFIRMED'; reportedAt?: Date; paidAt?: Date },
+    assertAccess: (locationId: string) => void = () => {},
   ) {
     const existing = await this.prisma.yastasSettlement.findUnique({ where: { id } });
     if (!existing) {
@@ -217,6 +218,7 @@ export class YastasService {
         HttpStatus.NOT_FOUND,
       );
     }
+    assertAccess(existing.locationId);
     return this.prisma.yastasSettlement.update({ where: { id }, data: updates });
   }
 

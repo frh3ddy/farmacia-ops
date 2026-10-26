@@ -258,30 +258,35 @@ export class LocationGuard implements CanActivate {
       request.body?.locationId;
 
     if (!requestedLocationId) {
-      // No location specified, allow (controller will handle)
+      // No location specified, allow (controller will handle — see scopedLocationId)
       return true;
     }
 
-    const accessibleLocations = request.accessibleLocations || [];
-    const currentLocation = request.currentLocation;
-
-    // OWNER can access all locations (multi-location reports)
-    if (currentLocation?.role === 'OWNER') {
-      return true;
-    }
-
-    // Check if user has access to requested location
-    const hasAccess = accessibleLocations.some(
-      (a: any) => a.locationId === requestedLocationId && a.isActive
-    );
-
-    if (!hasAccess) {
-      throw new HttpException(
-        { success: false, message: 'Access denied to this location' },
-        HttpStatus.FORBIDDEN
-      );
-    }
-
+    assertLocationAccess(request, requestedLocationId);
     return true;
   }
+}
+
+/** Throws 403 unless the session's employee may act on this location (OWNER: any). */
+export function assertLocationAccess(request: any, locationId: string): void {
+  if (request.currentLocation?.role === 'OWNER') return;
+  const hasAccess = (request.accessibleLocations || []).some(
+    (a: any) => a.locationId === locationId && a.isActive
+  );
+  if (!hasAccess) {
+    throw new HttpException(
+      { success: false, message: 'Access denied to this location' },
+      HttpStatus.FORBIDDEN
+    );
+  }
+}
+
+/**
+ * The location a list query may read. An omitted locationId means "all
+ * locations" only for an OWNER; anyone else gets their current location
+ * instead of every location's data.
+ */
+export function scopedLocationId(request: any, locationId?: string): string | undefined {
+  if (locationId || request.currentLocation?.role === 'OWNER') return locationId;
+  return request.currentLocation?.locationId;
 }

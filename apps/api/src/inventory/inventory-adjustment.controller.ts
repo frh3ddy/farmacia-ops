@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { AdjustmentType } from '@prisma/client';
-import { AuthGuard, RoleGuard, LocationGuard, Roles, Public } from '../auth/guards/auth.guard';
+import { AuthGuard, RoleGuard, LocationGuard, Roles, scopedLocationId, Public } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -239,10 +239,11 @@ export class InventoryAdjustmentController {
   @Get('product/:productId')
   @Roles('OWNER', 'MANAGER')
   async getAdjustmentsByProduct(
+    @Req() req: any,
     @Param('productId') productId: string,
     @Query('locationId') locationId?: string
   ) {
-    const adjustments = await this.adjustmentService.getAdjustmentsByProduct(productId, locationId);
+    const adjustments = await this.adjustmentService.getAdjustmentsByProduct(productId, scopedLocationId(req, locationId));
     return {
       success: true,
       count: adjustments.length,
