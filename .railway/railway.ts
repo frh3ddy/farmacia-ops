@@ -15,7 +15,9 @@ export default defineRailway(() => {
   const postgresVolume = volume("postgres-volume", { alerts: { usage: { "100": {}, "80": {}, "95": {} } }, allowOnlineResize: true, region: "us-west2", sizeMB: 500 });
   const api = service("api", {
     source: farmaciaOps,
-    build: { buildCommand: "npm run build:web && npm run build:api", buildEnvironment: "V3", builder: "RAILPACK", watchPatterns: ["/apps/api/**", "/apps/web/**"] },
+    // /prisma/**: a schema-only change must still deploy the api, whose
+    // pre-deploy step is the only place migrations run.
+    build: { buildCommand: "npm run build:web && npm run build:api", buildEnvironment: "V3", builder: "RAILPACK", watchPatterns: ["/apps/api/**", "/apps/web/**", "/prisma/**"] },
     // node directly, not `npm run start:api`: the npm chain kept two npm
     // processes resident. The heap cap makes V8 collect and shrink instead of
     // growing toward the 8 GB container limit; raise it on "heap out of memory".
@@ -30,7 +32,7 @@ export default defineRailway(() => {
   });
   const worker = service("worker", {
     source: farmaciaOps,
-    build: { buildCommand: "npm run build:worker", buildEnvironment: "V3", builder: "RAILPACK", watchPatterns: ["/apps/worker/**", "/package.json", "/package-lock.json"] },
+    build: { buildCommand: "npm run build:worker", buildEnvironment: "V3", builder: "RAILPACK", watchPatterns: ["/apps/worker/**", "/package.json", "/package-lock.json", "/prisma/**"] },
     start: "node --max-old-space-size=256 apps/worker/dist/worker.js",
     replicas: { "us-west2": 1 },
     networking: { privateNetworkEndpoint: "giving-creation" },
