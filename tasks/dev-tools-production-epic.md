@@ -46,17 +46,16 @@ Catalog cleanup and full wipe made sense before cutover; after it they erase the
 
 ## Existing test batches in production
 
-Run by the owner (read-only); decide per row, nothing is deleted automatically:
+Run by the owner (read-only); decide per row, nothing is deleted automatically. `L60AMVPDZJ48F` is the real Oriente store, so the query matches test batches by their markers, not by location:
 
 ```sql
 select i.id, p.name, l.name as location, i.quantity, i."unitCost", i."receivedAt"::date
 from "Inventory" i
 join "Product" p on p.id = i."productId"
 join "Location" l on l.id = i."locationId"
-where l."squareId" = 'L60AMVPDZJ48F'
-   or (i."unitCost" = 5 and i.source is null and i."migrationId" is null
-       and not exists (select 1 from "InventoryReceiving" r where r."inventoryBatchId" = i.id)
-       and not exists (select 1 from "InventoryAdjustment" a where a."createdBatchId" = i.id)
-       and not exists (select 1 from "TransferLine" t where t."destinationInventoryId" = i.id))
+where i."unitCost" = 5 and i.source is null and i."migrationId" is null
+  and not exists (select 1 from "InventoryReceiving" r where r."inventoryBatchId" = i.id)
+  and not exists (select 1 from "InventoryAdjustment" a where a."createdBatchId" = i.id)
+  and not exists (select 1 from "TransferLine" t where t."destinationInventoryId" = i.id)
 order by i."receivedAt";
 ```
