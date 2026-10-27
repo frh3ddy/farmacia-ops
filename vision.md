@@ -39,6 +39,9 @@ accountant, cashiers), working in Spanish.
 - **Square is the source of truth for the catalog, locations, and sales.** The app
   syncs from it, and only writes back on deliberate actions (prices, cutover deletions).
   Square's REST API is date-versioned; use the current `SquareClient` SDK.
+- **After a location's cutover, the app is the source of truth for its stock and cost.**
+  Square's stock counts are not the yardstick; the app's own records must add up, and a
+  nightly integrity check proves it (books balance, and every Square payment has its sale).
 - **Sales must be durable end to end:** a Square webhook is answered 2xx only after
   the event is queued; failed jobs are kept for replay; processing is idempotent
   on Square's `event_id`.
