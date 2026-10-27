@@ -251,18 +251,13 @@ export class LocationGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     
-    // Get requested locationId from params, query, or body
-    const requestedLocationId =
-      request.params?.locationId ||
-      request.query?.locationId ||
-      request.body?.locationId;
-
-    if (!requestedLocationId) {
-      // No location specified, allow (controller will handle — see scopedLocationId)
-      return true;
+    // Check every locationId sent (params, query, body): a handler may read any
+    // of them, so checking only the first let an allowed one cover another.
+    // None sent: allow — the controller scopes it (see scopedLocationId).
+    const requestedLocationIds = [request.params?.locationId, request.query?.locationId, request.body?.locationId];
+    for (const locationId of requestedLocationIds) {
+      if (locationId) assertLocationAccess(request, locationId);
     }
-
-    assertLocationAccess(request, requestedLocationId);
     return true;
   }
 }
@@ -284,9 +279,17 @@ export function assertLocationAccess(request: any, locationId: string): void {
 /**
  * The location a list query may read. An omitted locationId means "all
  * locations" only for an OWNER; anyone else gets their current location
- * instead of every location's data.
+ * instead of every location's data — or a 403 when they have none (e.g. their
+ * assignment there was deactivated), never "all".
  */
 export function scopedLocationId(request: any, locationId?: string): string | undefined {
   if (locationId || request.currentLocation?.role === 'OWNER') return locationId;
-  return request.currentLocation?.locationId;
+  const ownLocationId = request.currentLocation?.locationId;
+  if (!ownLocationId) {
+    throw new HttpException(
+      { success: false, message: 'Access denied to this location' },
+      HttpStatus.FORBIDDEN
+    );
+  }
+  return ownLocationId;
 }

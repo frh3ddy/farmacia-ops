@@ -1,6 +1,6 @@
 import { Controller, Post, Get, Body, Param, Query, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { TransferService } from './transfer.service';
-import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, RoleGuard, LocationGuard, Roles, assertLocationAccess } from '../auth/guards/auth.guard';
 
 interface ShipTransferDto {
   productId: string;
@@ -42,6 +42,8 @@ export class TransferController {
     if (!fromLocationId) {
       throw new HttpException({ success: false, message: 'fromLocationId is required' }, HttpStatus.BAD_REQUEST);
     }
+    // LocationGuard only reads `locationId`; shipping out needs access to the source.
+    assertLocationAccess(req, fromLocationId);
 
     const result = await this.transferService.ship({
       productId: body.productId,
@@ -70,6 +72,7 @@ export class TransferController {
       lineReceipts: body.lineReceipts,
       syncToSquare: body.syncToSquare ?? true,
       receivedBy: currentEmployee?.id,
+      assertAccess: (toLocationId) => assertLocationAccess(req, toLocationId),
     });
 
     return { success: true, message: `Received ${result.totalReceived} unit(s)`, data: result };
