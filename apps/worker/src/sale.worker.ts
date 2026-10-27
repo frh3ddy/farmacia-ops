@@ -9,7 +9,8 @@ import {
   SaleValidationError,
   UnmappedVariationError,
 } from './errors';
-import { mapVariationToProduct } from './catalog.mapper';
+import { mapVariationToProduct, type MappedProduct } from './catalog.mapper';
+import { toSaleLines } from './sale-lines';
 import { consumeBatchesFifo, type ConsumedBatch, type FifoConsumptionResult } from './fifo';
 import { debugLog } from './debug-log';
 
@@ -38,27 +39,6 @@ export function getPrisma(): PrismaClient {
     debugLog('[DEBUG] [SALE_WORKER] Prisma client initialized');
   }
   return prisma;
-}
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
-
-/**
- * Safely stringify objects that may contain BigInt values
- * BigInt values are converted to strings
- */
-function safeStringify(obj: any, space?: number): string {
-  return JSON.stringify(
-    obj,
-    (key, value) => {
-      if (typeof value === 'bigint') {
-        return value.toString() + 'n'; // Add 'n' suffix to indicate it was a BigInt
-      }
-      return value;
-    },
-    space,
-  );
 }
 
 // Lazy initialization of Square client (only when needed)
@@ -141,12 +121,6 @@ function getSquareClient(): SquareClient {
 // ============================================================================
 
 type FIFOCostResult = FifoConsumptionResult;
-
-interface SaleItemInput {
-  productId: string;
-  quantitySold: number;
-  salePrice: Prisma.Decimal | string | number;
-}
 
 interface SaleItemOutput {
   saleId: string;
@@ -659,149 +633,34 @@ export async function processSaleJob(job: Job): Promise<void> {
     );
   }
 
-  // Map Square line items to SaleItemInput
-  // Note: This assumes products are mapped by SKU or variation ID
-  // You may need to adjust the mapping logic based on your product setup
-  debugLog('[DEBUG] Mapping line items to SaleItemInput...');
-  const lineItems: SaleItemInput[] = [];
-  const yastasLineItems: Array<{ employeeId: string; faceAmount: Prisma.Decimal }> = [];
-
-  for (let i = 0; i < orderLineItems.length; i++) {
-    const orderLineItem = orderLineItems[i];
-    debugLog(`[DEBUG] Processing line item ${i + 1}/${orderLineItems.length}:`, {
-      uid: orderLineItem.uid,
-      name: orderLineItem.name,
-      catalogObjectId: orderLineItem.catalogObjectId,
-      quantity: orderLineItem.quantity,
-      // Note: catalogVersion is a BigInt, so we convert it to string
-      catalogVersion: orderLineItem.catalogVersion?.toString(),
-    });
-    if (!orderLineItem.uid && !orderLineItem.catalogObjectId) {
-      console.warn(`[DEBUG] WARNING: Skipping line item ${i + 1} without uid or catalogObjectId:`, orderLineItem);
-      continue;
-    }
-
-    // Map variation ID to product using CatalogMapping
-    const catalogObjectId = orderLineItem.catalogObjectId;
-    const itemName = orderLineItem.name;
-    debugLog(`[DEBUG] Looking up product for line item ${i + 1}:`, {
-      catalogObjectId,
-      itemName,
-    });
-
-    // Validate catalogObjectId exists (this is the variation ID)
-    if (!catalogObjectId) {
-      console.warn(`[DEBUG] WARNING: Line item ${i + 1} missing catalogObjectId, skipping`);
-      continue;
-    }
-
-    // Map variation to product using CatalogMapping
-    let productId: string;
-    let tracksInventory: boolean;
-    let mappedEmployeeId: string | null;
+  // Resolve each catalog item's product; an unmapped one fails the sale
+  // (the catalog sync creates the mapping, then the retry succeeds).
+  const mappings = new Map<string, MappedProduct>();
+  for (const { catalogObjectId } of orderLineItems) {
+    if (!catalogObjectId || mappings.has(catalogObjectId)) continue;
     try {
-      const mapped = await mapVariationToProduct(
-        catalogObjectId,
-        locationId,
-        getPrisma(),
-      );
-      productId = mapped.productId;
-      tracksInventory = mapped.tracksInventory;
-      mappedEmployeeId = mapped.employeeId;
-      debugLog(`[DEBUG] ✓ Product mapped for line item ${i + 1}:`, {
-        variationId: catalogObjectId,
-        productId,
-        locationId,
-        tracksInventory,
-      });
+      mappings.set(catalogObjectId, await mapVariationToProduct(catalogObjectId, locationId, getPrisma()));
     } catch (error) {
       if (error instanceof UnmappedVariationError) {
-        console.error(`[DEBUG] ERROR: Unmapped variation for line item ${i + 1}:`, {
-          variationId: error.squareVariationId,
-          locationId: error.locationId,
-          message: error.message,
-        });
         throw new SaleValidationError(
           `Square variation is not mapped to a product. Variation ID: ${error.squareVariationId}, Location ID: ${error.locationId}. ` +
             `Please run catalog sync to create mappings.`,
-          {
-            variationId: error.squareVariationId,
-            locationId: error.locationId,
-            orderLineItem: safeStringify(orderLineItem),
-            orderId,
-            squareId,
-          },
+          { variationId: error.squareVariationId, locationId: error.locationId, orderId, squareId },
         );
       }
-      // Re-throw other errors
       throw error;
     }
-
-    const quantity = orderLineItem.quantity
-      ? parseInt(orderLineItem.quantity, 10)
-      : 1;
-    debugLog(`[DEBUG] Line item ${i + 1} quantity:`, quantity);
-
-    if (quantity <= 0) {
-      console.error(`[DEBUG] ERROR: Line item ${i + 1} has invalid quantity`);
-      throw new SaleValidationError(
-        'Line item quantity must be positive',
-        { orderLineItem: safeStringify(orderLineItem) },
-      );
-    }
-
-    // Get price from line item
-    // totalMoney is the total price for the quantity (in cents)
-    // basePriceMoney would be the unit price, but we'll calculate from totalMoney
-    const totalMoney = orderLineItem.totalMoney;
-    debugLog(`[DEBUG] Line item ${i + 1} totalMoney:`, totalMoney);
-    
-    if (!totalMoney || totalMoney.amount === undefined || totalMoney.amount === null) {
-      console.error(`[DEBUG] ERROR: Line item ${i + 1} missing price information`);
-      throw new SaleValidationError(
-        'Line item missing price information',
-        { orderLineItem: safeStringify(orderLineItem) },
-      );
-    }
-
-    // Convert from cents to dollars and calculate unit price
-    // totalMoney.amount is a bigint, convert to string first
-    const totalPriceInDollars = new Prisma.Decimal(totalMoney.amount.toString()).div(100);
-    const unitPrice = totalPriceInDollars.div(quantity);
-    debugLog(`[DEBUG] Line item ${i + 1} pricing:`, {
-      totalPriceInDollars: totalPriceInDollars.toString(),
-      unitPrice: unitPrice.toString(),
-    });
-
-    if (!tracksInventory) {
-      // Yastás service item — never a Sale/SaleItem, never touches FIFO.
-      if (!mappedEmployeeId) {
-        throw new SaleValidationError(
-          `CatalogMapping for variation ${catalogObjectId} is flagged non-inventory (tracksInventory=false) but has no employeeId`,
-          { catalogObjectId, orderId, squareId, locationId },
-        );
-      }
-      yastasLineItems.push({ employeeId: mappedEmployeeId, faceAmount: totalPriceInDollars });
-      debugLog(`[DEBUG] ✓ Line item ${i + 1} mapped as Yastás operation (employee ${mappedEmployeeId})`);
-      continue;
-    }
-
-    lineItems.push({
-      productId: productId,
-      quantitySold: quantity,
-      salePrice: new Prisma.Decimal(unitPrice),
-    });
-    debugLog(`[DEBUG] ✓ Line item ${i + 1} mapped successfully`);
   }
 
+  const { saleItems: lineItems, yastasLines: yastasLineItems, skipped } = toSaleLines(orderLineItems, mappings, {
+    orderId,
+    squareId,
+    locationId,
+  });
+  if (skipped.length > 0) {
+    console.warn(`[SALE_WORKER] ${skipped.length} line(s) with no catalog item not recorded for payment ${squareId}`);
+  }
   debugLog('[DEBUG] Total line items mapped:', lineItems.length, 'Yastás line items:', yastasLineItems.length);
-  if (lineItems.length === 0 && yastasLineItems.length === 0) {
-    console.error('[DEBUG] ERROR: No valid line items found after mapping');
-    throw new SaleValidationError(
-      'No valid line items found after mapping',
-      { orderId, squareId, locationId },
-    );
-  }
 
   // Validate line items structure
   for (const item of lineItems) {

@@ -44,6 +44,8 @@ The mapping from Square order lines to sale items and Yastás lines (`processSal
 - Given a line with no catalog item, should report it as skipped instead of only warning (input for the open question on custom amounts)
 - Given the sale transaction, should have one Postgres-backed test covering a sale, a shortfall auto-cover and a Yastás line (api's `*.pg.spec.ts` pattern)
 
+Done: the mapping is `toSaleLines` (`apps/worker/src/sale-lines.ts`). Open: the transaction test needs Prisma on PGlite, which needs `@electric-sql/pglite` 0.4.3 + `pglite-socket` (the repo has 0.3.2; all 46 migrations already apply on PGlite).
+
 ---
 
 ## Record orders with several Yastás lines
