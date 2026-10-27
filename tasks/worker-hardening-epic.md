@@ -23,7 +23,7 @@ Production is `RAILWAY_ENVIRONMENT_NAME=production`, which Railway sets on the s
 
 ---
 
-## Count Yastás payments as recorded
+## ✅ Count Yastás payments as recorded
 
 The sales check counts a payment as recorded only when a `Sale` has its id; a Yastás-only payment creates a `YastasOperation` instead.
 
