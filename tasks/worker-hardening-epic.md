@@ -1,6 +1,6 @@
 # Worker Hardening Epic
 
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETED
 **Goal**: Every real Square payment is recorded exactly once, test sales never touch production stock, and the sale processor's money logic is tested and readable.
 
 ## Overview
@@ -69,7 +69,7 @@ Each Yastás line creates a `YastasOperation` with the payment id, and `squareId
 
 ---
 
-## Remove dead and duplicated code
+## ✅ Remove dead and duplicated code
 
 **Requirements**:
 - Given `catalog.sync.ts`, should delete everything except the Square client, which moves to one `square-client.ts` used by the sale processor and the sales check

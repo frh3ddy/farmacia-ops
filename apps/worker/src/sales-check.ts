@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import type { Queue } from 'bullmq';
-import { getSquareClient } from './catalog.sync';
+import { getSquareClient } from './square-client';
 import { paymentIdOf } from './failed-job';
 
 // Sales check (tasks/inventory-integrity-epic.md): every completed Square

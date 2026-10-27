@@ -50,6 +50,9 @@ export function toSaleLines(
     }
     // Square money is in centavos; the line total covers its whole quantity.
     const total = new Prisma.Decimal(amount.toString()).div(100);
+    if (total.lt(0)) {
+      throw new SaleValidationError('Line item salePrice must be non-negative', { orderLineItem: safeStringify(line) });
+    }
 
     if (!mapped.tracksInventory) {
       if (!mapped.employeeId) {

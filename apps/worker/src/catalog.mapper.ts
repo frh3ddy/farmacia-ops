@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { UnmappedVariationError, ProductNotFoundError } from './errors';
 import { debugLog } from './debug-log';
 
@@ -29,10 +29,7 @@ export interface MappedProduct {
 export async function mapVariationToProduct(
   squareVariationId: string,
   squareLocationId: string,
-  prismaClient: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  prismaClient: Prisma.TransactionClient,
 ): Promise<MappedProduct> {
   // Step 1: Convert Square location ID to internal location ID
   const location = await prismaClient.location.findUnique({

@@ -14,19 +14,19 @@ export class WorkerManager {
   private redisConfig: { host: string; port: number; password?: string; db: number };
 
   constructor() {
-    console.log('[DEBUG] [WORKER_MANAGER] Initializing WorkerManager');
+    debugLog('[DEBUG] [WORKER_MANAGER] Initializing WorkerManager');
     this.redisConfig = this.getRedisConfig();
-    console.log('[DEBUG] [WORKER_MANAGER] Redis config loaded');
+    debugLog('[DEBUG] [WORKER_MANAGER] Redis config loaded');
   }
 
   private getRedisConfig() {
-    console.log('[DEBUG] [WORKER_MANAGER] Getting Redis configuration');
+    debugLog('[DEBUG] [WORKER_MANAGER] Getting Redis configuration');
     const redisUrl = process.env.REDIS_URL;
     if (!redisUrl) {
       console.error('[DEBUG] [WORKER_MANAGER] ERROR: REDIS_URL not set');
       throw new Error('REDIS_URL environment variable is not set');
     }
-    console.log('[DEBUG] [WORKER_MANAGER] REDIS_URL found (masked)');
+    debugLog('[DEBUG] [WORKER_MANAGER] REDIS_URL found (masked)');
     const url = new URL(redisUrl);
     const config = {
       host: url.hostname,
@@ -34,7 +34,7 @@ export class WorkerManager {
       password: url.password || undefined,
       db: url.pathname ? parseInt(url.pathname.slice(1), 10) : 0,
     };
-    console.log('[DEBUG] [WORKER_MANAGER] Redis config parsed:', {
+    debugLog('[DEBUG] [WORKER_MANAGER] Redis config parsed:', {
       host: config.host,
       port: config.port,
       db: config.db,
@@ -47,16 +47,16 @@ export class WorkerManager {
    * Initialize and start all registered workers
    */
   async startAll() {
-    console.log('[DEBUG] [WORKER_MANAGER] ========================================');
-    console.log('[DEBUG] [WORKER_MANAGER] Starting worker initialization');
-    console.log(`[DEBUG] [WORKER_MANAGER] Registering ${WORKERS.length} worker(s)...\n`);
+    debugLog('[DEBUG] [WORKER_MANAGER] ========================================');
+    debugLog('[DEBUG] [WORKER_MANAGER] Starting worker initialization');
+    debugLog(`[DEBUG] [WORKER_MANAGER] Registering ${WORKERS.length} worker(s)...\n`);
 
     for (const config of WORKERS) {
-      console.log(`[DEBUG] [WORKER_MANAGER] Creating worker for queue: ${config.queueName}`);
+      debugLog(`[DEBUG] [WORKER_MANAGER] Creating worker for queue: ${config.queueName}`);
       const managedWorker = await this.createWorker(config);
       this.workers.push(managedWorker);
       this.setupWorkerEvents(managedWorker);
-      console.log(`[DEBUG] [WORKER_MANAGER] ✅ Registered worker: ${config.queueName}`);
+      debugLog(`[DEBUG] [WORKER_MANAGER] ✅ Registered worker: ${config.queueName}`);
 
       // Upsert, keyed by queue name: restarts and deploys keep one schedule.
       if (config.schedule) {
@@ -70,7 +70,7 @@ export class WorkerManager {
         const active = await managedWorker.queue.getActiveCount();
         const completed = await managedWorker.queue.getCompletedCount();
         const failed = await managedWorker.queue.getFailedCount();
-        console.log(`[DEBUG] [WORKER_MANAGER] Queue ${config.queueName} status:`, {
+        debugLog(`[DEBUG] [WORKER_MANAGER] Queue ${config.queueName} status:`, {
           waiting,
           active,
           completed,
@@ -78,11 +78,11 @@ export class WorkerManager {
         });
         
         if (waiting > 0) {
-          console.log(`[DEBUG] [WORKER_MANAGER] ⚠️ Found ${waiting} waiting jobs in queue ${config.queueName}`);
+          debugLog(`[DEBUG] [WORKER_MANAGER] ⚠️ Found ${waiting} waiting jobs in queue ${config.queueName}`);
         }
         
         if (failed > 0) {
-          console.log(`[DEBUG] [WORKER_MANAGER] ⚠️ Found ${failed} failed jobs in queue ${config.queueName}`);
+          debugLog(`[DEBUG] [WORKER_MANAGER] ⚠️ Found ${failed} failed jobs in queue ${config.queueName}`);
           // Get failed jobs to show details
           const failedJobs = await managedWorker.queue.getFailed(0, failed);
           for (const failedJob of failedJobs) {
@@ -99,8 +99,8 @@ export class WorkerManager {
       }
     }
 
-    console.log(`[DEBUG] [WORKER_MANAGER] 👂 All workers are listening for jobs...\n`);
-    console.log('[DEBUG] [WORKER_MANAGER] ========================================');
+    debugLog(`[DEBUG] [WORKER_MANAGER] 👂 All workers are listening for jobs...\n`);
+    debugLog('[DEBUG] [WORKER_MANAGER] ========================================');
   }
 
   private queueFor(name: string): Queue {
@@ -113,8 +113,8 @@ export class WorkerManager {
    * Create a worker and its associated queue
    */
   private async createWorker(config: WorkerConfig): Promise<ManagedWorker> {
-    console.log(`[DEBUG] [WORKER_MANAGER] Creating queue: ${config.queueName}`);
-    console.log(`[DEBUG] [WORKER_MANAGER] Redis config:`, {
+    debugLog(`[DEBUG] [WORKER_MANAGER] Creating queue: ${config.queueName}`);
+    debugLog(`[DEBUG] [WORKER_MANAGER] Redis config:`, {
       host: this.redisConfig.host,
       port: this.redisConfig.port,
       db: this.redisConfig.db,
@@ -130,10 +130,10 @@ export class WorkerManager {
         },
       },
     });
-    console.log(`[DEBUG] [WORKER_MANAGER] Queue created: ${config.queueName}`);
+    debugLog(`[DEBUG] [WORKER_MANAGER] Queue created: ${config.queueName}`);
 
-    console.log(`[DEBUG] [WORKER_MANAGER] Creating worker: ${config.queueName}`);
-    console.log(`[DEBUG] [WORKER_MANAGER] Worker concurrency: ${config.concurrency ?? 5}`);
+    debugLog(`[DEBUG] [WORKER_MANAGER] Creating worker: ${config.queueName}`);
+    debugLog(`[DEBUG] [WORKER_MANAGER] Worker concurrency: ${config.concurrency ?? 5}`);
     
     const worker = new Worker(
       config.queueName,
@@ -143,21 +143,21 @@ export class WorkerManager {
         concurrency: config.concurrency ?? 5,
       }
     );
-    console.log(`[DEBUG] [WORKER_MANAGER] Worker created: ${config.queueName}`);
+    debugLog(`[DEBUG] [WORKER_MANAGER] Worker created: ${config.queueName}`);
 
     // Add 'ready' event to confirm worker is listening
     worker.on('ready', () => {
-      console.log(`[DEBUG] [WORKER_MANAGER] ✅ Worker ${config.queueName} is ready and listening for jobs`);
+      debugLog(`[DEBUG] [WORKER_MANAGER] ✅ Worker ${config.queueName} is ready and listening for jobs`);
     });
 
     // Add 'closing' event
     worker.on('closing', () => {
-      console.log(`[DEBUG] [WORKER_MANAGER] Worker ${config.queueName} is closing`);
+      debugLog(`[DEBUG] [WORKER_MANAGER] Worker ${config.queueName} is closing`);
     });
 
     // Add 'closed' event
     worker.on('closed', () => {
-      console.log(`[DEBUG] [WORKER_MANAGER] Worker ${config.queueName} is closed`);
+      debugLog(`[DEBUG] [WORKER_MANAGER] Worker ${config.queueName} is closed`);
     });
 
     return { config, queue, worker };
@@ -169,7 +169,7 @@ export class WorkerManager {
   private setupWorkerEvents(managed: ManagedWorker) {
     const { worker, config } = managed;
 
-    console.log(`[DEBUG] [WORKER_MANAGER] Setting up event handlers for: ${config.queueName}`);
+    debugLog(`[DEBUG] [WORKER_MANAGER] Setting up event handlers for: ${config.queueName}`);
 
     worker.on('active', (job) => {
       debugLog(`[DEBUG] [WORKER_MANAGER] 🔄 [${config.queueName}] Job ${job.id} started`);
@@ -197,10 +197,10 @@ export class WorkerManager {
     });
 
     worker.on('progress', (job, progress) => {
-      console.log(`[DEBUG] [WORKER_MANAGER] 📊 [${config.queueName}] Job ${job.id} progress:`, progress);
+      debugLog(`[DEBUG] [WORKER_MANAGER] 📊 [${config.queueName}] Job ${job.id} progress:`, progress);
     });
 
-    console.log(`[DEBUG] [WORKER_MANAGER] Event handlers set up for: ${config.queueName}`);
+    debugLog(`[DEBUG] [WORKER_MANAGER] Event handlers set up for: ${config.queueName}`);
   }
 
   /**

@@ -2,7 +2,7 @@ import { Job } from 'bullmq';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { getSquareClient } from './catalog.sync';
+import { getSquareClient } from './square-client';
 import {
   InsufficientInventoryError,
   DatabaseTransactionError,
@@ -49,8 +49,6 @@ export function getPrisma(): PrismaClient {
 // Type Definitions
 // ============================================================================
 
-type FIFOCostResult = FifoConsumptionResult;
-
 interface SaleItemOutput {
   saleId: string;
   productId: string;
@@ -70,10 +68,6 @@ interface SaleTotals {
 // ============================================================================
 
 /**
- * Calculate FIFO cost for a sale item by consuming inventory batches in chronological order
- * FIFO ordering is mandatory: always order by receivedAt ASC, never by createdAt
- */
-/**
  * Resolve a cost basis for a product with no (or insufficient) inventory,
  * so a shortfall can be auto-covered instead of failing the sale. Ported
  * from InventoryAdjustmentService.getLastKnownCost
@@ -83,10 +77,7 @@ interface SaleTotals {
 async function getLastKnownCost(
   productId: string,
   locationId: string,
-  client: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  client: Prisma.TransactionClient,
 ): Promise<Prisma.Decimal | null> {
   const supplierProduct = await client.supplierProduct.findFirst({
     where: { productId, isPreferred: true },
@@ -107,18 +98,17 @@ async function getLastKnownCost(
   return approval ? approval.approvedCost : null;
 }
 
+/**
+ * Calculate FIFO cost for a sale item by consuming inventory batches in chronological order
+ * FIFO ordering is mandatory: always order by receivedAt ASC, never by createdAt
+ */
 async function calculateFIFOCost(
   productId: string,
   locationId: string,
   quantitySold: number,
   squareId: string,
-  tx?: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
-): Promise<FIFOCostResult> {
-  const client = tx || getPrisma();
-
+  client: Prisma.TransactionClient,
+): Promise<FifoConsumptionResult> {
   // Step 1: Query inventory batches (FIFO order - NON-NEGOTIABLE)
   const batches = await client.inventory.findMany({
     where: {
@@ -196,16 +186,11 @@ async function calculateFIFOCost(
  */
 async function deductInventory(
   consumedBatches: ConsumedBatch[],
-  tx?: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  client: Prisma.TransactionClient,
 ): Promise<void> {
   if (consumedBatches.length === 0) {
     return;
   }
-
-  const client = tx || getPrisma();
 
   // Single batched UPDATE via a VALUES join instead of one sequential
   // round-trip per consumed batch. A sale item touching several FIFO
@@ -251,24 +236,13 @@ async function processSaleItem(
   quantitySold: number,
   salePrice: Prisma.Decimal | string | number,
   squareId: string,
-  tx?: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  client: Prisma.TransactionClient,
 ): Promise<SaleItemOutput> {
-  const client = tx || getPrisma();
-
   // Step 1: Calculate FIFO cost (this queries inventory)
-  const costResult = await calculateFIFOCost(
-    productId,
-    locationId,
-    quantitySold,
-    squareId,
-    tx,
-  );
+  const costResult = await calculateFIFOCost(productId, locationId, quantitySold, squareId, client);
 
   // Step 2: Deduct inventory (atomic update)
-  await deductInventory(costResult.consumedBatches, tx);
+  await deductInventory(costResult.consumedBatches, client);
 
   // Step 3: Create immutable SaleItem snapshot
   const saleItem = await client.saleItem.create({
@@ -306,10 +280,7 @@ async function processSaleItem(
 async function recordInventoryConsumption(
   saleItemId: string,
   consumedBatches: ConsumedBatch[],
-  client: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  client: Prisma.TransactionClient,
 ): Promise<void> {
   // Batch fetch unit costs for all consumed batches
   const batchIds = consumedBatches.map(b => b.batchId);
@@ -434,7 +405,7 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   debugLog('[DEBUG] Validating payment object fields...');
   
-  if (!payment || typeof payment !== 'object') {
+  if (typeof payment !== 'object') {
     console.error('[DEBUG] ERROR: Payment is not a valid object');
     throw new SaleValidationError(
       'Payment is not a valid object',
@@ -586,25 +557,6 @@ export async function processSaleJob(job: Job): Promise<void> {
     console.warn(`[SALE_WORKER] ${skipped.length} line(s) with no catalog item not recorded for payment ${squareId}`);
   }
   debugLog('[DEBUG] Total line items mapped:', lineItems.length, 'Yastás line items:', yastasLineItems.length);
-
-  // Validate line items structure
-  for (const item of lineItems) {
-    if (!item.productId) {
-      throw new SaleValidationError('Line item missing productId', { item });
-    }
-    if (!item.quantitySold || item.quantitySold <= 0) {
-      throw new SaleValidationError(
-        'Line item quantity must be positive',
-        { item },
-      );
-    }
-    if (!item.salePrice || new Prisma.Decimal(item.salePrice).lt(0)) {
-      throw new SaleValidationError(
-        'Line item salePrice must be non-negative',
-        { item },
-      );
-    }
-  }
 
   // Phase 3 & 4: Create Sale Record and Process Items (all in transaction)
   debugLog('[DEBUG] Starting transaction to create sale and process items...');
@@ -778,15 +730,8 @@ export async function processSaleJob(job: Job): Promise<void> {
     debugLog('[DEBUG] Item Count:', itemCount);
     debugLog('[DEBUG] ========================================');
   } catch (error) {
-    // Error handling
-    if (error instanceof UnmappedVariationError) {
-      console.error('Unmapped variation error:', {
-        variationId: error.squareVariationId,
-        locationId: error.locationId,
-        message: error.message,
-        squareId: squareId,
-      });
-      // Re-throw as SaleValidationError (already converted above, but handle here for safety)
+    // A setup problem found inside the transaction (e.g. no Yastás wallet) keeps its type.
+    if (error instanceof SaleValidationError) {
       throw error;
     }
 
