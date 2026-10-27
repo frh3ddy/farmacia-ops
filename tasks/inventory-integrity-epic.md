@@ -1,6 +1,6 @@
 # Inventory Integrity Epic
 
-**Status**: 🚧 IN PROGRESS
+**Status**: ✅ COMPLETED
 **Goal**: A nightly check proves the app's stock and sales records are whole, so a bookkeeping bug or a lost Square sale is found the next morning instead of never.
 
 ## Overview
@@ -83,7 +83,7 @@ Run both checks every night in the worker and store the result for the web banne
 
 ---
 
-## Integrity banner in the web app
+## ✅ Integrity banner in the web app
 
 Show the owner the latest run's problems where they will see them.
 

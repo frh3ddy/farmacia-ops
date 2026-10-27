@@ -1,4 +1,5 @@
 import { useState, type ComponentType } from "react";
+import { IntegrityBanner } from "./components/IntegrityBanner";
 import { Sidebar } from "./components/Sidebar";
 import { NAV_SECTIONS } from "./lib/navigation";
 import { LocationsScreen } from "./sections/ops/LocationsScreen";
@@ -62,6 +63,7 @@ export function App() {
     <div className="flex min-h-screen">
       <Sidebar activeItem={activeItem} onSelect={setActiveItem} />
       <main className="h-screen flex-1 overflow-y-auto bg-(--color-surface) px-8 py-4">
+        <IntegrityBanner />
         {Screen ? <Screen /> : <ComingSoon label={item.label} sectionDescription={section.description} />}
       </main>
     </div>

@@ -1160,4 +1160,8 @@ export class InventoryReportsService {
       consumptionCount: batch.consumptions.length,
     };
   }
+
+  getLatestIntegrityRun() {
+    return this.prisma.integrityRun.findFirst({ orderBy: { ranAt: 'desc' } });
+  }
 }
