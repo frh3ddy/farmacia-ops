@@ -9,6 +9,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import type { Job } from 'bullmq';
 import { getPrisma, processSaleJob } from './sale.worker';
+import { SaleValidationError } from './errors';
 import { booksMismatches, loadBooks } from './books-check';
 
 // The worker's moduleResolution can't see package subpath exports; Node's require can.
@@ -42,12 +43,12 @@ afterAll(async () => {
   await db?.close();
 });
 
-const job = (lineItems: object[], paymentId = 'p-1') =>
+const job = (lineItems: object[], paymentId = 'p-1', squareLocationId = 'SQ-CENTRO') =>
   ({
     id: `evt-${paymentId}`,
     data: {
       payload: {
-        object: { payment: { id: paymentId, location_id: 'SQ-CENTRO', order_id: `o-${paymentId}`, created_at: '2026-10-27T18:00:00Z' } },
+        object: { payment: { id: paymentId, location_id: squareLocationId, order_id: `o-${paymentId}`, created_at: '2026-10-27T18:00:00Z' } },
         _testOrderData: { id: `o-${paymentId}`, lineItems },
       },
     },
@@ -138,4 +139,11 @@ test('an order with two Yastás lines', async () => {
     ],
     walletChange: '-350',
   });
+});
+
+test('a Yastás payment at a location with no wallet', async () => {
+  await getPrisma().location.create({ data: { squareId: 'SQ-NORTE', name: 'Norte' } });
+
+  // A setup problem, not a database failure: it must keep its type.
+  await expect(processSaleJob(job([line('v-luz', '1', 25000)], 'p-3', 'SQ-NORTE'))).rejects.toThrow(SaleValidationError);
 });

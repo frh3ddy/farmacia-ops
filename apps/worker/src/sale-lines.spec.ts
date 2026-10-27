@@ -65,6 +65,10 @@ describe('toSaleLines', () => {
     expect(() => toSaleLines([noPrice], new Map([['v-jarabe', product('jarabe')]]), context)).toThrow(/missing price information/);
   });
 
+  it('given a negative line total, fails with a validation error', () => {
+    expect(() => toSaleLines([line('v-jarabe', '1', -5000)], new Map([['v-jarabe', product('jarabe')]]), context)).toThrow(/must be non-negative/);
+  });
+
   it('given only custom-amount lines, fails because nothing can be recorded', () => {
     expect(() => toSaleLines([line(undefined, '1', 2000)], new Map(), context)).toThrow(/No valid line items found after mapping/);
   });
