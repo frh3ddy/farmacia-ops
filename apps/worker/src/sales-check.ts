@@ -62,12 +62,18 @@ export async function loadSalesCheck(
     where: { squareId: { in: payments.map((p) => p.id) } },
     select: { squareId: true },
   });
-  const failedJobs = await salesQueue.getFailed();
-
   return {
     payments,
     recordedPaymentIds: new Set(recorded.map((s) => s.squareId)),
-    failedJobPaymentIds: new Set(failedJobs.map((job) => job.data?.payload?.object?.payment?.id).filter(Boolean)),
+    failedJobPaymentIds: failedJobPaymentIds(await salesQueue.getFailed()),
     cutoff: window.cutoff,
   };
+}
+
+/**
+ * Square payment ids of failed sale jobs. BullMQ's getFailed() can return
+ * undefined for a failed id whose job data is gone, so those are skipped.
+ */
+export function failedJobPaymentIds(jobs: Array<{ data?: any } | undefined>): Set<string> {
+  return new Set(jobs.map((job) => job?.data?.payload?.object?.payment?.id).filter((id): id is string => !!id));
 }
