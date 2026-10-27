@@ -15,10 +15,7 @@ import { AuthService } from './auth.service';
 import { EmployeeService } from './employee.service';
 import { LocationsService } from '../locations/locations.service';
 import { DeviceType } from '@prisma/client';
-import { AuthGuard, RoleGuard, Roles } from './guards/auth.guard';
-
-/** What AuthGuard attaches to the request: the validated session and its employee/locations. */
-type AuthedRequest = Awaited<ReturnType<AuthService['validateSession']>>;
+import { AuthGuard, Roles, GuardedRequest } from './guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -175,8 +172,8 @@ export class AuthController {
   // Device Deactivation
   // --------------------------------------------------------------------------
   @Post('device/:deviceId/deactivate')
-  @UseGuards(AuthGuard, RoleGuard)
-  async deactivateDevice(@Param('deviceId') deviceId: string, @Req() req: AuthedRequest) {
+  @UseGuards(AuthGuard)
+  async deactivateDevice(@Param('deviceId') deviceId: string, @Req() req: GuardedRequest) {
     await this.authService.deactivateDevice(deviceId, req.employee.id);
 
     return {
@@ -189,8 +186,8 @@ export class AuthController {
   // Get Active Devices
   // --------------------------------------------------------------------------
   @Get('devices')
-  @UseGuards(AuthGuard, RoleGuard)
-  async getActiveDevices(@Req() req: AuthedRequest, @Query('locationId') locationId?: string) {
+  @UseGuards(AuthGuard)
+  async getActiveDevices(@Req() req: GuardedRequest, @Query('locationId') locationId?: string) {
     const { employee, currentLocation } = req;
     const targetLocationId = locationId || currentLocation?.locationId;
     if (!targetLocationId) {
@@ -257,7 +254,7 @@ export class AuthController {
   // Refresh Session
   // --------------------------------------------------------------------------
   @Post('pin/refresh')
-  @UseGuards(AuthGuard, RoleGuard)
+  @UseGuards(AuthGuard)
   async refreshSession(@Headers('x-session-token') sessionToken: string) {
     const result = await this.authService.refreshSession(sessionToken);
 
@@ -272,7 +269,7 @@ export class AuthController {
   // Switch Location
   // --------------------------------------------------------------------------
   @Post('switch-location')
-  @UseGuards(AuthGuard, RoleGuard)
+  @UseGuards(AuthGuard)
   async switchLocation(
     @Body() body: SwitchLocationDto,
     @Headers('x-session-token') sessionToken: string
@@ -300,8 +297,8 @@ export class AuthController {
   // Get Current Session
   // --------------------------------------------------------------------------
   @Get('me')
-  @UseGuards(AuthGuard, RoleGuard)
-  async getCurrentSession(@Req() req: AuthedRequest) {
+  @UseGuards(AuthGuard)
+  async getCurrentSession(@Req() req: GuardedRequest) {
     const { session, employee, currentLocation, accessibleLocations } = req;
 
     return {
@@ -365,7 +362,7 @@ export class AuthController {
   // Get Audit Logs
   // --------------------------------------------------------------------------
   @Get('audit-logs')
-  @UseGuards(AuthGuard, RoleGuard)
+  @UseGuards(AuthGuard)
   @Roles('OWNER')
   async getAuditLogs(
     @Query('locationId') locationId?: string,
@@ -395,7 +392,7 @@ export class AuthController {
   // Cleanup Expired Sessions (admin endpoint)
   // --------------------------------------------------------------------------
   @Post('sessions/cleanup')
-  @UseGuards(AuthGuard, RoleGuard)
+  @UseGuards(AuthGuard)
   @Roles('OWNER')
   async cleanupExpiredSessions() {
     const result = await this.authService.cleanupExpiredSessions();

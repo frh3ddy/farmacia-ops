@@ -22,7 +22,7 @@ import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
 import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from './medication-definition';
 import { findOrCreateLaboratory } from './laboratory';
-import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { PharmaceuticalForm, AdministrationRoute, PackagingType } from '@prisma/client';
 
@@ -87,7 +87,7 @@ const imageFileFilter = (_req: any, file: any, cb: any) => {
 };
 
 @Controller('products')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 export class ProductsController {
   constructor(
     private readonly productsService: ProductsService,
@@ -104,7 +104,7 @@ export class ProductsController {
   @Post()
   @Roles('OWNER', 'MANAGER')
   @HttpCode(HttpStatus.CREATED)
-  async createProduct(@Body() body: CreateProductDto, @Req() req: any) {
+  async createProduct(@Body() body: CreateProductDto, @Req() req: GuardedRequest) {
     // Validate required fields
     if (!body.name || body.name.trim().length === 0) {
       throw new HttpException(
@@ -202,7 +202,7 @@ export class ProductsController {
    */
   @Post('sync-to-square')
   @Roles('OWNER', 'MANAGER')
-  async syncToSquare(@Body() body: any, @Req() req: any) {
+  async syncToSquare(@Body() body: any, @Req() req: GuardedRequest) {
     const locationId = body.locationId || req.currentLocation?.locationId;
     if (!locationId) {
       throw new BadRequestException('Location ID is required');
@@ -224,7 +224,7 @@ export class ProductsController {
    */
   @Get('catalog-search')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
-  async catalogSearch(@Query('q') q: string, @Query('locationId') locationId: string, @Req() req: any) {
+  async catalogSearch(@Query('q') q: string, @Query('locationId') locationId: string, @Req() req: GuardedRequest) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.catalogSearchService.search(q || '', targetLocationId);
     return { success: true, ...result };
@@ -327,7 +327,7 @@ export class ProductsController {
     @Query('limit') limitStr: string,
     @Query('search') search: string,
     @Query('exact') exact: string,
-    @Req() req: any,
+    @Req() req: GuardedRequest,
   ) {
     // Use query param or current location
     const targetLocationId = locationId || req.currentLocation?.locationId;
@@ -397,7 +397,7 @@ export class ProductsController {
   async getSupplierCatalog(
     @Param('supplierId') supplierId: string,
     @Query('locationId') locationId: string,
-    @Req() req: any,
+    @Req() req: GuardedRequest,
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
 
@@ -563,7 +563,7 @@ export class ProductsController {
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async getProductCounts(
     @Query('locationId') locationId: string,
-    @Req() req: any,
+    @Req() req: GuardedRequest,
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProductCounts(targetLocationId);
@@ -582,7 +582,7 @@ export class ProductsController {
   async getProduct(
     @Param('id') id: string,
     @Query('locationId') locationId: string,
-    @Req() req: any,
+    @Req() req: GuardedRequest,
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProduct(id, targetLocationId);
@@ -599,7 +599,7 @@ export class ProductsController {
   async updatePrice(
     @Param('id') id: string,
     @Body() body: UpdatePriceDto,
-    @Req() req: any,
+    @Req() req: GuardedRequest,
   ) {
     if (body.sellingPrice === undefined || body.sellingPrice === null) {
       throw new HttpException(

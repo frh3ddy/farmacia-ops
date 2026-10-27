@@ -7,7 +7,7 @@ import {
   HttpException,
   UseGuards,
 } from '@nestjs/common';
-import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, Roles } from '../auth/guards/auth.guard';
 import { CatalogService, CatalogSyncResult } from './catalog.service';
 
 interface SyncCatalogDto {
@@ -22,7 +22,7 @@ interface SyncCatalogResponse {
 }
 
 @Controller('admin/square/catalog')
-@UseGuards(AuthGuard, RoleGuard)
+@UseGuards(AuthGuard)
 @Roles('OWNER', 'MANAGER')
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}

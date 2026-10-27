@@ -19,7 +19,7 @@ import {
   import { WebhooksHelper } from 'square';
   import { SaleQueue } from '../queues/sale.queue';
   import { SalesTestService, CreateTestSaleInput } from './sales-test.service';
-  import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
+  import { AuthGuard, Roles } from '../auth/guards/auth.guard';
 
   @Controller('webhooks/square')
   export class SquareWebhookController {
@@ -116,7 +116,7 @@ import {
   // Sales Testing Controller - For testing sales with real product data
   // ============================================================================
   @Controller('api/sales-test')
-  @UseGuards(AuthGuard, RoleGuard)
+  @UseGuards(AuthGuard)
   export class SalesTestController {
     constructor(private readonly salesTestService: SalesTestService) {}
 

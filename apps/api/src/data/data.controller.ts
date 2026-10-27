@@ -1,9 +1,9 @@
 import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, Roles } from '../auth/guards/auth.guard';
 
 @Controller('api')
-@UseGuards(AuthGuard, RoleGuard)
+@UseGuards(AuthGuard)
 export class DataController {
   constructor(private readonly prisma: PrismaService) {}
 

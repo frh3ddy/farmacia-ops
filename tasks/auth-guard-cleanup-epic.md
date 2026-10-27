@@ -1,6 +1,6 @@
 # Auth Guard Cleanup Epic
 
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETED
 **Goal**: One guard path per request, with typed requests, and no dead auth code.
 
 ## Overview
@@ -9,7 +9,7 @@ Every api route depends on `apps/api/src/auth/guards/auth.guard.ts`, but it stil
 
 ---
 
-## Remove SessionGuard
+## ✅ Remove SessionGuard
 
 `SessionGuard` duplicates `AuthGuard`'s session logic and no route uses it.
 
@@ -18,7 +18,7 @@ Every api route depends on `apps/api/src/auth/guards/auth.guard.ts`, but it stil
 
 ---
 
-## Single role check
+## ✅ Single role check
 
 `@UseGuards(AuthGuard, RoleGuard)` checks roles twice, since `AuthGuard` already enforces `@Roles`.
 
@@ -28,7 +28,7 @@ Every api route depends on `apps/api/src/auth/guards/auth.guard.ts`, but it stil
 
 ---
 
-## Typed guarded request
+## ✅ Typed guarded request
 
 Guards, helpers and handlers take `request: any` / `req: any`.
 

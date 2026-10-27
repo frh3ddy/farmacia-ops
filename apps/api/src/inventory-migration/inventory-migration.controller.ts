@@ -17,7 +17,7 @@ import { SupplierService } from './supplier.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { findOrCreateLaboratory } from '../products/laboratory';
 import { Prisma, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
-import { AuthGuard, RoleGuard, LocationGuard, Roles, scopedLocationId } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, GuardedRequest } from '../auth/guards/auth.guard';
 import {
   CutoverInput,
   CostApprovalRequest,
@@ -33,7 +33,7 @@ import {
 } from './inventory-migration.dto';
 
 @Controller('admin/inventory/cutover')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 @Roles('OWNER', 'MANAGER')
 export class InventoryMigrationController {
   constructor(
@@ -534,7 +534,7 @@ export class InventoryMigrationController {
   }
 
   @Post('approve-batch')
-  async approveBatch(@Body() body: ApproveBatchRequest, @Req() req: any) {
+  async approveBatch(@Body() body: ApproveBatchRequest, @Req() req: GuardedRequest) {
     const currentEmployee = req.employee;
     try {
       const approvedCosts = body.approvedCosts.map((ac) => ({
@@ -755,7 +755,7 @@ export class InventoryMigrationController {
       } | null;
       labName?: string | null;
     },
-    @Req() req: any,
+    @Req() req: GuardedRequest,
   ) {
     try {
       const labId = body.labName ? await findOrCreateLaboratory(this.prisma, body.labName) : undefined;
@@ -866,7 +866,7 @@ export class InventoryMigrationController {
   }
 
   @Get('extraction-sessions')
-  async listExtractionSessions(@Req() req: any, @Query('locationId') locationId?: string) {
+  async listExtractionSessions(@Req() req: GuardedRequest, @Query('locationId') locationId?: string) {
     try {
       const sessions = await this.migrationService.listExtractionSessions(scopedLocationId(req, locationId));
       return {
@@ -886,7 +886,7 @@ export class InventoryMigrationController {
   }
 
   @Post('approve-costs')
-  async approveExtractedCosts(@Body() body: ApproveCostsRequest, @Req() req: any) {
+  async approveExtractedCosts(@Body() body: ApproveCostsRequest, @Req() req: GuardedRequest) {
     const currentEmployee = req.employee;
     try {
       const approvedCosts = body.approvedCosts.map((ac) => ({
@@ -934,12 +934,12 @@ export class InventoryMigrationController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
-  async cutover(@Body() body: InitiateCutoverRequest, @Req() req: any) {
+  async cutover(@Body() body: InitiateCutoverRequest, @Req() req: GuardedRequest) {
     return this.initiateCutover(body, req);
   }
 
   @Post('initiate')
-  async initiateCutover(@Body() body: InitiateCutoverRequest, @Req() req: any) {
+  async initiateCutover(@Body() body: InitiateCutoverRequest, @Req() req: GuardedRequest) {
     const currentEmployee = req.employee;
     const cutoverDate = this.parseDate(body.cutoverDate);
     if (!cutoverDate) {
@@ -1079,7 +1079,7 @@ export class InventoryMigrationController {
   }
 
   @Get('status')
-  async getCutoverStatus(@Req() req: any, @Query('locationId') locationId?: string) {
+  async getCutoverStatus(@Req() req: GuardedRequest, @Query('locationId') locationId?: string) {
     const status = await this.migrationService.getCutoverStatus(scopedLocationId(req, locationId));
     return {
       ...status,

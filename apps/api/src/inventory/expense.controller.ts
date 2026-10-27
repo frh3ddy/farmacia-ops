@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { ExpenseService } from './expense.service';
 import { ExpenseType } from '@prisma/client';
-import { AuthGuard, RoleGuard, LocationGuard, Roles, Public } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, Public, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 /**
  * Parse a date string that could be either:
@@ -49,7 +49,7 @@ interface CreateExpenseDto {
 }
 
 @Controller('expenses')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 export class ExpenseController {
   constructor(private readonly expenseService: ExpenseService) {}
 
@@ -76,7 +76,7 @@ export class ExpenseController {
   @Get('summary/report')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getExpenseSummary(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -101,7 +101,7 @@ export class ExpenseController {
   @Get()
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async listExpenses(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('type') type?: ExpenseType,
     @Query('startDate') startDate?: string,
@@ -137,7 +137,7 @@ export class ExpenseController {
   // --------------------------------------------------------------------------
   @Post()
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async createExpense(@Body() body: CreateExpenseDto, @Req() req: any) {
+  async createExpense(@Body() body: CreateExpenseDto, @Req() req: RoleGuardedRequest) {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
 

@@ -8,11 +8,11 @@ import {
   UseGuards,
   Req,
 } from '@nestjs/common';
-import { AuthGuard, RoleGuard, LocationGuard, Roles, scopedLocationId } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, GuardedRequest } from '../auth/guards/auth.guard';
 import { InventoryAgingService } from './inventory-aging.service';
 
 @Controller('inventory/aging')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
 export class InventoryAgingController {
   constructor(
@@ -21,7 +21,7 @@ export class InventoryAgingController {
 
   @Get('summary')
   async getAgingSummary(
-    @Req() req: any,
+    @Req() req: GuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('categoryId') categoryId?: string,
   ) {
@@ -71,7 +71,7 @@ export class InventoryAgingController {
 
   @Get('products')
   async getProductAging(
-    @Req() req: any,
+    @Req() req: GuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('categoryId') categoryId?: string,
     @Query('riskLevel') riskLevel?: string,
@@ -158,7 +158,7 @@ export class InventoryAgingController {
   }
 
   @Get('location')
-  async getLocationAging(@Req() req: any, @Query('locationId') locationId?: string) {
+  async getLocationAging(@Req() req: GuardedRequest, @Query('locationId') locationId?: string) {
     try {
       // Normalize empty strings to undefined
       const normalizedLocationId = scopedLocationId(req, locationId?.trim() || undefined);
@@ -207,7 +207,7 @@ export class InventoryAgingController {
   }
 
   @Get('category')
-  async getCategoryAging(@Req() req: any, @Query('categoryId') categoryId?: string) {
+  async getCategoryAging(@Req() req: GuardedRequest, @Query('categoryId') categoryId?: string) {
     try {
       // Normalize empty strings to undefined
       const normalizedCategoryId = categoryId?.trim() || undefined;
@@ -258,7 +258,7 @@ export class InventoryAgingController {
 
   @Get('signals')
   async getActionableSignals(
-    @Req() req: any,
+    @Req() req: GuardedRequest,
     @Query('severity') severity?: string,
     @Query('type') type?: string,
     @Query('limit') limit?: string,
@@ -349,7 +349,7 @@ export class InventoryAgingController {
 
   @Get('expiring')
   async getExpiringProducts(
-    @Req() req: any,
+    @Req() req: GuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('withinDays') withinDays?: string,
     @Query('includeExpired') includeExpired?: string,
@@ -418,7 +418,7 @@ export class InventoryAgingController {
 
   @Post('clear-cache')
   async clearCache(
-    @Req() req: any,
+    @Req() req: GuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('categoryId') categoryId?: string,
   ) {

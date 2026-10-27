@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { LaborService } from './labor.service';
-import { AuthGuard, RoleGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, Roles } from '../auth/guards/auth.guard';
 
 interface UpdateShiftTimesDto {
   startAt?: string;
@@ -26,7 +26,7 @@ interface UpdateShiftTimesDto {
  * the location offset, so hour math never depends on the server timezone.
  */
 @Controller('labor')
-@UseGuards(AuthGuard, RoleGuard)
+@UseGuards(AuthGuard)
 export class LaborController {
   constructor(private readonly laborService: LaborService) {}
 
