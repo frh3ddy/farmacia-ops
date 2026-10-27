@@ -50,6 +50,7 @@ export function getPrisma(): PrismaClient {
 // ============================================================================
 
 interface SaleItemOutput {
+  id: string;
   saleId: string;
   productId: string;
   quantity: number;
@@ -260,6 +261,7 @@ async function processSaleItem(
   await recordInventoryConsumption(saleItem.id, costResult.consumedBatches, client);
 
   return {
+    id: saleItem.id,
     saleId: saleItem.saleId,
     productId: saleItem.productId,
     quantity: saleItem.quantity,
@@ -776,4 +778,37 @@ export async function processSaleJob(job: Job): Promise<void> {
       error,
     );
   }
+}
+/**
+ * Matches a custom-amount line to a product: takes its stock and cost the way the
+ * sale would have (FIFO, shortfall cover) and adds the cost to the sale. Revenue
+ * is unchanged — it was counted when the sale arrived. Matching twice is a no-op.
+ */
+export async function processMatchJob(job: Job<{ lineId: string; productId: string; matchedBy: string }>): Promise<void> {
+  const { lineId, productId, matchedBy } = job.data;
+  await getPrisma().$transaction(async (tx) => {
+    const line = await tx.unmatchedSaleLine.findUniqueOrThrow({ where: { id: lineId }, include: { sale: true } });
+    if (line.matchedSaleItemId) return;
+
+    const item = await processSaleItem(
+      line.saleId,
+      productId,
+      line.sale.locationId,
+      line.quantity,
+      line.amount.div(line.quantity),
+      line.sale.squareId,
+      tx,
+    );
+    // Conditional, so two jobs racing on one line can't both match it.
+    const { count } = await tx.unmatchedSaleLine.updateMany({
+      where: { id: lineId, matchedSaleItemId: null },
+      data: { matchedSaleItemId: item.id, matchedAt: new Date(), matchedBy },
+    });
+    if (count === 0) throw new DatabaseTransactionError(`Sale line ${lineId} was matched by another job`);
+
+    await tx.sale.update({
+      where: { id: line.saleId },
+      data: { totalCost: { increment: item.cost }, grossProfit: { decrement: item.cost } },
+    });
+  });
 }

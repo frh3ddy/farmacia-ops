@@ -23,6 +23,13 @@ Follows the open questions in `tasks/worker-hardening-epic.md`, answered by the 
 - Given pending lines, should list them per location with description, amount and date, newest first
 - Given a pending line, should keep the nightly books check balanced (no stock moved until it is matched)
 
+Square check (2026-10-27): 500 orders Oct 17–27 had one custom-amount line (`item_type: CUSTOM_AMOUNT`, $16, no name or note) and it was the whole order, so the worker couldn't record it. Description comes from the line's `name`, else its `note`.
+
+Progress:
+- ✅ Recording — `toSaleLines` returns `customLines`; the worker writes them as `UnmatchedSaleLine` rows and counts them in revenue (migration `20261028130000_unmatched_sale_line`).
+- ✅ Matching — `POST /api/sales/unmatched-lines/:id/match` (owner/manager, own location) queues a `match-sale-line` job on the `sales` queue; the worker's `processMatchJob` runs the sale's FIFO path and adds the cost (migration `20261028140000_unmatched_sale_line_match`). `GET /api/sales/unmatched-lines` lists pending lines.
+- Screen — next.
+
 ---
 
 ## Record Square refunds

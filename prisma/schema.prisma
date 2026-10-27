@@ -476,9 +476,15 @@ model UnmatchedSaleLine {
   quantity      Int
   amount        Decimal // line total
 
+  // Set once someone matches the line: the SaleItem that took its stock and cost.
+  matchedSaleItemId String?   @unique
+  matchedAt         DateTime?
+  matchedBy         String? // Employee ID
+
   createdAt DateTime @default(now())
 
-  sale Sale @relation(fields: [saleId], references: [id])
+  sale            Sale      @relation(fields: [saleId], references: [id])
+  matchedSaleItem SaleItem? @relation(fields: [matchedSaleItemId], references: [id])
 
   @@unique([saleId, squareLineUid])
 }
@@ -497,6 +503,8 @@ model SaleItem {
 
   // Consumption records for FIFO audit trail
   consumptions InventoryConsumption[]
+
+  matchedFrom UnmatchedSaleLine?
 }
 
 // ============================================================================
