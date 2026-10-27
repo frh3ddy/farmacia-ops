@@ -2,14 +2,15 @@ import { Job } from 'bullmq';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { SquareClient, SquareEnvironment } from 'square';
+import { getSquareClient } from './square-client';
 import {
   InsufficientInventoryError,
   DatabaseTransactionError,
   SaleValidationError,
   UnmappedVariationError,
 } from './errors';
-import { mapVariationToProduct } from './catalog.mapper';
+import { mapVariationToProduct, type MappedProduct } from './catalog.mapper';
+import { toSaleLines } from './sale-lines';
 import { consumeBatchesFifo, type ConsumedBatch, type FifoConsumptionResult } from './fifo';
 import { debugLog } from './debug-log';
 
@@ -33,6 +34,10 @@ export function getPrisma(): PrismaClient {
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
     });
+    // An idle connection dropped by the server (restart, failover) emits
+    // 'error' on the pool; unhandled, it crashes the worker. The pool
+    // replaces the connection on the next query.
+    pool.on('error', (error) => console.error('[SALE_WORKER] Idle database connection lost:', error.message));
     const adapter = new PrismaPg(pool);
     prisma = new PrismaClient({ adapter });
     debugLog('[DEBUG] [SALE_WORKER] Prisma client initialized');
@@ -41,112 +46,8 @@ export function getPrisma(): PrismaClient {
 }
 
 // ============================================================================
-// Utility Functions
-// ============================================================================
-
-/**
- * Safely stringify objects that may contain BigInt values
- * BigInt values are converted to strings
- */
-function safeStringify(obj: any, space?: number): string {
-  return JSON.stringify(
-    obj,
-    (key, value) => {
-      if (typeof value === 'bigint') {
-        return value.toString() + 'n'; // Add 'n' suffix to indicate it was a BigInt
-      }
-      return value;
-    },
-    space,
-  );
-}
-
-// Lazy initialization of Square client (only when needed)
-let squareClient: SquareClient | null = null;
-
-function getSquareClient(): SquareClient {
-  if (!squareClient) {
-    debugLog('[DEBUG] [SQUARE_CLIENT] Initializing Square client...');
-    debugLog('[DEBUG] [SQUARE_CLIENT] Checking for SQUARE_ACCESS_TOKEN...');
-    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN exists:', !!process.env.SQUARE_ACCESS_TOKEN);
-    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN length:', process.env.SQUARE_ACCESS_TOKEN?.length || 0);
-    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set (will use Production)');
-    
-    let squareAccessToken = process.env.SQUARE_ACCESS_TOKEN;
-    
-    // Trim whitespace in case there are spaces in the token value
-    if (squareAccessToken) {
-      squareAccessToken = squareAccessToken.trim();
-      debugLog('[DEBUG] [SQUARE_CLIENT] Token after trim length:', squareAccessToken.length);
-      
-      // Check for spaces in the token (common issue)
-      if (squareAccessToken.includes(' ')) {
-        console.warn('[DEBUG] [SQUARE_CLIENT] ⚠️ WARNING: Token contains spaces! This might cause issues.');
-        console.warn('[DEBUG] [SQUARE_CLIENT] Token preview (first 10 chars):', squareAccessToken.substring(0, 10) + '...');
-      }
-    }
-    
-    if (!squareAccessToken) {
-      console.error('[DEBUG] [SQUARE_CLIENT] ERROR: SQUARE_ACCESS_TOKEN is not set');
-      console.error('[DEBUG] [SQUARE_CLIENT] All environment variables starting with SQUARE_:');
-      const squareVars = Object.keys(process.env).filter(key => key.startsWith('SQUARE_'));
-      if (squareVars.length === 0) {
-        console.error('[DEBUG] [SQUARE_CLIENT]   No SQUARE_* variables found in process.env');
-      } else {
-        squareVars.forEach(key => {
-          const value = process.env[key];
-          console.error(`[DEBUG] [SQUARE_CLIENT]   ${key}: ${value ? '***' + value.slice(-4) + ` (length: ${value.length})` : 'not set'}`);
-        });
-      }
-      throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
-    }
-
-    // Determine Square environment: use Sandbox for staging/dev, Production otherwise
-    let squareEnvironment: SquareEnvironment;
-    const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-    const railwayEnv = process.env.RAILWAY_ENVIRONMENT?.toLowerCase();
-    const squareEnv = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-
-    if (
-      squareEnv === 'sandbox' ||
-      nodeEnv === 'development' ||
-      nodeEnv === 'dev' ||
-      railwayEnv === 'staging' ||
-      railwayEnv === 'development'
-    ) {
-      squareEnvironment = SquareEnvironment.Sandbox;
-    } else if (squareEnv === 'production') {
-      squareEnvironment = SquareEnvironment.Production;
-    } else {
-      // Default to Production for safety
-      squareEnvironment = SquareEnvironment.Production;
-    }
-
-    debugLog('[DEBUG] [SQUARE_CLIENT] Creating Square client with environment:', squareEnvironment);
-    debugLog('[DEBUG] [SQUARE_CLIENT] NODE_ENV:', nodeEnv || 'not set');
-    debugLog('[DEBUG] [SQUARE_CLIENT] RAILWAY_ENVIRONMENT:', railwayEnv || 'not set');
-    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', squareEnv || 'not set');
-    squareClient = new SquareClient({
-      token: squareAccessToken,
-      environment: squareEnvironment,
-      version: '2025-01-23', // pinned so an SDK bump can't silently change behavior
-    });
-    debugLog('[DEBUG] [SQUARE_CLIENT] ✅ Square client initialized');
-  }
-  return squareClient;
-}
-
-// ============================================================================
 // Type Definitions
 // ============================================================================
-
-type FIFOCostResult = FifoConsumptionResult;
-
-interface SaleItemInput {
-  productId: string;
-  quantitySold: number;
-  salePrice: Prisma.Decimal | string | number;
-}
 
 interface SaleItemOutput {
   saleId: string;
@@ -167,10 +68,6 @@ interface SaleTotals {
 // ============================================================================
 
 /**
- * Calculate FIFO cost for a sale item by consuming inventory batches in chronological order
- * FIFO ordering is mandatory: always order by receivedAt ASC, never by createdAt
- */
-/**
  * Resolve a cost basis for a product with no (or insufficient) inventory,
  * so a shortfall can be auto-covered instead of failing the sale. Ported
  * from InventoryAdjustmentService.getLastKnownCost
@@ -180,10 +77,7 @@ interface SaleTotals {
 async function getLastKnownCost(
   productId: string,
   locationId: string,
-  client: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  client: Prisma.TransactionClient,
 ): Promise<Prisma.Decimal | null> {
   const supplierProduct = await client.supplierProduct.findFirst({
     where: { productId, isPreferred: true },
@@ -204,18 +98,17 @@ async function getLastKnownCost(
   return approval ? approval.approvedCost : null;
 }
 
+/**
+ * Calculate FIFO cost for a sale item by consuming inventory batches in chronological order
+ * FIFO ordering is mandatory: always order by receivedAt ASC, never by createdAt
+ */
 async function calculateFIFOCost(
   productId: string,
   locationId: string,
   quantitySold: number,
   squareId: string,
-  tx?: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
-): Promise<FIFOCostResult> {
-  const client = tx || getPrisma();
-
+  client: Prisma.TransactionClient,
+): Promise<FifoConsumptionResult> {
   // Step 1: Query inventory batches (FIFO order - NON-NEGOTIABLE)
   const batches = await client.inventory.findMany({
     where: {
@@ -293,16 +186,11 @@ async function calculateFIFOCost(
  */
 async function deductInventory(
   consumedBatches: ConsumedBatch[],
-  tx?: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  client: Prisma.TransactionClient,
 ): Promise<void> {
   if (consumedBatches.length === 0) {
     return;
   }
-
-  const client = tx || getPrisma();
 
   // Single batched UPDATE via a VALUES join instead of one sequential
   // round-trip per consumed batch. A sale item touching several FIFO
@@ -348,24 +236,13 @@ async function processSaleItem(
   quantitySold: number,
   salePrice: Prisma.Decimal | string | number,
   squareId: string,
-  tx?: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  client: Prisma.TransactionClient,
 ): Promise<SaleItemOutput> {
-  const client = tx || getPrisma();
-
   // Step 1: Calculate FIFO cost (this queries inventory)
-  const costResult = await calculateFIFOCost(
-    productId,
-    locationId,
-    quantitySold,
-    squareId,
-    tx,
-  );
+  const costResult = await calculateFIFOCost(productId, locationId, quantitySold, squareId, client);
 
   // Step 2: Deduct inventory (atomic update)
-  await deductInventory(costResult.consumedBatches, tx);
+  await deductInventory(costResult.consumedBatches, client);
 
   // Step 3: Create immutable SaleItem snapshot
   const saleItem = await client.saleItem.create({
@@ -403,10 +280,7 @@ async function processSaleItem(
 async function recordInventoryConsumption(
   saleItemId: string,
   consumedBatches: ConsumedBatch[],
-  client: Omit<
-    PrismaClient,
-    '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
-  >,
+  client: Prisma.TransactionClient,
 ): Promise<void> {
   // Batch fetch unit costs for all consumed batches
   const batchIds = consumedBatches.map(b => b.batchId);
@@ -487,7 +361,6 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   if (!payload) {
     console.error('[DEBUG] ERROR: payload is missing from job.data');
-    console.error('[DEBUG] Full job.data:', JSON.stringify(job.data, null, 2));
     throw new SaleValidationError(
       'Missing payload in job data',
       { jobData: JSON.stringify(job.data) },
@@ -524,8 +397,6 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   if (!payment) {
     console.error('[DEBUG] ERROR: Payment object is missing');
-    console.error('[DEBUG] Full payload structure:', JSON.stringify(payload, null, 2));
-    console.error('[DEBUG] Full job.data structure:', JSON.stringify(job.data, null, 2));
     throw new SaleValidationError(
       'Missing payment object in payload',
       { payload: JSON.stringify(payload), jobData: JSON.stringify(job.data) },
@@ -534,7 +405,7 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   debugLog('[DEBUG] Validating payment object fields...');
   
-  if (!payment || typeof payment !== 'object') {
+  if (typeof payment !== 'object') {
     console.error('[DEBUG] ERROR: Payment is not a valid object');
     throw new SaleValidationError(
       'Payment is not a valid object',
@@ -544,7 +415,6 @@ export async function processSaleJob(job: Job): Promise<void> {
   
   if (!payment.id) {
     console.error('[DEBUG] ERROR: Payment object missing id');
-    console.error('[DEBUG] Payment object:', JSON.stringify(payment, null, 2));
     throw new SaleValidationError(
       'Payment object missing id',
       { payment: JSON.stringify(payment) },
@@ -586,7 +456,7 @@ export async function processSaleJob(job: Job): Promise<void> {
   }
   // A purely-Yastás order never creates a Sale row, so the check above can't
   // catch a redelivered webhook for it — check YastasOperation too.
-  const existingYastasOp = await getPrisma().yastasOperation.findUnique({
+  const existingYastasOp = await getPrisma().yastasOperation.findFirst({
     where: { squareId },
   });
   if (existingYastasOp) {
@@ -659,168 +529,34 @@ export async function processSaleJob(job: Job): Promise<void> {
     );
   }
 
-  // Map Square line items to SaleItemInput
-  // Note: This assumes products are mapped by SKU or variation ID
-  // You may need to adjust the mapping logic based on your product setup
-  debugLog('[DEBUG] Mapping line items to SaleItemInput...');
-  const lineItems: SaleItemInput[] = [];
-  const yastasLineItems: Array<{ employeeId: string; faceAmount: Prisma.Decimal }> = [];
-
-  for (let i = 0; i < orderLineItems.length; i++) {
-    const orderLineItem = orderLineItems[i];
-    debugLog(`[DEBUG] Processing line item ${i + 1}/${orderLineItems.length}:`, {
-      uid: orderLineItem.uid,
-      name: orderLineItem.name,
-      catalogObjectId: orderLineItem.catalogObjectId,
-      quantity: orderLineItem.quantity,
-      // Note: catalogVersion is a BigInt, so we convert it to string
-      catalogVersion: orderLineItem.catalogVersion?.toString(),
-    });
-    if (!orderLineItem.uid && !orderLineItem.catalogObjectId) {
-      console.warn(`[DEBUG] WARNING: Skipping line item ${i + 1} without uid or catalogObjectId:`, orderLineItem);
-      continue;
-    }
-
-    // Map variation ID to product using CatalogMapping
-    const catalogObjectId = orderLineItem.catalogObjectId;
-    const itemName = orderLineItem.name;
-    debugLog(`[DEBUG] Looking up product for line item ${i + 1}:`, {
-      catalogObjectId,
-      itemName,
-    });
-
-    // Validate catalogObjectId exists (this is the variation ID)
-    if (!catalogObjectId) {
-      console.warn(`[DEBUG] WARNING: Line item ${i + 1} missing catalogObjectId, skipping`);
-      continue;
-    }
-
-    // Map variation to product using CatalogMapping
-    let productId: string;
-    let tracksInventory: boolean;
-    let mappedEmployeeId: string | null;
+  // Resolve each catalog item's product; an unmapped one fails the sale
+  // (the catalog sync creates the mapping, then the retry succeeds).
+  const mappings = new Map<string, MappedProduct>();
+  for (const { catalogObjectId } of orderLineItems) {
+    if (!catalogObjectId || mappings.has(catalogObjectId)) continue;
     try {
-      const mapped = await mapVariationToProduct(
-        catalogObjectId,
-        locationId,
-        getPrisma(),
-      );
-      productId = mapped.productId;
-      tracksInventory = mapped.tracksInventory;
-      mappedEmployeeId = mapped.employeeId;
-      debugLog(`[DEBUG] ✓ Product mapped for line item ${i + 1}:`, {
-        variationId: catalogObjectId,
-        productId,
-        locationId,
-        tracksInventory,
-      });
+      mappings.set(catalogObjectId, await mapVariationToProduct(catalogObjectId, locationId, getPrisma()));
     } catch (error) {
       if (error instanceof UnmappedVariationError) {
-        console.error(`[DEBUG] ERROR: Unmapped variation for line item ${i + 1}:`, {
-          variationId: error.squareVariationId,
-          locationId: error.locationId,
-          message: error.message,
-        });
         throw new SaleValidationError(
           `Square variation is not mapped to a product. Variation ID: ${error.squareVariationId}, Location ID: ${error.locationId}. ` +
             `Please run catalog sync to create mappings.`,
-          {
-            variationId: error.squareVariationId,
-            locationId: error.locationId,
-            orderLineItem: safeStringify(orderLineItem),
-            orderId,
-            squareId,
-          },
+          { variationId: error.squareVariationId, locationId: error.locationId, orderId, squareId },
         );
       }
-      // Re-throw other errors
       throw error;
     }
-
-    const quantity = orderLineItem.quantity
-      ? parseInt(orderLineItem.quantity, 10)
-      : 1;
-    debugLog(`[DEBUG] Line item ${i + 1} quantity:`, quantity);
-
-    if (quantity <= 0) {
-      console.error(`[DEBUG] ERROR: Line item ${i + 1} has invalid quantity`);
-      throw new SaleValidationError(
-        'Line item quantity must be positive',
-        { orderLineItem: safeStringify(orderLineItem) },
-      );
-    }
-
-    // Get price from line item
-    // totalMoney is the total price for the quantity (in cents)
-    // basePriceMoney would be the unit price, but we'll calculate from totalMoney
-    const totalMoney = orderLineItem.totalMoney;
-    debugLog(`[DEBUG] Line item ${i + 1} totalMoney:`, totalMoney);
-    
-    if (!totalMoney || totalMoney.amount === undefined || totalMoney.amount === null) {
-      console.error(`[DEBUG] ERROR: Line item ${i + 1} missing price information`);
-      throw new SaleValidationError(
-        'Line item missing price information',
-        { orderLineItem: safeStringify(orderLineItem) },
-      );
-    }
-
-    // Convert from cents to dollars and calculate unit price
-    // totalMoney.amount is a bigint, convert to string first
-    const totalPriceInDollars = new Prisma.Decimal(totalMoney.amount.toString()).div(100);
-    const unitPrice = totalPriceInDollars.div(quantity);
-    debugLog(`[DEBUG] Line item ${i + 1} pricing:`, {
-      totalPriceInDollars: totalPriceInDollars.toString(),
-      unitPrice: unitPrice.toString(),
-    });
-
-    if (!tracksInventory) {
-      // Yastás service item — never a Sale/SaleItem, never touches FIFO.
-      if (!mappedEmployeeId) {
-        throw new SaleValidationError(
-          `CatalogMapping for variation ${catalogObjectId} is flagged non-inventory (tracksInventory=false) but has no employeeId`,
-          { catalogObjectId, orderId, squareId, locationId },
-        );
-      }
-      yastasLineItems.push({ employeeId: mappedEmployeeId, faceAmount: totalPriceInDollars });
-      debugLog(`[DEBUG] ✓ Line item ${i + 1} mapped as Yastás operation (employee ${mappedEmployeeId})`);
-      continue;
-    }
-
-    lineItems.push({
-      productId: productId,
-      quantitySold: quantity,
-      salePrice: new Prisma.Decimal(unitPrice),
-    });
-    debugLog(`[DEBUG] ✓ Line item ${i + 1} mapped successfully`);
   }
 
+  const { saleItems: lineItems, yastasLines: yastasLineItems, skipped } = toSaleLines(orderLineItems, mappings, {
+    orderId,
+    squareId,
+    locationId,
+  });
+  if (skipped.length > 0) {
+    console.warn(`[SALE_WORKER] ${skipped.length} line(s) with no catalog item not recorded for payment ${squareId}`);
+  }
   debugLog('[DEBUG] Total line items mapped:', lineItems.length, 'Yastás line items:', yastasLineItems.length);
-  if (lineItems.length === 0 && yastasLineItems.length === 0) {
-    console.error('[DEBUG] ERROR: No valid line items found after mapping');
-    throw new SaleValidationError(
-      'No valid line items found after mapping',
-      { orderId, squareId, locationId },
-    );
-  }
-
-  // Validate line items structure
-  for (const item of lineItems) {
-    if (!item.productId) {
-      throw new SaleValidationError('Line item missing productId', { item });
-    }
-    if (!item.quantitySold || item.quantitySold <= 0) {
-      throw new SaleValidationError(
-        'Line item quantity must be positive',
-        { item },
-      );
-    }
-    if (!item.salePrice || new Prisma.Decimal(item.salePrice).lt(0)) {
-      throw new SaleValidationError(
-        'Line item salePrice must be non-negative',
-        { item },
-      );
-    }
-  }
 
   // Phase 3 & 4: Create Sale Record and Process Items (all in transaction)
   debugLog('[DEBUG] Starting transaction to create sale and process items...');
@@ -869,6 +605,7 @@ export async function processSaleJob(job: Job): Promise<void> {
               employeeId: item.employeeId,
               locationId: location.id,
               squareId: squareId,
+              squareLineUid: item.lineUid,
               direction: 'IN',
               faceAmount: item.faceAmount,
               occurredAt: createdAt,
@@ -993,15 +730,8 @@ export async function processSaleJob(job: Job): Promise<void> {
     debugLog('[DEBUG] Item Count:', itemCount);
     debugLog('[DEBUG] ========================================');
   } catch (error) {
-    // Error handling
-    if (error instanceof UnmappedVariationError) {
-      console.error('Unmapped variation error:', {
-        variationId: error.squareVariationId,
-        locationId: error.locationId,
-        message: error.message,
-        squareId: squareId,
-      });
-      // Re-throw as SaleValidationError (already converted above, but handle here for safety)
+    // A setup problem found inside the transaction (e.g. no Yastás wallet) keeps its type.
+    if (error instanceof SaleValidationError) {
       throw error;
     }
 

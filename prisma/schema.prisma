@@ -984,6 +984,7 @@ model YastasOperation {
   locationId       String
   squareId         String? // Square payment.id (same convention as Sale.squareId, NOT order id);
   // set only for IN rows, used for webhook-redelivery idempotency
+  squareLineUid    String? // the Square order line item's uid: one payment can hold several Yastás lines
   yastasReceiptRef String? // Yastás's own receipt/operation reference for day-end reconciliation
   direction        YastasOperationDirection
   faceAmount       Decimal // amount entered at POS or manual entry — NOT revenue
@@ -994,7 +995,7 @@ model YastasOperation {
   location  Location         @relation(fields: [locationId], references: [id])
   movements WalletMovement[]
 
-  @@unique([squareId])
+  @@unique([squareId, squareLineUid])
   @@index([employeeId])
   @@index([locationId])
 }

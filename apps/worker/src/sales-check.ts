@@ -1,9 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import type { Queue } from 'bullmq';
-import { getSquareClient } from './catalog.sync';
+import { getSquareClient } from './square-client';
+import { paymentIdOf } from './failed-job';
 
 // Sales check (tasks/inventory-integrity-epic.md): every completed Square
-// payment must have become a Sale (Sale.squareId is the Square payment id).
+// payment must have become a Sale (Sale.squareId is the Square payment id),
+// or a YastasOperation for a Yastás-only payment.
 
 export type SquarePayment = { id: string; locationId: string; status: string; createdAt: string };
 
@@ -58,16 +60,19 @@ export async function loadSalesCheck(
     }
   }
 
-  const recorded = await prisma.sale.findMany({
-    where: { squareId: { in: payments.map((p) => p.id) } },
-    select: { squareId: true },
-  });
   return {
     payments,
-    recordedPaymentIds: new Set(recorded.map((s) => s.squareId)),
+    recordedPaymentIds: await recordedPaymentIds(prisma, payments.map((p) => p.id)),
     failedJobPaymentIds: failedJobPaymentIds(await salesQueue.getFailed()),
     cutoff: window.cutoff,
   };
+}
+
+/** The payment ids the app recorded: a Sale, or a YastasOperation for a Yastás-only payment (which never creates a Sale). */
+export async function recordedPaymentIds(prisma: PrismaClient, paymentIds: string[]): Promise<Set<string>> {
+  const query = { where: { squareId: { in: paymentIds } }, select: { squareId: true } } as const;
+  const [sales, operations] = await Promise.all([prisma.sale.findMany(query), prisma.yastasOperation.findMany(query)]);
+  return new Set([...sales, ...operations].map((r) => r.squareId).filter((id): id is string => !!id));
 }
 
 /**
@@ -75,5 +80,5 @@ export async function loadSalesCheck(
  * undefined for a failed id whose job data is gone, so those are skipped.
  */
 export function failedJobPaymentIds(jobs: Array<{ data?: any } | undefined>): Set<string> {
-  return new Set(jobs.map((job) => job?.data?.payload?.object?.payment?.id).filter((id): id is string => !!id));
+  return new Set(jobs.map(paymentIdOf).filter((id): id is string => !!id));
 }

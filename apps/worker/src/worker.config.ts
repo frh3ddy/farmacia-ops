@@ -31,13 +31,7 @@ export const WORKERS: WorkerConfig[] = [
       return processSaleJob(job);
     },
     concurrency: 5,
-    options: {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 2000,
-      },
-    },
+    // Retries come from the api, which queues these jobs (apps/api/src/queues/sale.queue.ts).
   },
   {
     // Nightly integrity check (tasks/inventory-integrity-epic.md). One attempt:

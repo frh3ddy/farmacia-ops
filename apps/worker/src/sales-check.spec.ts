@@ -1,4 +1,4 @@
-import { failedJobPaymentIds, salesMismatches, type SalesCheckInput } from './sales-check';
+import { failedJobPaymentIds, recordedPaymentIds, salesMismatches, type SalesCheckInput } from './sales-check';
 
 const cutoff = new Date('2026-10-27T08:30:00Z');
 
@@ -57,5 +57,23 @@ describe('failedJobPaymentIds', () => {
     // have failed the sales check every night.
     const job = { data: { payload: { object: { payment: { id: 'p-1' } } } } };
     expect(failedJobPaymentIds([undefined, job, { data: {} }])).toEqual(new Set(['p-1']));
+  });
+});
+
+describe('recordedPaymentIds', () => {
+  const prisma = (sales: string[], yastas: string[]) =>
+    ({
+      sale: { findMany: jest.fn().mockResolvedValue(sales.map((squareId) => ({ squareId }))) },
+      yastasOperation: { findMany: jest.fn().mockResolvedValue(yastas.map((squareId) => ({ squareId }))) },
+    }) as any;
+
+  it('given a Yastás-only payment, counts its YastasOperation as recorded (it never creates a Sale)', async () => {
+    const db = prisma(['p-sold'], ['p-yastas']);
+
+    expect(await recordedPaymentIds(db, ['p-sold', 'p-yastas', 'p-lost'])).toEqual(new Set(['p-sold', 'p-yastas']));
+    expect(db.yastasOperation.findMany).toHaveBeenCalledWith({
+      where: { squareId: { in: ['p-sold', 'p-yastas', 'p-lost'] } },
+      select: { squareId: true },
+    });
   });
 });
