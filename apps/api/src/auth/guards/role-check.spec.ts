@@ -1,4 +1,4 @@
-import { readdirSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { assert } from 'riteway/vitest';
@@ -10,11 +10,12 @@ const srcDir = join(__dirname, '../..');
 const controllerFiles = (readdirSync(srcDir, { recursive: true }) as string[]).filter((f) => f.endsWith('.controller.ts'));
 
 type Route = { route: string; roles?: string[]; guards: Function[] };
+let routes: Route[] = [];
 let roleRoutes: Route[] = [];
 
 beforeAll(async () => {
   const modules: Record<string, unknown>[] = await Promise.all(controllerFiles.map((f) => import(join(srcDir, f))));
-  roleRoutes = modules
+  routes = modules
     .flatMap((exports) => Object.values(exports))
     .filter((value): value is Function => typeof value === 'function' && Reflect.getMetadata(PATH_METADATA, value) !== undefined)
     .flatMap((controller) =>
@@ -28,9 +29,22 @@ beforeAll(async () => {
             guards: [...(Reflect.getMetadata(GUARDS_METADATA, controller) ?? []), ...(Reflect.getMetadata(GUARDS_METADATA, handler) ?? [])],
           };
         }),
-    )
-    .filter((r) => r.roles?.length);
+    );
+  roleRoutes = routes.filter((r) => r.roles?.length);
 });
+
+/** `Controller.handler` for every handler that declares a RoleGuardedRequest parameter. */
+function roleGuardedHandlers() {
+  return controllerFiles.flatMap((f) => {
+    const lines = readFileSync(join(srcDir, f), 'utf8').split('\n');
+    const controller = lines.join('\n').match(/export class (\w+)/)?.[1];
+    return lines.flatMap((line, i) => {
+      if (!/: RoleGuardedRequest\b/.test(line)) return [];
+      const signature = lines.slice(0, i + 1).reverse().find((l) => /^  (?:async )?\w+\(/.test(l));
+      return [`${controller}.${signature?.match(/^  (?:async )?(\w+)\(/)?.[1]}`];
+    });
+  });
+}
 
 describe('role check', () => {
   test('routes restricted to roles', () => {
@@ -42,12 +56,23 @@ describe('role check', () => {
     });
   });
 
-  test('roles checked once', () => {
+  test('handlers typed as RoleGuardedRequest', () => {
+    // RoleGuardedRequest promises a current location, which AuthGuard only
+    // guarantees on @Roles routes; elsewhere it can be undefined and crash.
+    const roleRouteNames = new Set(roleRoutes.map((r) => r.route));
+    const handlers = roleGuardedHandlers();
+
     assert({
-      given: 'every route with @Roles',
-      should: 'check the roles in AuthGuard only, not again in a second guard',
-      actual: roleRoutes.filter((r) => r.guards.some((g) => g.name === 'RoleGuard')).map((r) => r.route),
+      given: 'every handler that declares a RoleGuardedRequest',
+      should: 'be a @Roles route',
+      actual: handlers.filter((h) => !roleRouteNames.has(h)),
       expected: [],
+    });
+    assert({
+      given: 'the api source',
+      should: 'find the RoleGuardedRequest handlers to check',
+      actual: handlers.length > 0 && handlers.every((h) => routes.some((r) => r.route === h)),
+      expected: true,
     });
   });
 
