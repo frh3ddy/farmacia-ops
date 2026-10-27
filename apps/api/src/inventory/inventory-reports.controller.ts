@@ -287,4 +287,11 @@ export class InventoryReportsController {
       data: detail,
     };
   }
+
+  /** The latest nightly integrity run (apps/worker/src/integrity-run.ts), for the web banner; null before the first run. */
+  @Get('integrity')
+  @Roles('OWNER')
+  async getLatestIntegrityRun() {
+    return { success: true, data: await this.reportsService.getLatestIntegrityRun() };
+  }
 }
