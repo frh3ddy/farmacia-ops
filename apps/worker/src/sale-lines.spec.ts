@@ -16,7 +16,7 @@ const line = (catalogObjectId: string | undefined, quantity: string, amount: num
 const plain = (lines: ReturnType<typeof toSaleLines>) => ({
   saleItems: lines.saleItems.map((i) => ({ ...i, salePrice: i.salePrice.toString() })),
   yastasLines: lines.yastasLines.map((l) => ({ ...l, faceAmount: l.faceAmount.toString() })),
-  skipped: lines.skipped.map((l) => l.name),
+  customLines: lines.customLines.map((l) => ({ ...l, amount: l.amount.toString() })),
 });
 
 describe('toSaleLines', () => {
@@ -26,7 +26,7 @@ describe('toSaleLines', () => {
     expect(plain(toSaleLines([line('v-jarabe', '3', 10000)], mappings, context))).toEqual({
       saleItems: [{ productId: 'jarabe', quantitySold: 3, salePrice: new Prisma.Decimal(100).div(3).toString() }],
       yastasLines: [],
-      skipped: [],
+      customLines: [],
     });
   });
 
@@ -36,14 +36,17 @@ describe('toSaleLines', () => {
     expect(plain(toSaleLines([line('v-jarabe', '1', 5000), line('v-yastas', '1', 25000)], mappings, context))).toEqual({
       saleItems: [{ productId: 'jarabe', quantitySold: 1, salePrice: '50' }],
       yastasLines: [{ employeeId: 'emp-1', faceAmount: '250', lineUid: 'uid-v-yastas' }],
-      skipped: [],
+      customLines: [],
     });
   });
 
-  it('given a line with no catalog item (a custom amount), reports it as skipped', () => {
+  it('given a custom amount, keeps its description, quantity and total for later matching', () => {
     const mappings = new Map([['v-jarabe', product('jarabe')]]);
+    const custom = { ...line(undefined, '2', 3000), uid: 'uid-c', name: null, note: 'crema roja' };
 
-    expect(plain(toSaleLines([line('v-jarabe', '1', 5000), line(undefined, '1', 2000)], mappings, context)).skipped).toEqual(['item undefined']);
+    expect(plain(toSaleLines([line('v-jarabe', '1', 5000), custom], mappings, context)).customLines).toEqual([
+      { description: 'crema roja', quantity: 2, amount: '30', lineUid: 'uid-c' },
+    ]);
   });
 
   it('given a non-inventory mapping with no employee, fails with a validation error', () => {
@@ -69,7 +72,13 @@ describe('toSaleLines', () => {
     expect(() => toSaleLines([line('v-jarabe', '1', -5000)], new Map([['v-jarabe', product('jarabe')]]), context)).toThrow(/must be non-negative/);
   });
 
-  it('given only custom-amount lines, fails because nothing can be recorded', () => {
-    expect(() => toSaleLines([line(undefined, '1', 2000)], new Map(), context)).toThrow(/No valid line items found after mapping/);
+  it('given only custom amounts, records them instead of failing', () => {
+    expect(plain(toSaleLines([{ ...line(undefined, '1', 1600), name: undefined }], new Map(), context)).customLines).toEqual([
+      { description: null, quantity: 1, amount: '16', lineUid: 'uid-undefined' },
+    ]);
+  });
+
+  it('given a negative custom amount, fails with a validation error', () => {
+    expect(() => toSaleLines([line(undefined, '1', -1600)], new Map(), context)).toThrow(/must be non-negative/);
   });
 });

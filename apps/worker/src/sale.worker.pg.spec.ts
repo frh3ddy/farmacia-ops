@@ -147,3 +147,34 @@ test('a Yastás payment at a location with no wallet', async () => {
   // A setup problem, not a database failure: it must keep its type.
   await expect(processSaleJob(job([line('v-luz', '1', 25000)], 'p-3', 'SQ-NORTE'))).rejects.toThrow(SaleValidationError);
 });
+
+test('an order of only custom amounts', async () => {
+  const prisma = getPrisma();
+  // Staff typed $16 with no description, and a 2 × $15 'crema roja'.
+  const lines = [
+    { uid: 'uid-c1', quantity: '1', totalMoney: { amount: 1600, currency: 'MXN' } },
+    { uid: 'uid-c2', note: 'crema roja', quantity: '2', totalMoney: { amount: 3000, currency: 'MXN' } },
+  ];
+  await processSaleJob(job(lines, 'p-4'));
+  await processSaleJob(job(lines, 'p-4')); // redelivered
+
+  const sale = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-4' }, include: { items: true, unmatchedLines: true } });
+  expect({
+    revenue: sale.totalRevenue.toString(),
+    cost: sale.totalCost.toString(),
+    profit: sale.grossProfit.toString(),
+    items: sale.items.length,
+    pending: sale.unmatchedLines.map((l) => [l.squareLineUid, l.description, l.quantity, l.amount.toString()]).sort(),
+    books: booksMismatches(await loadBooks(prisma)),
+  }).toEqual({
+    revenue: '46',
+    cost: '0',
+    profit: '46',
+    items: 0,
+    pending: [
+      ['uid-c1', null, 1, '16'],
+      ['uid-c2', 'crema roja', 2, '30'],
+    ],
+    books: [],
+  });
+});
