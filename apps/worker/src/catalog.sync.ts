@@ -34,7 +34,7 @@ interface CatalogData {
  */
 let squareClient: SquareClient | null = null;
 
-function getSquareClient(): SquareClient {
+export function getSquareClient(): SquareClient {
   if (!squareClient) {
     const squareAccessToken = process.env.SQUARE_ACCESS_TOKEN?.trim();
     
