@@ -36,8 +36,6 @@ interface LocationAccess {
 // Constants
 // ============================================================================
 
-const PIN_LOCKOUT_ATTEMPTS = 3;
-const PIN_LOCKOUT_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const SESSION_DURATION_MS = 4 * 60 * 60 * 1000; // 4 hours
 const DEVICE_TOKEN_PREFIX = 'dt_';
 const SESSION_TOKEN_PREFIX = 'st_';
@@ -336,6 +334,10 @@ export class AuthService {
 
     // Validate device
     const device = await this.validateDeviceToken(deviceToken);
+    // A wrong PIN names no employee (the PIN is what picks one), so the
+    // device is what gets locked out: 5 wrong PINs per 15 minutes.
+    const lockoutKey = `pin:${device.id}`;
+    this.assertLoginNotLocked(lockoutKey);
 
     // Find employee by PIN at this location
     // We need to check all employees with assignments to this location
@@ -375,8 +377,7 @@ export class AuthService {
     }
 
     if (!matchedEmployee) {
-      // Record failed attempt for all possible employees (security measure)
-      // In practice, you might want a different approach
+      this.recordFailedLogin(lockoutKey);
       throw new HttpException(
         { success: false, message: 'Invalid PIN' },
         HttpStatus.UNAUTHORIZED
@@ -398,6 +399,8 @@ export class AuthService {
         HttpStatus.UNAUTHORIZED
       );
     }
+
+    this.failedLogins.delete(lockoutKey);
 
     // Reset failed attempts on successful login
     await this.prisma.employee.update({
@@ -461,30 +464,6 @@ export class AuthService {
           }
         : null,
     };
-  }
-
-  // --------------------------------------------------------------------------
-  // Record Failed PIN Attempt
-  // --------------------------------------------------------------------------
-
-  async recordFailedPINAttempt(employeeId: string) {
-    const employee = await this.prisma.employee.findUnique({
-      where: { id: employeeId },
-    });
-
-    if (!employee) return;
-
-    const newAttempts = employee.pinFailedAttempts + 1;
-    const updates: any = { pinFailedAttempts: newAttempts };
-
-    if (newAttempts >= PIN_LOCKOUT_ATTEMPTS) {
-      updates.pinLockedUntil = new Date(Date.now() + PIN_LOCKOUT_DURATION_MS);
-    }
-
-    await this.prisma.employee.update({
-      where: { id: employeeId },
-      data: updates,
-    });
   }
 
   // --------------------------------------------------------------------------
