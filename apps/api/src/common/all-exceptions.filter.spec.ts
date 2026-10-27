@@ -46,6 +46,15 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
+  test('locked out', () => {
+    assert({
+      given: 'a request refused with 429 by a login lockout',
+      should: 'log it like any other refusal',
+      actual: warningsFor(refused(HttpStatus.TOO_MANY_REQUESTS, 'Demasiados intentos fallidos. Intenta de nuevo en 15 minutos.')),
+      expected: ['[ACCESS] 429 GET /inventory/reports/cogs employee=e1 ip=10.0.0.7: Demasiados intentos fallidos. Intenta de nuevo en 15 minutos.'],
+    });
+  });
+
   test('other errors', () => {
     assert({
       given: 'a request that fails with 400',
