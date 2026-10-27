@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmployeeRole } from '@prisma/client';
 import * as crypto from 'crypto';
@@ -48,6 +48,7 @@ const SESSION_TOKEN_PREFIX = 'st_';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly failedLogins = new Map<string, { count: number; since: number }>();
   static readonly MAX_FAILED_LOGINS = 5;
   static readonly LOGIN_LOCK_MS = 15 * 60 * 1000;
@@ -490,7 +491,12 @@ export class AuthService {
   // Validate Session
   // --------------------------------------------------------------------------
 
-  async validateSession(sessionToken: string) {
+  /**
+   * Pass `device` to also require that the request comes from the device the
+   * session was created on (AuthGuard does). It is checked before the session
+   * is touched, and a mismatch answers exactly like an unknown token.
+   */
+  async validateSession(sessionToken: string, device?: { deviceToken: string | undefined }) {
     const session = await this.prisma.employeeSession.findUnique({
       where: { sessionToken },
       include: {
@@ -505,7 +511,11 @@ export class AuthService {
       },
     });
 
-    if (!session) {
+    const wrongDevice = !!session && !!device && !sameToken(device.deviceToken, session.deviceToken);
+    if (wrongDevice) {
+      this.logger.warn(`[AUTH] Session ${session!.id} used from a different device (employee ${session!.employeeId})`);
+    }
+    if (!session || wrongDevice) {
       throw new HttpException(
         { success: false, message: 'Invalid session' },
         HttpStatus.UNAUTHORIZED
@@ -752,4 +762,11 @@ export class AuthService {
 
     return { deletedCount: result.count };
   }
+}
+
+/** Constant-time equality for two tokens; a missing one never matches. */
+function sameToken(a: string | undefined, b: string): boolean {
+  if (!a) return false;
+  const [x, y] = [Buffer.from(a), Buffer.from(b)];
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
 }

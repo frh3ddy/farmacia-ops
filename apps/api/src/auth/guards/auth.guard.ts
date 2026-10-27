@@ -179,18 +179,6 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
 
-    // Validate device token
-    const authorization = request.headers['authorization'];
-    if (authorization) {
-      const deviceToken = authorization.replace('Bearer ', '');
-      try {
-        const device = await this.authService.validateDeviceToken(deviceToken);
-        request.device = device;
-      } catch (error) {
-        // Device validation is optional for some endpoints
-      }
-    }
-
     // Validate session token
     const sessionToken = request.headers['x-session-token'];
     if (!sessionToken) {
@@ -201,9 +189,14 @@ export class AuthGuard implements CanActivate {
     }
 
     try {
+      // A session only works from the device it was created on (both web and
+      // iOS send the device token as Authorization: Bearer). Deactivating a
+      // device deletes its sessions, so no separate device lookup is needed.
       const { session, employee, currentLocation, accessibleLocations } =
-        await this.authService.validateSession(sessionToken);
-      
+        await this.authService.validateSession(sessionToken, {
+          deviceToken: bearerToken(request.headers['authorization']),
+        });
+
       request.session = session;
       request.employee = employee;
       request.currentLocation = currentLocation;
@@ -240,6 +233,10 @@ export class AuthGuard implements CanActivate {
 
     return true;
   }
+}
+
+function bearerToken(authorization?: string): string | undefined {
+  return authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined;
 }
 
 // ============================================================================
