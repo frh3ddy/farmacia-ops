@@ -85,6 +85,11 @@ export class WorkerManager {
           // Get failed jobs to show details
           const failedJobs = await managedWorker.queue.getFailed(0, failed);
           for (const failedJob of failedJobs) {
+            // getFailed() returns undefined for a failed id whose job data is gone.
+            if (!failedJob) {
+              console.error(`[WORKER_MANAGER] A failed job in ${config.queueName} has no data left (expired or removed)`);
+              continue;
+            }
             console.error(`[DEBUG] [WORKER_MANAGER] Failed job details:`, {
               id: failedJob.id,
               name: failedJob.name,
