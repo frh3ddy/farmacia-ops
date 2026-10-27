@@ -9,15 +9,17 @@ A review of `apps/worker` (2026-10-27) found that the Dev Tools test sale writes
 
 ---
 
-## Keep test sales out of production stock
+## ✅ Keep test sales out of production stock
 
 `POST /api/sales-test/create` (OWNER, MANAGER) queues a mock `payment.created` carrying `_testOrderData`, so the worker skips Square and records a real sale with id `test_payment_…`, consuming real batches and adding revenue. The integrity check can't see it: it only looks for payments missing a sale. Decided 2026-10-27: block it in production only; local and staging keep it.
 
 **Requirements**:
 - Given the production environment, should refuse to create a test sale and say why
-- Given the web app in production, should hide the Dev Tools → Sales Test screen
+- Given the web app in production, should show on the Sales Test screen why test sales are off (every `/api/sales-test` route answers 403 with the reason, which the screen already displays)
 - Given a non-production environment, should keep test sales working as today
-- Given existing `test_payment_…` sales in production, should list them for the owner to decide on (no automatic deletion)
+- Given existing `test_payment_…` sales in production, should list them for the owner to decide on (no automatic deletion; the owner runs the query, since production reads need their hand)
+
+Production is `RAILWAY_ENVIRONMENT_NAME=production`, which Railway sets on the service; `NODE_ENV` can't tell staging from production.
 
 ---
 
