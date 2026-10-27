@@ -7,7 +7,7 @@ const managerRequest = () => ({
   employee: { id: 'e1' },
   currentLocation: { role: 'MANAGER', locationId: 'centro' },
   accessibleLocations: [{ locationId: 'centro', isActive: true }],
-});
+}) as any; // fixture: only the fields the controller reads
 
 /** 'done', or the refusal's message. */
 const outcome = (promise: Promise<unknown>) => promise.then(() => 'done', (e: Error) => e.message);
