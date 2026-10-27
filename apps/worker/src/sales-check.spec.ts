@@ -1,4 +1,4 @@
-import { salesMismatches, type SalesCheckInput } from './sales-check';
+import { failedJobPaymentIds, salesMismatches, type SalesCheckInput } from './sales-check';
 
 const cutoff = new Date('2026-10-27T08:30:00Z');
 
@@ -42,5 +42,20 @@ describe('salesMismatches', () => {
     const result = salesMismatches(input({ payments: [payment('p-canceled', 'CANCELED'), payment('p-declined', 'FAILED')], recordedPaymentIds: new Set() }));
 
     expect(result).toEqual([]);
+  });
+});
+
+describe('failedJobPaymentIds', () => {
+  it('given failed jobs, returns their Square payment ids', () => {
+    const job = { data: { payload: { object: { payment: { id: 'p-1' } } } } };
+    expect(failedJobPaymentIds([job])).toEqual(new Set(['p-1']));
+  });
+
+  it('given an undefined entry (a failed id whose job data is gone), skips it instead of throwing', () => {
+    // Regression: production's sales queue returned one undefined failed job,
+    // which crashed the worker's startup listing (reading 'id') and would
+    // have failed the sales check every night.
+    const job = { data: { payload: { object: { payment: { id: 'p-1' } } } } };
+    expect(failedJobPaymentIds([undefined, job, { data: {} }])).toEqual(new Set(['p-1']));
   });
 });
