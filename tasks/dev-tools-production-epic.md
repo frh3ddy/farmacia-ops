@@ -1,6 +1,6 @@
 # Dev Tools in Production Epic
 
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETED
 **Goal**: Tools meant for testing and fresh starts can't change real stock, cost or sales once the app is the source of truth.
 
 ## Overview
@@ -11,7 +11,9 @@ Found while hardening the worker (tasks/worker-hardening-epic.md, which already 
 - `POST /api/catalog/cleanup` (Catalog Sync screen, typed "DELETE" confirm) deletes every product, mapping, batch, receiving, consumption and sale.
 - `POST /api/wipe/full` (no screen; body must say "DELETE EVERYTHING") deletes all data including employees.
 
-Production is `RAILWAY_ENVIRONMENT_NAME=production` (the `NotInProduction` guard in `apps/api/src/webhooks/square.controller.ts`).
+Production is `RAILWAY_ENVIRONMENT_NAME=production`. Decision (owner, 2026-10-27): block all three in production; staging and local keep them.
+
+**Done**: `NotInProduction` moved to `apps/api/src/auth/guards/not-in-production.guard.ts` and applied to test sales, test inventory, catalog cleanup and full wipe (spec: `not-in-production.spec.ts`). The screens show the api's 403 message, so no web change was needed.
 
 ---
 
@@ -32,10 +34,29 @@ Production is `RAILWAY_ENVIRONMENT_NAME=production` (the `NotInProduction` guard
 
 ---
 
-## Decide on the destructive resets
+## Block the destructive resets
 
-Needs a decision before implementation: catalog cleanup and full wipe made sense before cutover; after it they erase the only record of stock and cost.
+Catalog cleanup and full wipe made sense before cutover; after it they erase the only record of stock and cost.
 
 **Requirements**:
-- Given the production environment, should refuse catalog cleanup and full wipe, or (if kept) require the owner's PIN and record who ran it
-- Given the decision, should update the Catalog Sync screen to match (hide the cleanup or explain the block)
+- Given the production environment, should refuse catalog cleanup and full wipe
+- Given the Catalog Sync screen in production, should show the reason (it displays api errors)
+
+---
+
+## Existing test batches in production
+
+Run by the owner (read-only); decide per row, nothing is deleted automatically:
+
+```sql
+select i.id, p.name, l.name as location, i.quantity, i."unitCost", i."receivedAt"::date
+from "Inventory" i
+join "Product" p on p.id = i."productId"
+join "Location" l on l.id = i."locationId"
+where l."squareId" = 'L60AMVPDZJ48F'
+   or (i."unitCost" = 5 and i.source is null and i."migrationId" is null
+       and not exists (select 1 from "InventoryReceiving" r where r."inventoryBatchId" = i.id)
+       and not exists (select 1 from "InventoryAdjustment" a where a."createdBatchId" = i.id)
+       and not exists (select 1 from "TransferLine" t where t."destinationInventoryId" = i.id))
+order by i."receivedAt";
+```
