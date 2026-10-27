@@ -35,7 +35,7 @@ describe('toSaleLines', () => {
 
     expect(plain(toSaleLines([line('v-jarabe', '1', 5000), line('v-yastas', '1', 25000)], mappings, context))).toEqual({
       saleItems: [{ productId: 'jarabe', quantitySold: 1, salePrice: '50' }],
-      yastasLines: [{ employeeId: 'emp-1', faceAmount: '250' }],
+      yastasLines: [{ employeeId: 'emp-1', faceAmount: '250', lineUid: 'uid-v-yastas' }],
       skipped: [],
     });
   });

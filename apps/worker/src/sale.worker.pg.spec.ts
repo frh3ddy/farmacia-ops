@@ -42,19 +42,19 @@ afterAll(async () => {
   await db?.close();
 });
 
-const job = (lineItems: object[]) =>
+const job = (lineItems: object[], paymentId = 'p-1') =>
   ({
-    id: 'evt-1',
+    id: `evt-${paymentId}`,
     data: {
       payload: {
-        object: { payment: { id: 'p-1', location_id: 'SQ-CENTRO', order_id: 'o-1', created_at: '2026-10-27T18:00:00Z' } },
-        _testOrderData: { id: 'o-1', lineItems },
+        object: { payment: { id: paymentId, location_id: 'SQ-CENTRO', order_id: `o-${paymentId}`, created_at: '2026-10-27T18:00:00Z' } },
+        _testOrderData: { id: `o-${paymentId}`, lineItems },
       },
     },
   }) as unknown as Job;
 
-const line = (catalogObjectId: string, quantity: string, centavos: number) => ({
-  uid: `uid-${catalogObjectId}`,
+const line = (catalogObjectId: string, quantity: string, centavos: number, uid = `uid-${catalogObjectId}`) => ({
+  uid,
   catalogObjectId,
   quantity,
   totalMoney: { amount: centavos, currency: 'MXN' }, // job data is JSON, so a number
@@ -89,7 +89,7 @@ test('a sale across two batches, a product short of stock, and a Yastás line', 
   const sale = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-1' }, include: { items: true } });
   const cover = await prisma.inventoryAdjustment.findFirstOrThrow({ where: { type: 'AUTO_SALE_COVER' } });
   const left = async (id: string) => (await prisma.inventory.findUniqueOrThrow({ where: { id } })).quantity;
-  const operation = await prisma.yastasOperation.findUniqueOrThrow({ where: { squareId: 'p-1' } });
+  const operation = await prisma.yastasOperation.findFirstOrThrow({ where: { squareId: 'p-1' } });
 
   expect({
     revenue: sale.totalRevenue.toString(),
@@ -115,4 +115,27 @@ test('a sale across two batches, a product short of stock, and a Yastás line', 
   // A redelivered webhook records nothing twice.
   await processSaleJob(job(lines));
   expect([await prisma.sale.count(), await prisma.inventoryConsumption.count(), await prisma.walletMovement.count()]).toEqual([1, 3, 1]);
+});
+
+test('an order with two Yastás lines', async () => {
+  const prisma = getPrisma();
+  const wallet = await prisma.yastasWallet.findFirstOrThrow();
+  const before = wallet.balance;
+
+  // Two electricity payments on one ticket: same item, two lines.
+  const lines = [line('v-luz', '1', 25000, 'uid-luz-1'), line('v-luz', '1', 10000, 'uid-luz-2')];
+  await processSaleJob(job(lines, 'p-2'));
+  await processSaleJob(job(lines, 'p-2')); // redelivered
+
+  const operations = await prisma.yastasOperation.findMany({ where: { squareId: 'p-2' }, include: { movements: true }, orderBy: { faceAmount: 'desc' } });
+  expect({
+    operations: operations.map((o) => [o.faceAmount.toString(), o.movements.map((m) => m.amount.toString())]),
+    walletChange: (await prisma.yastasWallet.findUniqueOrThrow({ where: { id: wallet.id } })).balance.sub(before).toString(),
+  }).toEqual({
+    operations: [
+      ['250', ['-250']],
+      ['100', ['-100']],
+    ],
+    walletChange: '-350',
+  });
 });
