@@ -1066,3 +1066,14 @@ model YastasWalletTransfer {
   @@index([fromLocationId])
   @@index([toLocationId])
 }
+
+// Nightly integrity check results (apps/worker/src/integrity-run.ts), read by
+// the web banner. Kept 90 days.
+model IntegrityRun {
+  id            String   @id @default(uuid())
+  ranAt         DateTime
+  mismatchCount Int
+  checks        Json // { books, sales, fifo }: { status: 'ok' | 'failed', mismatches, error? }
+
+  @@index([ranAt])
+}

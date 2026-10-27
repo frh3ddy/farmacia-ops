@@ -17,7 +17,7 @@ import { debugLog } from './debug-log';
 let pool: Pool | null = null;
 let prisma: PrismaClient | null = null;
 
-function getPrisma(): PrismaClient {
+export function getPrisma(): PrismaClient {
   if (!prisma) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
