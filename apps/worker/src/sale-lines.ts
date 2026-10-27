@@ -6,6 +6,7 @@ import type { MappedProduct } from './catalog.mapper';
 export type OrderLine = {
   uid?: string | null;
   name?: string | null;
+  note?: string | null;
   catalogObjectId?: string | null;
   quantity?: string | null;
   totalMoney?: { amount?: bigint | number | null; currency?: string | null } | null;
@@ -15,14 +16,14 @@ export type SaleLines = {
   saleItems: Array<{ productId: string; quantitySold: number; salePrice: Prisma.Decimal }>;
   /** Yastás service items: never a Sale or SaleItem, never FIFO (vision.md). */
   yastasLines: Array<{ employeeId: string; faceAmount: Prisma.Decimal; lineUid: string | null }>;
-  /** Lines with no catalog item (custom amounts), which are not recorded. */
-  skipped: OrderLine[];
+  /** Custom amounts (no catalog item): counted in revenue, cost pending until matched to a product. */
+  customLines: Array<{ description: string | null; quantity: number; amount: Prisma.Decimal; lineUid: string | null }>;
 };
 
 const safeStringify = (value: unknown) => JSON.stringify(value, (_key, v) => (typeof v === 'bigint' ? `${v}n` : v));
 
 /**
- * Splits a Square order's lines into sale items and Yastás lines.
+ * Splits a Square order's lines into sale items, Yastás lines and custom amounts.
  * `mappings` holds the resolved product for every catalogObjectId in `lines`.
  */
 export function toSaleLines(
@@ -30,15 +31,9 @@ export function toSaleLines(
   mappings: Map<string, MappedProduct>,
   context: { orderId: string; squareId: string; locationId: string },
 ): SaleLines {
-  const result: SaleLines = { saleItems: [], yastasLines: [], skipped: [] };
+  const result: SaleLines = { saleItems: [], yastasLines: [], customLines: [] };
 
   for (const line of lines) {
-    const mapped = line.catalogObjectId ? mappings.get(line.catalogObjectId) : undefined;
-    if (!mapped) {
-      result.skipped.push(line);
-      continue;
-    }
-
     const quantity = line.quantity ? parseInt(line.quantity, 10) : 1;
     if (!(quantity > 0)) {
       throw new SaleValidationError('Line item quantity must be positive', { orderLineItem: safeStringify(line) });
@@ -52,6 +47,12 @@ export function toSaleLines(
     const total = new Prisma.Decimal(amount.toString()).div(100);
     if (total.lt(0)) {
       throw new SaleValidationError('Line item salePrice must be non-negative', { orderLineItem: safeStringify(line) });
+    }
+
+    const mapped = line.catalogObjectId ? mappings.get(line.catalogObjectId) : undefined;
+    if (!mapped) {
+      result.customLines.push({ description: line.name || line.note || null, quantity, amount: total, lineUid: line.uid ?? null });
+      continue;
     }
 
     if (!mapped.tracksInventory) {
@@ -68,8 +69,5 @@ export function toSaleLines(
     result.saleItems.push({ productId: mapped.productId, quantitySold: quantity, salePrice: total.div(quantity) });
   }
 
-  if (result.saleItems.length === 0 && result.yastasLines.length === 0) {
-    throw new SaleValidationError('No valid line items found after mapping', context);
-  }
   return result;
 }

@@ -288,6 +288,7 @@ export class DataController {
         const inventoryAdjustment = await tx.inventoryAdjustment.deleteMany({});
         const saleItem = await tx.saleItem.deleteMany({});
         const inventory = await tx.inventory.deleteMany({});
+        const unmatchedSaleLine = await tx.unmatchedSaleLine.deleteMany({});
         const sale = await tx.sale.deleteMany({});
         const extractionBatch = await tx.extractionBatch.deleteMany({});
         const rackSection = await tx.rackSection.deleteMany({});
@@ -324,6 +325,7 @@ export class DataController {
           inventoryAdjustment: inventoryAdjustment.count,
           saleItem: saleItem.count,
           inventory: inventory.count,
+          unmatchedSaleLine: unmatchedSaleLine.count,
           sale: sale.count,
           extractionBatch: extractionBatch.count,
           rackSection: rackSection.count,

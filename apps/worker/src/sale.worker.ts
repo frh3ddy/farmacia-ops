@@ -316,10 +316,11 @@ async function recordInventoryConsumption(
 }
 
 /**
- * Calculate total revenue, total cost, and gross profit for a sale
+ * Calculate total revenue, total cost, and gross profit for a sale.
+ * Custom amounts add revenue only: their cost is pending until matched.
  */
-function calculateSaleTotals(saleItems: SaleItemOutput[]): SaleTotals {
-  let totalRevenue = new Prisma.Decimal(0);
+function calculateSaleTotals(saleItems: SaleItemOutput[], customLines: Array<{ amount: Prisma.Decimal }>): SaleTotals {
+  let totalRevenue = customLines.reduce((sum, l) => sum.add(l.amount), new Prisma.Decimal(0));
   let totalCost = new Prisma.Decimal(0);
 
   for (const saleItem of saleItems) {
@@ -548,14 +549,11 @@ export async function processSaleJob(job: Job): Promise<void> {
     }
   }
 
-  const { saleItems: lineItems, yastasLines: yastasLineItems, skipped } = toSaleLines(orderLineItems, mappings, {
+  const { saleItems: lineItems, yastasLines: yastasLineItems, customLines } = toSaleLines(orderLineItems, mappings, {
     orderId,
     squareId,
     locationId,
   });
-  if (skipped.length > 0) {
-    console.warn(`[SALE_WORKER] ${skipped.length} line(s) with no catalog item not recorded for payment ${squareId}`);
-  }
   debugLog('[DEBUG] Total line items mapped:', lineItems.length, 'Yastás line items:', yastasLineItems.length);
 
   // Phase 3 & 4: Create Sale Record and Process Items (all in transaction)
@@ -626,7 +624,7 @@ export async function processSaleJob(job: Job): Promise<void> {
           debugLog(`[DEBUG] [TX] ✓ YastasOperation ${operation.id} + WalletMovement recorded`);
         }
 
-        if (lineItems.length === 0) {
+        if (lineItems.length === 0 && customLines.length === 0) {
           // Pure-Yastás order — no Sale/SaleItem rows at all.
           return { saleId: null, itemCount: 0 };
         }
@@ -690,9 +688,15 @@ export async function processSaleJob(job: Job): Promise<void> {
           }
         }
 
+        if (customLines.length > 0) {
+          await tx.unmatchedSaleLine.createMany({
+            data: customLines.map((l) => ({ saleId: sale.id, squareLineUid: l.lineUid, description: l.description, quantity: l.quantity, amount: l.amount })),
+          });
+        }
+
         // Calculate sale totals
         debugLog('[DEBUG] [TX] Calculating sale totals...');
-        const totals = calculateSaleTotals(saleItems);
+        const totals = calculateSaleTotals(saleItems, customLines);
         debugLog('[DEBUG] [TX] Sale totals:', {
           totalRevenue: totals.totalRevenue.toString(),
           totalCost: totals.totalCost.toString(),

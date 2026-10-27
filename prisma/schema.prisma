@@ -460,9 +460,27 @@ model Sale {
 
   createdAt DateTime
 
-  items SaleItem[]
+  items          SaleItem[]
+  unmatchedLines UnmatchedSaleLine[]
 
   location Location @relation(fields: [locationId], references: [id])
+}
+
+/// A Square custom-amount line (no catalog item): counted in the sale's
+/// revenue, its cost pending until someone matches it to a product.
+model UnmatchedSaleLine {
+  id            String  @id @default(uuid())
+  saleId        String
+  squareLineUid String?
+  description   String? // what staff typed, if anything
+  quantity      Int
+  amount        Decimal // line total
+
+  createdAt DateTime @default(now())
+
+  sale Sale @relation(fields: [saleId], references: [id])
+
+  @@unique([saleId, squareLineUid])
 }
 
 model SaleItem {
