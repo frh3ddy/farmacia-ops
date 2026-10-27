@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { Reflector } from '@nestjs/core';
 import { assert } from 'riteway/vitest';
 import { AuthService } from '../auth.service';
-import { AuthGuard } from './auth.guard';
+import { AuthGuard, DeviceGuard } from './auth.guard';
 
 // Real AuthService over a Prisma stub holding one live session, created on the
 // device with token "device-A" (stored as its hash), for a manager at "centro".
@@ -68,6 +68,57 @@ describe('AuthGuard device binding', () => {
       should: 'refuse exactly like an unknown token, without touching the session',
       actual: await attempt({}),
       expected: { result: 'Invalid session', sessionWrites: 0 },
+    });
+  });
+});
+
+describe('DeviceGuard', () => {
+  test('device token without Bearer', async () => {
+    const authService = { validateDeviceToken: vi.fn() };
+    const request = { headers: { authorization: 'dt_raw' } };
+    const context = { switchToHttp: () => ({ getRequest: () => request }) } as any;
+
+    assert({
+      given: 'an Authorization header without "Bearer "',
+      should: 'refuse it as a missing device token, without looking it up',
+      actual: await new DeviceGuard(authService as any).canActivate(context).then(
+        () => 'allowed',
+        (e) => [e.getStatus(), authService.validateDeviceToken.mock.calls.length],
+      ),
+      expected: [401, 0],
+    });
+  });
+});
+
+describe('DeviceGuard errors', () => {
+  test('database failure', async () => {
+    const outage = new Error('connection refused');
+    const authService = { validateDeviceToken: vi.fn().mockRejectedValue(outage) };
+    const request = { headers: { authorization: 'Bearer dt_raw' } };
+    const context = { switchToHttp: () => ({ getRequest: () => request }) } as any;
+
+    assert({
+      given: 'a device check that fails with a database error',
+      should: 'pass that error on (a 500), not report the device as invalid',
+      actual: await new DeviceGuard(authService as any).canActivate(context).catch((e) => e),
+      expected: outage,
+    });
+  });
+});
+
+describe('AuthGuard errors', () => {
+  test('database failure', async () => {
+    // Regression: any non-HTTP error became 401 "Invalid or expired session", so
+    // a database outage logged everyone out instead of showing a server error.
+    const outage = new Error('connection refused');
+    const authService = { validateSession: vi.fn().mockRejectedValue(outage) };
+    const guard = new AuthGuard(authService as any, new Reflector());
+
+    assert({
+      given: 'a session check that fails with a database error',
+      should: 'pass that error on (a 500), not report the session as invalid',
+      actual: await guard.canActivate(contextFor({ authorization: 'Bearer device-A' })).catch((e) => e),
+      expected: outage,
     });
   });
 });
