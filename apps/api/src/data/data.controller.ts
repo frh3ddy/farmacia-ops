@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthGuard, Roles } from '../auth/guards/auth.guard';
+import { NotInProduction } from '../auth/guards/not-in-production.guard';
 
 @Controller('api')
 @UseGuards(AuthGuard)
@@ -146,6 +147,7 @@ export class DataController {
 
   @Post('catalog/cleanup')
   @Roles('OWNER')
+  @UseGuards(NotInProduction)
   async cleanupCatalog(@Body() body?: { deleteProducts?: boolean }) {
     try {
       const deleteProducts = body?.deleteProducts ?? true; // Default to true for fresh start
@@ -260,6 +262,7 @@ export class DataController {
   // the Product/Location/Inventory rows they point at).
   @Post('wipe/full')
   @Roles('OWNER')
+  @UseGuards(NotInProduction)
   async wipeFullDatabase(@Body() body?: { confirm?: string }) {
     if (body?.confirm !== 'DELETE EVERYTHING') {
       return {
@@ -363,6 +366,7 @@ export class DataController {
 
   @Post('inventory/test')
   @Roles('OWNER')
+  @UseGuards(NotInProduction)
   async createTestInventory(@Body() body: { squareVariationIds?: string[] }) {
     // Create test inventory for specified products
     // If squareVariationIds provided, find products via catalog mapping
