@@ -111,29 +111,4 @@ export class InventoryReconciliationController {
       );
     }
   }
-
-  /**
-   * Verify FIFO compliance for a sale
-   * Checks that inventory was consumed in correct chronological order
-   */
-  @Get('verify-fifo/:saleId')
-  async verifyFIFOCompliance(@Param('saleId') saleId: string) {
-    try {
-      const result = await this.reconciliationService.verifyFIFOCompliance(saleId);
-
-      return {
-        success: true,
-        saleId,
-        ...result,
-      };
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: `FIFO verification failed: ${error instanceof Error ? error.message : String(error)}`,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
 }

@@ -56,15 +56,18 @@ Every Square payment must have become a `Sale` (`Sale.squareId` is the Square pa
 
 ---
 
-## Real FIFO verification
+## ✅ Real FIFO verification
 
-`GET /inventory/reconciliation/verify-fifo/:saleId` can never find a violation: its query sorts a sale item's consumptions by the batch's `receivedAt`, then checks they are in `receivedAt` order (found 2026-10-27 while removing the reconciliation report).
+`GET /inventory/reconciliation/verify-fifo/:saleId` can never find a violation: its query sorts a sale item's consumptions by the batch's `receivedAt`, then checks they are in `receivedAt` order (found 2026-10-27 while removing the reconciliation report). No client calls it, so the check moves to the worker as a third nightly check and the endpoint is deleted (decided 2026-10-27).
+
+Consumption rows don't record the order they were taken in (one `createMany`, same `consumedAt`), but batch quantities only ever go down: an older batch that has stock now had at least that much when the sale ran.
 
 **Requirements**:
-- Given a sale item whose consumptions took a newer batch while an older batch at the same product and location still had stock, should report a FIFO violation
-- Given a sale item that consumed its batches oldest `receivedAt` first, should report it compliant
-- Given the check, should judge by the order the consumptions happened in, not by re-sorting them by `receivedAt`
-- Given the nightly job, should also run this check over the day's sales
+- Given a sale item that took stock from a batch while an older batch (earlier `receivedAt`) of the same product and location still has stock and already existed when the sale ran (`createdAt` ≤ `consumedAt`), should report a FIFO violation naming both batches
+- Given a sale item that consumed its batches oldest `receivedAt` first, should report nothing
+- Given an older batch created after the sale (a cutover or transfer batch with an old `receivedAt`), should not report it
+- Given a window of sales, should run as a few set-based queries
+- Given the api, should delete `verify-fifo/:saleId` and `verifyFIFOCompliance`
 
 ---
 

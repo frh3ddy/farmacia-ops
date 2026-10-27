@@ -17,9 +17,9 @@ describe('InventoryReconciliationController routes', () => {
     // replaces them (tasks/inventory-integrity-epic.md).
     assert({
       given: 'the reconciliation controller',
-      should: 'serve only the FIFO checks, not the always-reconciled report',
+      should: 'serve only the consumption lookups (FIFO is checked nightly by the worker)',
       actual: routePaths(),
-      expected: ['consumption/:productId', 'sale-item/:saleItemId', 'verify-fifo/:saleId'],
+      expected: ['consumption/:productId', 'sale-item/:saleItemId'],
     });
   });
 });
