@@ -564,7 +564,7 @@ export class AuthService {
   // --------------------------------------------------------------------------
 
   async refreshSession(sessionToken: string) {
-    const { session, employee } = await this.validateSession(sessionToken);
+    const { session } = await this.validateSession(sessionToken);
 
     // Create new session token
     const newSessionToken = this.generateSessionToken();

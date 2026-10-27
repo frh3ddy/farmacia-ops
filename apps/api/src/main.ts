@@ -2,7 +2,6 @@ import "reflect-metadata";
 import { config } from "dotenv";
 import { resolve, join } from "path";
 import { NestFactory } from "@nestjs/core";
-import { INestApplication } from "@nestjs/common";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";

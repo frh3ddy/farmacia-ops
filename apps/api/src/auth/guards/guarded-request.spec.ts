@@ -7,7 +7,7 @@ const srcDir = join(__dirname, '../..');
 const controllerFiles = (readdirSync(srcDir, { recursive: true }) as string[]).filter((f) => f.endsWith('.controller.ts'));
 
 // Type checks: npm test runs tsc, which fails if any of these compile.
-function locationHelperMisuses() {
+export function locationHelperMisuses() {
   // @ts-expect-error misspelled request field
   assertLocationAccess({ currentLocaton: undefined, accessibleLocations: [] }, 'centro');
   // @ts-expect-error not a request

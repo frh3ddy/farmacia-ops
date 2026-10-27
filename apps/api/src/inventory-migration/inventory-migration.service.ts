@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma, PrismaClient, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
+import { Prisma, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import {
   CutoverInput,
@@ -9,7 +9,6 @@ import {
   CostApprovalRequest,
   OpeningBalanceItem,
   MigrationResult,
-  MigrationError,
   MigrationWarning,
   CutoverLock,
   LocationPreview,

@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
   CostExtractionResult,
-  ExtractedCostEntry,
 } from './types';
 
 // 1. Centralize the Month/Typo Map (Moved outside class for performance)

@@ -127,14 +127,6 @@ export class InventoryReconciliationService {
 
     const totalConsumed = consumptions.reduce((sum, c) => sum + c.quantity, 0);
 
-    // Calculate opening balance (sum of all batch quantities when received)
-    // This is the initial quantity before any consumption
-    const openingBalance = batches.reduce((sum, b) => {
-      // Opening balance = current quantity + consumed from this batch
-      // We need to get consumption per batch
-      return sum + b.quantity; // This is simplified - we'd need per-batch consumption
-    }, 0);
-
     // For now, simplified calculation:
     // Expected = Current (what's in batches now)
     // If we had full history: Expected = Opening + Received - Consumed
@@ -234,16 +226,10 @@ export class InventoryReconciliationService {
     startDate: Date,
     endDate: Date,
   ): Promise<ConsumptionSummary> {
-    const [product, location] = await Promise.all([
-      this.prisma.product.findUnique({
-        where: { id: productId },
-        select: { id: true, name: true, squareProductName: true },
-      }),
-      this.prisma.location.findUnique({
-        where: { id: locationId },
-        select: { id: true, name: true },
-      }),
-    ]);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, name: true, squareProductName: true },
+    });
 
     if (!product) {
       throw new Error(`Product ${productId} not found`);
