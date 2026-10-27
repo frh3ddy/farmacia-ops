@@ -49,6 +49,9 @@ async function bootstrap() {
       : ['error', 'warn', 'log'],
   });
 
+  // Railway's edge proxy is one hop in front: take req.ip from its X-Forwarded-For entry.
+  app.set("trust proxy", 1);
+
   // Apply JSON parser for all other routes
   // app.use(express.json());
 

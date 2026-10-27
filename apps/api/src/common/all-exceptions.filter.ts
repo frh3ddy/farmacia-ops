@@ -4,13 +4,16 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 
 // Normalizes every thrown error into the { success: false, message } shape
 // controllers used to hand-roll in a try/catch on every endpoint.
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse<Response>();
 
@@ -23,6 +26,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : typeof body === 'string'
             ? body
             : exception.message;
+      if (status === HttpStatus.UNAUTHORIZED || status === HttpStatus.FORBIDDEN) {
+        // Refused requests leave a trace (OWASP A09). Never log headers: they carry the tokens.
+        const request = host.switchToHttp().getRequest<Request & { employee?: { id: string } }>();
+        this.logger.warn(
+          `[ACCESS] ${status} ${request.method} ${request.path} employee=${request.employee?.id ?? '-'} ip=${request.ip}: ${message}`,
+        );
+      }
       response.status(status).json({ success: false, message });
       return;
     }
