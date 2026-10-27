@@ -31,8 +31,8 @@ describe('device activation lockout', () => {
 });
 
 describe('location scoping', () => {
-  const manager = { currentLocation: { role: 'MANAGER', locationId: 'centro' }, accessibleLocations: [{ locationId: 'centro', isActive: true }] };
-  const owner = { currentLocation: { role: 'OWNER', locationId: 'centro' }, accessibleLocations: [] };
+  const manager = { currentLocation: { role: 'MANAGER', locationId: 'centro' }, accessibleLocations: [{ locationId: 'centro', isActive: true }] } as any; // fixture: only the fields the helpers read
+  const owner = { currentLocation: { role: 'OWNER', locationId: 'centro' }, accessibleLocations: [] } as any;
 
   it('gives non-owners their own location when none is asked for', () => {
     expect(scopedLocationId(manager)).toBe('centro');

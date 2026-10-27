@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { EmployeeService } from './employee.service';
 import { EmployeeRole } from '@prisma/client';
-import { AuthGuard, RoleGuard, Roles, Public } from './guards/auth.guard';
+import { AuthGuard, Roles, Public, GuardedRequest, RoleGuardedRequest } from './guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -66,7 +66,7 @@ const ROLE_HIERARCHY: Record<EmployeeRole, number> = {
 // ============================================================================
 
 @Controller('employees')
-@UseGuards(AuthGuard, RoleGuard)
+@UseGuards(AuthGuard)
 export class EmployeeController {
   constructor(
     private readonly employeeService: EmployeeService
@@ -79,7 +79,7 @@ export class EmployeeController {
   @Roles('OWNER')
   async createEmployee(
     @Body() body: CreateEmployeeDto,
-    @Req() req: any
+    @Req() req: RoleGuardedRequest
   ) {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
@@ -148,7 +148,7 @@ export class EmployeeController {
   @Get()
   @Roles('OWNER', 'MANAGER')
   async listEmployees(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('role') role?: EmployeeRole,
     @Query('isActive') isActive?: string,
@@ -182,7 +182,7 @@ export class EmployeeController {
   async updateEmployee(
     @Param('id') employeeId: string,
     @Body() body: UpdateEmployeeDto,
-    @Req() req: any
+    @Req() req: RoleGuardedRequest
   ) {
     const currentEmployee = req.employee;
 
@@ -206,7 +206,7 @@ export class EmployeeController {
   @Roles('OWNER')
   async deactivateEmployee(
     @Param('id') employeeId: string,
-    @Req() req: any
+    @Req() req: RoleGuardedRequest
   ) {
     const currentEmployee = req.employee;
 
@@ -234,7 +234,7 @@ export class EmployeeController {
   async setPIN(
     @Param('id') employeeId: string,
     @Body() body: SetPINDto,
-    @Req() req: any
+    @Req() req: RoleGuardedRequest
   ) {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
@@ -292,7 +292,7 @@ export class EmployeeController {
   @Roles('OWNER', 'MANAGER')
   async resetPINLockout(
     @Param('id') employeeId: string,
-    @Req() req: any
+    @Req() req: GuardedRequest
   ) {
     const currentEmployee = req.employee;
 
@@ -312,7 +312,7 @@ export class EmployeeController {
   async setPassword(
     @Param('id') employeeId: string,
     @Body() body: SetPasswordDto,
-    @Req() req: any
+    @Req() req: GuardedRequest
   ) {
     const currentEmployee = req.employee;
 
@@ -343,7 +343,7 @@ export class EmployeeController {
   async assignLocation(
     @Param('id') employeeId: string,
     @Body() body: AssignLocationDto,
-    @Req() req: any
+    @Req() req: GuardedRequest
   ) {
     const currentEmployee = req.employee;
 
@@ -377,7 +377,7 @@ export class EmployeeController {
     @Param('id') employeeId: string,
     @Param('locationId') locationId: string,
     @Body() body: UpdateAssignmentDto,
-    @Req() req: any
+    @Req() req: GuardedRequest
   ) {
     const currentEmployee = req.employee;
 
@@ -403,7 +403,7 @@ export class EmployeeController {
   async removeLocationAssignment(
     @Param('id') employeeId: string,
     @Param('locationId') locationId: string,
-    @Req() req: any
+    @Req() req: GuardedRequest
   ) {
     const currentEmployee = req.employee;
 

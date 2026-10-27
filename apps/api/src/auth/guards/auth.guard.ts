@@ -7,8 +7,15 @@ import {
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import type { Request } from 'express';
 import { AuthService } from '../auth.service';
 import { EmployeeRole } from '@prisma/client';
+
+/** A request that passed AuthGuard: the validated session and the employee's location access. */
+export type GuardedRequest = Request & Awaited<ReturnType<AuthService['validateSession']>>;
+/** A request on a @Roles route: AuthGuard refused it unless the session has a current location. */
+export type RoleGuardedRequest = GuardedRequest & { currentLocation: NonNullable<GuardedRequest['currentLocation']> };
+type LocationAccess = Pick<GuardedRequest, 'currentLocation' | 'accessibleLocations'>;
 
 // ============================================================================
 // Decorators
@@ -51,107 +58,6 @@ export class DeviceGuard implements CanActivate {
         HttpStatus.UNAUTHORIZED
       );
     }
-  }
-}
-
-// ============================================================================
-// Session Guard - Validates session token
-// ============================================================================
-
-@Injectable()
-export class SessionGuard implements CanActivate {
-  constructor(
-    private readonly authService: AuthService,
-    private readonly reflector: Reflector
-  ) {}
-
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    // Check if route is marked as public
-    const isPublic = this.reflector.getAllAndOverride<boolean>(PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-
-    if (isPublic) {
-      return true;
-    }
-
-    const request = context.switchToHttp().getRequest();
-    const sessionToken = request.headers['x-session-token'];
-
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required in X-Session-Token header' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
-    try {
-      const { session, employee, currentLocation, accessibleLocations } =
-        await this.authService.validateSession(sessionToken);
-      
-      // Attach to request for use in controllers
-      request.session = session;
-      request.employee = employee;
-      request.currentLocation = currentLocation;
-      request.accessibleLocations = accessibleLocations;
-      
-      return true;
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        { success: false, message: 'Invalid or expired session' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-  }
-}
-
-// ============================================================================
-// Role Guard - Checks if user has required role
-// ============================================================================
-
-@Injectable()
-export class RoleGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
-
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    // Get required roles from decorator
-    const requiredRoles = this.reflector.getAllAndOverride<EmployeeRole[]>(ROLES_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-
-    // If no roles specified, allow access
-    if (!requiredRoles || requiredRoles.length === 0) {
-      return true;
-    }
-
-    const request = context.switchToHttp().getRequest();
-    const currentLocation = request.currentLocation;
-
-    if (!currentLocation) {
-      throw new HttpException(
-        { success: false, message: 'No location context' },
-        HttpStatus.FORBIDDEN
-      );
-    }
-
-    const hasRole = requiredRoles.includes(currentLocation.role);
-
-    if (!hasRole) {
-      throw new HttpException(
-        {
-          success: false,
-          message: `Access denied. Requires one of: ${requiredRoles.join(', ')}`,
-        },
-        HttpStatus.FORBIDDEN
-      );
-    }
-
-    return true;
   }
 }
 
@@ -260,10 +166,10 @@ export class LocationGuard implements CanActivate {
 }
 
 /** Throws 403 unless the session's employee may act on this location (OWNER: any). */
-export function assertLocationAccess(request: any, locationId: string): void {
+export function assertLocationAccess(request: LocationAccess, locationId: string): void {
   if (request.currentLocation?.role === 'OWNER') return;
   const hasAccess = (request.accessibleLocations || []).some(
-    (a: any) => a.locationId === locationId && a.isActive
+    (a) => a.locationId === locationId && a.isActive
   );
   if (!hasAccess) {
     throw new HttpException(
@@ -279,7 +185,7 @@ export function assertLocationAccess(request: any, locationId: string): void {
  * instead of every location's data — or a 403 when they have none (e.g. their
  * assignment there was deactivated), never "all".
  */
-export function scopedLocationId(request: any, locationId?: string): string | undefined {
+export function scopedLocationId(request: LocationAccess, locationId?: string): string | undefined {
   if (locationId || request.currentLocation?.role === 'OWNER') return locationId;
   const ownLocationId = request.currentLocation?.locationId;
   if (!ownLocationId) {

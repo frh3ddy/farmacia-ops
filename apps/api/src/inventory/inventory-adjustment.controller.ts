@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { AdjustmentType } from '@prisma/client';
-import { AuthGuard, RoleGuard, LocationGuard, Roles, scopedLocationId, Public } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, Public, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -53,7 +53,7 @@ function parseDateString(dateStr: string): Date {
 // ============================================================================
 
 @Controller('inventory/adjustments')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 export class InventoryAdjustmentController {
   constructor(private readonly adjustmentService: InventoryAdjustmentService) {}
 
@@ -62,7 +62,7 @@ export class InventoryAdjustmentController {
   // --------------------------------------------------------------------------
   @Post()
   @Roles('OWNER', 'MANAGER')
-  async createAdjustment(@Body() body: CreateAdjustmentDto, @Req() req: any) {
+  async createAdjustment(@Body() body: CreateAdjustmentDto, @Req() req: RoleGuardedRequest) {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
 
@@ -140,7 +140,7 @@ export class InventoryAdjustmentController {
   // --------------------------------------------------------------------------
   @Post('damage')
   @Roles('OWNER', 'MANAGER')
-  async recordDamage(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
+  async recordDamage(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: RoleGuardedRequest) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.DAMAGE,
@@ -150,7 +150,7 @@ export class InventoryAdjustmentController {
 
   @Post('theft')
   @Roles('OWNER', 'MANAGER')
-  async recordTheft(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
+  async recordTheft(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: RoleGuardedRequest) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.THEFT,
@@ -160,7 +160,7 @@ export class InventoryAdjustmentController {
 
   @Post('expired')
   @Roles('OWNER', 'MANAGER')
-  async recordExpired(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
+  async recordExpired(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: RoleGuardedRequest) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.EXPIRED,
@@ -170,7 +170,7 @@ export class InventoryAdjustmentController {
 
   @Post('found')
   @Roles('OWNER', 'MANAGER')
-  async recordFound(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
+  async recordFound(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: RoleGuardedRequest) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.FOUND,
@@ -180,7 +180,7 @@ export class InventoryAdjustmentController {
 
   @Post('return')
   @Roles('OWNER', 'MANAGER')
-  async recordReturn(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
+  async recordReturn(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: RoleGuardedRequest) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.RETURN,
@@ -190,7 +190,7 @@ export class InventoryAdjustmentController {
 
   @Post('count-correction')
   @Roles('OWNER', 'MANAGER')
-  async recordCountCorrection(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
+  async recordCountCorrection(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: RoleGuardedRequest) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.COUNT_CORRECTION,
@@ -200,7 +200,7 @@ export class InventoryAdjustmentController {
 
   @Post('write-off')
   @Roles('OWNER', 'MANAGER')
-  async recordWriteOff(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: any) {
+  async recordWriteOff(@Body() body: Omit<CreateAdjustmentDto, 'type'>, @Req() req: RoleGuardedRequest) {
     return this.createAdjustment({
       ...body,
       type: AdjustmentType.WRITE_OFF,
@@ -239,7 +239,7 @@ export class InventoryAdjustmentController {
   @Get('product/:productId')
   @Roles('OWNER', 'MANAGER')
   async getAdjustmentsByProduct(
-    @Req() req: any,
+    @Req() req: GuardedRequest,
     @Param('productId') productId: string,
     @Query('locationId') locationId?: string
   ) {

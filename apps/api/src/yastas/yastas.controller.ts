@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { YastasOperationDirection } from '@prisma/client';
 import { YastasService } from './yastas.service';
-import { AuthGuard, RoleGuard, LocationGuard, Roles, assertLocationAccess, scopedLocationId } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, assertLocationAccess, scopedLocationId, GuardedRequest } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -54,7 +54,7 @@ interface UpdateSettlementDto {
 // ============================================================================
 
 @Controller('yastas')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 export class YastasController {
   constructor(private readonly yastasService: YastasService) {}
 
@@ -63,7 +63,7 @@ export class YastasController {
   // session supplies employeeId. Never touches Square.
   // --------------------------------------------------------------------------
   @Post('operations/out')
-  async recordOutOperation(@Body() body: RecordOutOperationDto, @Req() req: any) {
+  async recordOutOperation(@Body() body: RecordOutOperationDto, @Req() req: GuardedRequest) {
     const currentEmployee = req.employee;
 
     if (!body.locationId || body.faceAmount === undefined) {
@@ -88,7 +88,7 @@ export class YastasController {
   // --------------------------------------------------------------------------
   @Post('wallet-transfers')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async createWalletTransfer(@Body() body: CreateWalletTransferDto, @Req() req: any) {
+  async createWalletTransfer(@Body() body: CreateWalletTransferDto, @Req() req: GuardedRequest) {
     const currentEmployee = req.employee;
 
     if (!body.fromLocationId || !body.toLocationId || body.amount === undefined) {
@@ -115,7 +115,7 @@ export class YastasController {
   // --------------------------------------------------------------------------
   @Post('settlements')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async createSettlement(@Body() body: CreateSettlementDto, @Req() req: any) {
+  async createSettlement(@Body() body: CreateSettlementDto, @Req() req: GuardedRequest) {
     const currentEmployee = req.employee;
 
     if (!body.locationId || !body.periodStart || !body.periodEnd || body.amountEarned === undefined) {
@@ -142,7 +142,7 @@ export class YastasController {
 
   @Patch('settlements/:id')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async updateSettlement(@Param('id') id: string, @Body() body: UpdateSettlementDto, @Req() req: any) {
+  async updateSettlement(@Param('id') id: string, @Body() body: UpdateSettlementDto, @Req() req: GuardedRequest) {
     const settlement = await this.yastasService.updateSettlement(
       id,
       {
@@ -184,7 +184,7 @@ export class YastasController {
 
   @Get('operations')
   async listOperations(
-    @Req() req: any,
+    @Req() req: GuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('employeeId') employeeId?: string,
     @Query('direction') direction?: YastasOperationDirection,
@@ -203,7 +203,7 @@ export class YastasController {
   }
 
   @Get('settlements')
-  async listSettlements(@Req() req: any, @Query('locationId') locationId?: string) {
+  async listSettlements(@Req() req: GuardedRequest, @Query('locationId') locationId?: string) {
     const settlements = await this.yastasService.listSettlements(scopedLocationId(req, locationId));
     return { success: true, count: settlements.length, data: settlements };
   }

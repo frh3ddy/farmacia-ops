@@ -1,10 +1,10 @@
 import { Controller, Get, Post, HttpCode, HttpStatus, HttpException, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LocationsService } from './locations.service';
-import { AuthGuard, RoleGuard, DeviceGuard, Roles, Public } from '../auth/guards/auth.guard';
+import { AuthGuard, DeviceGuard, Roles, Public } from '../auth/guards/auth.guard';
 
 @Controller()
-@UseGuards(AuthGuard, RoleGuard)
+@UseGuards(AuthGuard)
 export class LocationsController {
   constructor(
     private readonly prisma: PrismaService,

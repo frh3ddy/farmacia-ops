@@ -1,6 +1,6 @@
 import { Controller, Post, Body, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { BreakBulkService } from './break-bulk.service';
-import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest } from '../auth/guards/auth.guard';
 
 interface BreakBulkDto {
   boxProductId: string;
@@ -12,7 +12,7 @@ interface BreakBulkDto {
 }
 
 @Controller('inventory/break-bulk')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 export class BreakBulkController {
   constructor(private readonly breakBulkService: BreakBulkService) {}
 
@@ -22,7 +22,7 @@ export class BreakBulkController {
    */
   @Post()
   @Roles('OWNER', 'MANAGER')
-  async breakBulk(@Body() body: BreakBulkDto, @Req() req: any) {
+  async breakBulk(@Body() body: BreakBulkDto, @Req() req: GuardedRequest) {
     const currentLocation = req.currentLocation;
     const currentEmployee = req.employee;
     const locationId = body.locationId || currentLocation?.locationId;

@@ -8,8 +8,6 @@ export { EmployeeController } from './employee.controller';
 // Guards
 export {
   DeviceGuard,
-  SessionGuard,
-  RoleGuard,
   AuthGuard,
   LocationGuard,
   Roles,

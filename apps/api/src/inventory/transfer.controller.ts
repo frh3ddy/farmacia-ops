@@ -1,6 +1,6 @@
 import { Controller, Post, Get, Body, Param, Query, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { TransferService } from './transfer.service';
-import { AuthGuard, RoleGuard, LocationGuard, Roles, assertLocationAccess } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 interface ShipTransferDto {
   productId: string;
@@ -18,7 +18,7 @@ interface ReceiveTransferDto {
 }
 
 @Controller('transfers')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 export class TransferController {
   constructor(private readonly transferService: TransferService) {}
 
@@ -28,7 +28,7 @@ export class TransferController {
    */
   @Post()
   @Roles('OWNER', 'MANAGER')
-  async ship(@Body() body: ShipTransferDto, @Req() req: any) {
+  async ship(@Body() body: ShipTransferDto, @Req() req: GuardedRequest) {
     const currentLocation = req.currentLocation;
     const currentEmployee = req.employee;
     const fromLocationId = body.fromLocationId || currentLocation?.locationId;
@@ -65,7 +65,7 @@ export class TransferController {
    */
   @Post(':id/receive')
   @Roles('OWNER', 'MANAGER')
-  async receive(@Param('id') id: string, @Body() body: ReceiveTransferDto, @Req() req: any) {
+  async receive(@Param('id') id: string, @Body() body: ReceiveTransferDto, @Req() req: GuardedRequest) {
     const currentEmployee = req.employee;
     const result = await this.transferService.receive({
       transferId: id,
@@ -85,7 +85,7 @@ export class TransferController {
    */
   @Get()
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async getTransfers(@Query('locationId') locationId: string, @Query('status') status: string, @Req() req: any) {
+  async getTransfers(@Query('locationId') locationId: string, @Query('status') status: string, @Req() req: RoleGuardedRequest) {
     const currentLocation = req.currentLocation;
     const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
 

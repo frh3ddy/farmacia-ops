@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { InventoryReceivingService } from './inventory-receiving.service';
 import { ProductsService } from '../products/products.service';
-import { AuthGuard, RoleGuard, LocationGuard, Roles, scopedLocationId } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -66,7 +66,7 @@ function parseDateString(dateStr: string): Date {
 // ============================================================================
 
 @Controller('inventory/receive')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 export class InventoryReceivingController {
   private readonly logger = new Logger(InventoryReceivingController.name);
   
@@ -80,7 +80,7 @@ export class InventoryReceivingController {
   // --------------------------------------------------------------------------
   @Post()
   @Roles('OWNER', 'MANAGER')
-  async receiveInventory(@Body() body: ReceiveInventoryDto, @Req() req: any) {
+  async receiveInventory(@Body() body: ReceiveInventoryDto, @Req() req: RoleGuardedRequest) {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
 
@@ -264,7 +264,7 @@ export class InventoryReceivingController {
   @Get('product/:productId')
   @Roles('OWNER', 'MANAGER')
   async getReceivingsByProduct(
-    @Req() req: any,
+    @Req() req: GuardedRequest,
     @Param('productId') productId: string,
     @Query('locationId') locationId?: string
   ) {

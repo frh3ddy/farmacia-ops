@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InventoryReportsService } from './inventory-reports.service';
-import { AuthGuard, RoleGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 // Helper to set date to end of day (23:59:59.999) to include all records from that day
 function endOfDay(date: Date): Date {
@@ -18,7 +18,7 @@ function endOfDay(date: Date): Date {
 }
 
 @Controller('inventory/reports')
-@UseGuards(AuthGuard, RoleGuard, LocationGuard)
+@UseGuards(AuthGuard, LocationGuard)
 export class InventoryReportsController {
   constructor(private readonly reportsService: InventoryReportsService) {}
 
@@ -28,7 +28,7 @@ export class InventoryReportsController {
   @Get('cogs')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getCOGSReport(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -56,7 +56,7 @@ export class InventoryReportsController {
   @Get('valuation')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getInventoryValuationReport(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('productId') productId?: string
   ) {
@@ -80,7 +80,7 @@ export class InventoryReportsController {
   @Get('profit-margin')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getProfitMarginReport(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
@@ -106,7 +106,7 @@ export class InventoryReportsController {
   @Get('adjustment-impact')
   @Roles('OWNER', 'MANAGER')
   async getAdjustmentImpactReport(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
@@ -132,7 +132,7 @@ export class InventoryReportsController {
   @Get('receiving-summary')
   @Roles('OWNER', 'MANAGER')
   async getReceivingSummaryReport(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
@@ -159,7 +159,7 @@ export class InventoryReportsController {
   @Get('profit-loss')
   @Roles('OWNER', 'ACCOUNTANT')
   async getProfitAndLossReport(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
@@ -185,7 +185,7 @@ export class InventoryReportsController {
   @Get('dashboard')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async getDashboardSummary(
-    @Req() req: any,
+    @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string

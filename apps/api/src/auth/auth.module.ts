@@ -7,8 +7,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LocationsModule } from '../locations/locations.module';
 import {
   DeviceGuard,
-  SessionGuard,
-  RoleGuard,
   AuthGuard,
   LocationGuard,
 } from './guards/auth.guard';
@@ -21,8 +19,6 @@ import {
     AuthService,
     EmployeeService,
     DeviceGuard,
-    SessionGuard,
-    RoleGuard,
     AuthGuard,
     LocationGuard,
   ],
@@ -30,8 +26,6 @@ import {
     AuthService,
     EmployeeService,
     DeviceGuard,
-    SessionGuard,
-    RoleGuard,
     AuthGuard,
     LocationGuard,
   ],
