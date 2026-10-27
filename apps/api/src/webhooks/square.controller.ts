@@ -14,15 +14,13 @@ import {
     UnauthorizedException,
     UseGuards,
     Logger,
-    CanActivate,
-    ForbiddenException,
-    Injectable,
   } from '@nestjs/common';
   import { Request, Response } from 'express';
   import { WebhooksHelper } from 'square';
   import { SaleQueue } from '../queues/sale.queue';
   import { SalesTestService, CreateTestSaleInput } from './sales-test.service';
   import { AuthGuard, Roles } from '../auth/guards/auth.guard';
+  import { NotInProduction } from '../auth/guards/not-in-production.guard';
 
   @Controller('webhooks/square')
   export class SquareWebhookController {
@@ -118,17 +116,6 @@ import {
   // ============================================================================
   // Sales Testing Controller - For testing sales with real product data
   // ============================================================================
-  /** Test sales record real sales and consume real stock, so production refuses them. */
-  @Injectable()
-  export class NotInProduction implements CanActivate {
-    canActivate() {
-      if (process.env.RAILWAY_ENVIRONMENT_NAME === 'production') {
-        throw new ForbiddenException('Test sales are disabled in production: they record real sales and consume real stock.');
-      }
-      return true;
-    }
-  }
-
   @Controller('api/sales-test')
   @UseGuards(AuthGuard, NotInProduction)
   export class SalesTestController {
