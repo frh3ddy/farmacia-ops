@@ -21,10 +21,12 @@ interface PINLoginInput {
   deviceToken: string;
 }
 
-interface SwitchLocationInput {
+/** What validateSession returns: the session, its employee and their location access. */
+type ValidatedSession = Awaited<ReturnType<AuthService['validateSession']>>;
+
+type SwitchLocationInput = Pick<ValidatedSession, 'session' | 'employee' | 'currentLocation'> & {
   locationId: string;
-  sessionToken: string;
-}
+};
 
 interface LocationAccess {
   locationId: string;
@@ -547,16 +549,15 @@ export class AuthService {
   // Refresh Session
   // --------------------------------------------------------------------------
 
-  async refreshSession(sessionToken: string) {
-    const { session } = await this.validateSession(sessionToken);
-
+  /** Rotates the token of a session AuthGuard already validated. */
+  async refreshSession(sessionId: string) {
     // Create new session token
     const newSessionToken = this.generateSessionToken();
     const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
 
     // Update session
     await this.prisma.employeeSession.update({
-      where: { id: session.id },
+      where: { id: sessionId },
       data: {
         sessionToken: hashToken(newSessionToken),
         expiresAt,
@@ -575,9 +576,7 @@ export class AuthService {
   // --------------------------------------------------------------------------
 
   async switchLocation(input: SwitchLocationInput) {
-    const { locationId, sessionToken } = input;
-
-    const { session, employee, currentLocation } = await this.validateSession(sessionToken);
+    const { locationId, session, employee, currentLocation } = input;
 
     // Check employee has access to new location
     const newAssignment = employee.assignments.find(

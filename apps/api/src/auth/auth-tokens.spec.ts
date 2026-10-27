@@ -99,12 +99,12 @@ describe('tokens at rest', () => {
 
   test('session refresh', async () => {
     const { auth, prisma } = authWithDevice();
-    const { sessionToken } = await auth.refreshSession('st_raw');
+    const { sessionToken } = await auth.refreshSession('s1');
 
     assert({
       given: 'a session refresh',
       should: 'store only the new token hash',
-      actual: prisma.employeeSession.update.mock.calls[1][0].data.sessionToken, // [0] is validateSession's lastActivityAt
+      actual: prisma.employeeSession.update.mock.calls[0][0].data.sessionToken,
       expected: sha256(sessionToken),
     });
   });

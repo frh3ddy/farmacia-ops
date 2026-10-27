@@ -15,7 +15,7 @@ import { AuthService } from './auth.service';
 import { EmployeeService } from './employee.service';
 import { LocationsService } from '../locations/locations.service';
 import { DeviceType } from '@prisma/client';
-import { AuthGuard, Roles, GuardedRequest } from './guards/auth.guard';
+import { AuthGuard, Roles, GuardedRequest, bearerToken } from './guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -242,7 +242,7 @@ export class AuthController {
     }
 
     // Extract device token from Authorization header
-    const deviceToken = authorization?.replace('Bearer ', '');
+    const deviceToken = bearerToken(authorization);
     if (!deviceToken) {
       throw new HttpException(
         { success: false, message: 'Device token required in Authorization header' },
@@ -267,8 +267,8 @@ export class AuthController {
   // --------------------------------------------------------------------------
   @Post('pin/refresh')
   @UseGuards(AuthGuard)
-  async refreshSession(@Headers('x-session-token') sessionToken: string) {
-    const result = await this.authService.refreshSession(sessionToken);
+  async refreshSession(@Req() req: GuardedRequest) {
+    const result = await this.authService.refreshSession(req.session.id);
 
     return {
       success: true,
@@ -284,7 +284,7 @@ export class AuthController {
   @UseGuards(AuthGuard)
   async switchLocation(
     @Body() body: SwitchLocationDto,
-    @Headers('x-session-token') sessionToken: string
+    @Req() req: GuardedRequest
   ) {
     if (!body.locationId) {
       throw new HttpException(
@@ -295,7 +295,9 @@ export class AuthController {
 
     const result = await this.authService.switchLocation({
       locationId: body.locationId,
-      sessionToken,
+      session: req.session,
+      employee: req.employee,
+      currentLocation: req.currentLocation,
     });
 
     return {

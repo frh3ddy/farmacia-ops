@@ -38,25 +38,17 @@ export class DeviceGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const authorization = request.headers['authorization'];
-
-    if (!authorization) {
+    const deviceToken = bearerToken(authorization);
+    if (!deviceToken) {
       throw new HttpException(
         { success: false, message: 'Device token required in Authorization header' },
         HttpStatus.UNAUTHORIZED
       );
     }
 
-    const deviceToken = authorization.replace('Bearer ', '');
-    
-    try {
-      await this.authService.validateDeviceToken(deviceToken);
-      return true;
-    } catch (error) {
-      throw new HttpException(
-        { success: false, message: 'Invalid or deactivated device' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
+    // Throws 401 "Invalid or deactivated device"; anything else stays a 500.
+    await this.authService.validateDeviceToken(deviceToken);
+    return true;
   }
 }
 
@@ -93,28 +85,19 @@ export class AuthGuard implements CanActivate {
       );
     }
 
-    try {
-      // A session only works from the device it was created on (both web and
-      // iOS send the device token as Authorization: Bearer). Deactivating a
-      // device deletes its sessions, so no separate device lookup is needed.
-      const { session, employee, currentLocation, accessibleLocations } =
-        await this.authService.validateSession(sessionToken, {
-          deviceToken: bearerToken(request.headers['authorization']),
-        });
+    // A session only works from the device it was created on (both web and
+    // iOS send the device token as Authorization: Bearer). Deactivating a
+    // device deletes its sessions, so no separate device lookup is needed.
+    // Auth failures throw 401s; anything else (e.g. the database) stays a 500.
+    const { session, employee, currentLocation, accessibleLocations } =
+      await this.authService.validateSession(sessionToken, {
+        deviceToken: bearerToken(request.headers['authorization']),
+      });
 
-      request.session = session;
-      request.employee = employee;
-      request.currentLocation = currentLocation;
-      request.accessibleLocations = accessibleLocations;
-    } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      throw new HttpException(
-        { success: false, message: 'Invalid or expired session' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
+    request.session = session;
+    request.employee = employee;
+    request.currentLocation = currentLocation;
+    request.accessibleLocations = accessibleLocations;
 
     // Check roles if specified
     const requiredRoles = this.reflector.getAllAndOverride<EmployeeRole[]>(ROLES_KEY, [
@@ -140,7 +123,8 @@ export class AuthGuard implements CanActivate {
   }
 }
 
-function bearerToken(authorization?: string): string | undefined {
+/** The token in an `Authorization: Bearer <token>` header; undefined for anything else. */
+export function bearerToken(authorization?: string): string | undefined {
   return authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined;
 }
 
