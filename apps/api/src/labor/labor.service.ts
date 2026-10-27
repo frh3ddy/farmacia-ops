@@ -1,5 +1,4 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
 import { SquareClient, SquareEnvironment } from 'square';
 import type { Shift } from 'square/api';
 
@@ -67,8 +66,6 @@ const DEFAULT_HOURLY_RATE_CENTS = 0;
 export class LaborService {
   private readonly logger = new Logger(LaborService.name);
   private squareClient: SquareClient | null = null;
-
-  constructor(private readonly prisma: PrismaService) {}
 
   // --------------------------------------------------------------------------
   // Square client (same pattern as CatalogService)

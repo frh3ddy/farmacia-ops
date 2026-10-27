@@ -6,7 +6,8 @@
     "skipLibCheck": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "vitest/globals"],
+    "noUnusedLocals": true
   },
   "include": ["src/**/*"]
 }

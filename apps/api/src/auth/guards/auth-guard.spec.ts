@@ -1,16 +1,17 @@
+import { createHash } from 'crypto';
 import { Reflector } from '@nestjs/core';
 import { assert } from 'riteway/vitest';
 import { AuthService } from '../auth.service';
 import { AuthGuard } from './auth.guard';
 
 // Real AuthService over a Prisma stub holding one live session, created on the
-// device with token "device-A", for a manager at "centro".
+// device with token "device-A" (stored as its hash), for a manager at "centro".
 function guardWithSession() {
   const prisma = {
     employeeSession: {
       findUnique: vi.fn().mockResolvedValue({
         id: 's1',
-        deviceToken: 'device-A',
+        deviceToken: createHash('sha256').update('device-A').digest('hex'),
         locationId: 'centro',
         expiresAt: new Date(Date.now() + 60_000),
         employee: {

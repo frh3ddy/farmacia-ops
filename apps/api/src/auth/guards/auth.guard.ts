@@ -49,8 +49,7 @@ export class DeviceGuard implements CanActivate {
     const deviceToken = authorization.replace('Bearer ', '');
     
     try {
-      const device = await this.authService.validateDeviceToken(deviceToken);
-      request.device = device;
+      await this.authService.validateDeviceToken(deviceToken);
       return true;
     } catch (error) {
       throw new HttpException(

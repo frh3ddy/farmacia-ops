@@ -19,12 +19,6 @@ import { findOrCreateLaboratory } from '../products/laboratory';
 import { Prisma, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, GuardedRequest } from '../auth/guards/auth.guard';
 import {
-  CutoverInput,
-  CostApprovalRequest,
-  MigrationResult,
-  LocationPreview,
-} from './types';
-import {
   ExtractCostsRequest,
   ApproveBatchRequest,
   ApproveCostsRequest,

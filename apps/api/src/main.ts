@@ -2,7 +2,6 @@ import "reflect-metadata";
 import { config } from "dotenv";
 import { resolve, join } from "path";
 import { NestFactory } from "@nestjs/core";
-import { INestApplication } from "@nestjs/common";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
@@ -49,6 +48,9 @@ async function bootstrap() {
       ? ['error', 'warn', 'log', 'debug', 'verbose']
       : ['error', 'warn', 'log'],
   });
+
+  // Railway's edge proxy is one hop in front: take req.ip from its X-Forwarded-For entry.
+  app.set("trust proxy", 1);
 
   // Apply JSON parser for all other routes
   // app.use(express.json());

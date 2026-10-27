@@ -203,7 +203,7 @@ export class AuthService {
       data: {
         locationId,
         name: deviceName,
-        deviceToken,
+        deviceToken: hashToken(deviceToken),
         type: deviceType,
         activatedBy: employee.id,
       },
@@ -307,7 +307,7 @@ export class AuthService {
 
   async validateDeviceToken(deviceToken: string) {
     const device = await this.prisma.device.findUnique({
-      where: { deviceToken },
+      where: { deviceToken: hashToken(deviceToken) },
       include: { location: true },
     });
 
@@ -416,8 +416,8 @@ export class AuthService {
     await this.prisma.employeeSession.create({
       data: {
         employeeId: matchedEmployee.id,
-        deviceToken,
-        sessionToken,
+        deviceToken: device.deviceToken,
+        sessionToken: hashToken(sessionToken),
         locationId: device.locationId,
         expiresAt,
       },
@@ -498,7 +498,7 @@ export class AuthService {
    */
   async validateSession(sessionToken: string, device?: { deviceToken: string | undefined }) {
     const session = await this.prisma.employeeSession.findUnique({
-      where: { sessionToken },
+      where: { sessionToken: hashToken(sessionToken) },
       include: {
         employee: {
           include: {
@@ -511,7 +511,7 @@ export class AuthService {
       },
     });
 
-    const wrongDevice = !!session && !!device && !sameToken(device.deviceToken, session.deviceToken);
+    const wrongDevice = !!session && !!device && !sameToken(device.deviceToken && hashToken(device.deviceToken), session.deviceToken);
     if (wrongDevice) {
       this.logger.warn(`[AUTH] Session ${session!.id} used from a different device (employee ${session!.employeeId})`);
     }
@@ -564,7 +564,7 @@ export class AuthService {
   // --------------------------------------------------------------------------
 
   async refreshSession(sessionToken: string) {
-    const { session, employee } = await this.validateSession(sessionToken);
+    const { session } = await this.validateSession(sessionToken);
 
     // Create new session token
     const newSessionToken = this.generateSessionToken();
@@ -574,7 +574,7 @@ export class AuthService {
     await this.prisma.employeeSession.update({
       where: { id: session.id },
       data: {
-        sessionToken: newSessionToken,
+        sessionToken: hashToken(newSessionToken),
         expiresAt,
         lastActivityAt: new Date(),
       },
@@ -646,7 +646,7 @@ export class AuthService {
 
   async logout(sessionToken: string) {
     const session = await this.prisma.employeeSession.findUnique({
-      where: { sessionToken },
+      where: { sessionToken: hashToken(sessionToken) },
     });
 
     if (session) {
@@ -675,6 +675,7 @@ export class AuthService {
         locationId,
         isActive: true,
       },
+      omit: { deviceToken: true },
       orderBy: { lastActiveAt: 'desc' },
     });
   }
@@ -762,6 +763,15 @@ export class AuthService {
 
     return { deletedCount: result.count };
   }
+}
+
+/**
+ * What the database stores for a session or device token: its SHA-256 (hex),
+ * never the token itself. The tokens are random UUIDs, so an unsalted fast
+ * hash is enough — there is nothing to brute-force.
+ */
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
 }
 
 /** Constant-time equality for two tokens; a missing one never matches. */
