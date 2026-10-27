@@ -1,6 +1,6 @@
 # Inventory Integrity Epic
 
-**Status**: 📋 PLANNED
+**Status**: 🚧 IN PROGRESS
 **Goal**: A nightly check proves the app's stock and sales records are whole, so a bookkeeping bug or a lost Square sale is found the next morning instead of never.
 
 ## Overview
@@ -15,7 +15,7 @@ Alerts go to the Railway logs and a banner in the web app (decided 2026-10-27).
 
 ---
 
-## Remove the reconciliation report
+## ✅ Remove the reconciliation report
 
 `GET /inventory/reconciliation/product/:productId` and `/location/:locationId` always answer "reconciled".
 
@@ -24,24 +24,27 @@ Alerts go to the Railway logs and a banner in the web app (decided 2026-10-27).
 - Given the FIFO checks in the same controller (`consumption/:productId`, `sale-item/:saleItemId`, `verify-fifo/:saleId`), should keep them working unchanged
 - Given the iOS app, should note the two now-unused endpoint cases in `APIEndpoint.swift` for removal there
 
+**iOS follow-up**: remove `reconcileProduct` and `reconcileLocation` from `farmacia-ios/FarmaciaApp/Core/Network/APIEndpoint.swift` (cases and paths); no screen calls them.
+
 ---
 
-## Books check
+## ✅ Books check
 
-For every product at every location, the stock in its batches must equal what its movements say.
+Prove each stock record adds up, with checks that can actually fail.
 
-Stock moves through `InventoryReceiving` (creates a batch), `InventoryAdjustment` (signed `quantity`; also transfers, break-bulk and the worker's `AUTO_SALE_COVER`), and `InventoryConsumption` (from a sale, or from a negative adjustment). Cutover opening batches and initial stock set at product creation have no movement record. `Inventory` keeps only the current `quantity`.
+Every batch records the movement that created it (`createdByReceiving`, `createdByAdjustment`, `createdByTransferLine`); a batch with none of them is opening stock (cutover or product creation), and `Inventory` keeps only its current `quantity`. Comparing a product's batches to "opening + movements" can't fail for opening stock, because its start can only be rebuilt from the batch itself, so the check works per record instead.
 
 **Requirements**:
-- Given a product at a location, should compute expected stock = opening stock + received + Σ adjustment quantities (signed) − sale consumption, and compare it to the sum of its batches' `quantity`
-- Given consumption rows that belong to an adjustment, should leave them out (the adjustment already counts them)
-- Given cutover opening batches and product-creation stock, should count them as opening stock, telling them apart from batches created by a receiving or a positive adjustment (add a batch source field if no existing link does)
-- Given every product at every location, should run as a few grouped queries, never one query per product
-- Given books that add up, should report no mismatch; given a product that doesn't, should report product, location, expected and actual
+- Given a batch created by a receiving, an adjustment or a transfer receipt, should report it when its created quantity − everything consumed from it ≠ its current quantity
+- Given a negative adjustment, should report it when its consumption rows don't add up to its quantity
+- Given a sale item, should report it when its consumption rows don't add up to the quantity sold
+- Given an opening batch, should report it when its quantity is negative
+- Given books that add up, should report no mismatch; each mismatch names the record, product, location, expected and actual
+- Given all products and locations, should run as one grouped query per check, never one query per product
 
 ---
 
-## Sales check
+## ✅ Sales check
 
 Every Square payment must have become a `Sale` (`Sale.squareId` is the Square payment id).
 
@@ -49,7 +52,19 @@ Every Square payment must have become a `Sale` (`Sale.squareId` is the Square pa
 - Given a day and a location, should list that day's Square payments (paginated) and report each one with no `Sale` of the same `squareId`
 - Given a payment whose sale job failed (e.g. `SaleValidationError` for a payment with no order), should report it as a failed job to replay, not as a lost sale
 - Given a payment received after the check's cutoff (still in the queue), should not report it
-- Given Square unreachable, should log that the check could not run and try again the next night, not retry in a loop
+- Given Square unreachable, should log that the check could not run and try again the next night, not retry in a loop (handled by the nightly job: `loadSalesCheck` throws, the job logs it)
+
+---
+
+## Real FIFO verification
+
+`GET /inventory/reconciliation/verify-fifo/:saleId` can never find a violation: its query sorts a sale item's consumptions by the batch's `receivedAt`, then checks they are in `receivedAt` order (found 2026-10-27 while removing the reconciliation report).
+
+**Requirements**:
+- Given a sale item whose consumptions took a newer batch while an older batch at the same product and location still had stock, should report a FIFO violation
+- Given a sale item that consumed its batches oldest `receivedAt` first, should report it compliant
+- Given the check, should judge by the order the consumptions happened in, not by re-sorting them by `receivedAt`
+- Given the nightly job, should also run this check over the day's sales
 
 ---
 
