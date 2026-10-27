@@ -58,12 +58,17 @@ export class AuthService {
   // (PIN login has its own DB lockout).
   // ponytail: in-memory, per api instance and reset on restart; move to Redis
   // or the Employee row if the api ever runs more than one replica.
-  private assertLoginNotLocked(key: string) {
+  private isLoginLocked(key: string): boolean {
     const entry = this.failedLogins.get(key);
     if (entry && Date.now() - entry.since >= AuthService.LOGIN_LOCK_MS) this.failedLogins.delete(key);
-    else if (entry && entry.count >= AuthService.MAX_FAILED_LOGINS) {
+    else if (entry && entry.count >= AuthService.MAX_FAILED_LOGINS) return true;
+    return false;
+  }
+
+  private assertLoginNotLocked(key: string) {
+    if (this.isLoginLocked(key)) {
       throw new HttpException(
-        { success: false, message: 'Too many failed attempts. Try again in 15 minutes.' },
+        { success: false, message: 'Demasiados intentos fallidos. Intenta de nuevo en 15 minutos.' },
         HttpStatus.TOO_MANY_REQUESTS
       );
     }
@@ -336,7 +341,7 @@ export class AuthService {
     const device = await this.validateDeviceToken(deviceToken);
     // A wrong PIN names no employee (the PIN is what picks one), so the
     // device is what gets locked out: 5 wrong PINs per 15 minutes.
-    const lockoutKey = `pin:${device.id}`;
+    const lockoutKey = pinLockoutKey(device.id);
     this.assertLoginNotLocked(lockoutKey);
 
     // Find employee by PIN at this location
@@ -649,7 +654,7 @@ export class AuthService {
   // --------------------------------------------------------------------------
 
   async getActiveDevices(locationId: string) {
-    return this.prisma.device.findMany({
+    const devices = await this.prisma.device.findMany({
       where: {
         locationId,
         isActive: true,
@@ -657,6 +662,20 @@ export class AuthService {
       omit: { deviceToken: true },
       orderBy: { lastActiveAt: 'desc' },
     });
+    return devices.map((d) => ({ ...d, pinLocked: this.isLoginLocked(pinLockoutKey(d.id)) }));
+  }
+
+  /** Lets an owner clear a device's wrong-PIN lockout before its 15 minutes run out. */
+  async unlockDevicePin(deviceId: string, employeeId: string) {
+    const device = await this.prisma.device.findUnique({ where: { id: deviceId } });
+    if (!device) {
+      throw new HttpException({ success: false, message: 'Device not found' }, HttpStatus.NOT_FOUND);
+    }
+    await this.assertOwnerForLocation(employeeId, device.locationId);
+
+    this.failedLogins.delete(pinLockoutKey(deviceId));
+    await this.logAction({ employeeId, deviceId, locationId: device.locationId, action: 'DEVICE_PIN_UNLOCKED' });
+    return { success: true };
   }
 
   async getActiveDevicesForOwner(employeeId: string, locationId: string) {
@@ -751,6 +770,11 @@ export class AuthService {
  */
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+/** The failed-login counter key for wrong PINs entered on a device. */
+function pinLockoutKey(deviceId: string): string {
+  return `pin:${deviceId}`;
 }
 
 /** Constant-time equality for two tokens; a missing one never matches. */

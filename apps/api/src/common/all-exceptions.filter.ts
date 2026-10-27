@@ -26,7 +26,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : typeof body === 'string'
             ? body
             : exception.message;
-      if (status === HttpStatus.UNAUTHORIZED || status === HttpStatus.FORBIDDEN) {
+      if ([HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN, HttpStatus.TOO_MANY_REQUESTS].includes(status)) {
         // Refused requests leave a trace (OWASP A09). Never log headers: they carry the tokens.
         const request = host.switchToHttp().getRequest<Request & { employee?: { id: string } }>();
         this.logger.warn(

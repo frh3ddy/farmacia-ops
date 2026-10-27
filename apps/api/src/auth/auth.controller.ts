@@ -182,6 +182,17 @@ export class AuthController {
     };
   }
 
+  @Post('device/:deviceId/unlock')
+  @UseGuards(AuthGuard)
+  async unlockDevicePin(@Param('deviceId') deviceId: string, @Req() req: GuardedRequest) {
+    await this.authService.unlockDevicePin(deviceId, req.employee.id);
+
+    return {
+      success: true,
+      message: 'Device unlocked',
+    };
+  }
+
   // --------------------------------------------------------------------------
   // Get Active Devices
   // --------------------------------------------------------------------------
@@ -209,6 +220,7 @@ export class AuthController {
         isActive: d.isActive,
         lastActiveAt: d.lastActiveAt,
         activatedAt: d.activatedAt,
+        pinLocked: d.pinLocked,
       })),
     };
   }
