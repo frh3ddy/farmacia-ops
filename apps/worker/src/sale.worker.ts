@@ -34,6 +34,10 @@ export function getPrisma(): PrismaClient {
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
     });
+    // An idle connection dropped by the server (restart, failover) emits
+    // 'error' on the pool; unhandled, it crashes the worker. The pool
+    // replaces the connection on the next query.
+    pool.on('error', (error) => console.error('[SALE_WORKER] Idle database connection lost:', error.message));
     const adapter = new PrismaPg(pool);
     prisma = new PrismaClient({ adapter });
     debugLog('[DEBUG] [SALE_WORKER] Prisma client initialized');

@@ -33,7 +33,7 @@ The sales check counts a payment as recorded only when a `Sale` has its id; a Ya
 
 ---
 
-## Test the sale line mapping
+## ✅ Test the sale line mapping
 
 The mapping from Square order lines to sale items and Yastás lines (`processSaleJob`, lines 649–823) has no tests, and the next task changes it.
 
@@ -44,7 +44,7 @@ The mapping from Square order lines to sale items and Yastás lines (`processSal
 - Given a line with no catalog item, should report it as skipped instead of only warning (input for the open question on custom amounts)
 - Given the sale transaction, should have one Postgres-backed test covering a sale, a shortfall auto-cover and a Yastás line (api's `*.pg.spec.ts` pattern)
 
-Done: the mapping is `toSaleLines` (`apps/worker/src/sale-lines.ts`). Open: the transaction test needs Prisma on PGlite, which needs `@electric-sql/pglite` 0.4.3 + `pglite-socket` (the repo has 0.3.2; all 46 migrations already apply on PGlite).
+Done: the mapping is `toSaleLines` (`apps/worker/src/sale-lines.ts`); `sale.worker.pg.spec.ts` runs `processSaleJob` on PGlite with every migration, through `pglite-socket` (worker dev deps pinned to `@electric-sql/pglite` 0.4.3 + `pglite-socket` 0.1.3; Jest needs `--experimental-vm-modules` for PGlite's dynamic import). Found on the way: the worker's `pg` pool had no `error` listener, so a dropped idle connection crashed the process.
 
 ---
 
