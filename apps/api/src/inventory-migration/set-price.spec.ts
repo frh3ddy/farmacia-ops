@@ -3,12 +3,12 @@ import { SquareInventoryService } from './square-inventory.service';
 
 describe('SquareInventoryService.setVariationPrice', () => {
   function setup() {
-    const upsert = jest.fn().mockResolvedValue({});
+    const upsert = vi.fn().mockResolvedValue({});
     const service = new SquareInventoryService();
     (service as any).squareClient = {
       catalog: {
         object: {
-          get: jest.fn().mockResolvedValue({
+          get: vi.fn().mockResolvedValue({
             object: {
               type: 'ITEM_VARIATION',
               id: 'v1',
@@ -60,19 +60,19 @@ describe('InventoryMigrationService.setProductPrice', () => {
   function setup(mappings: { squareVariationId: string; locationId: string | null }[]) {
     const prisma = {
       location: {
-        findMany: jest.fn().mockResolvedValue([
+        findMany: vi.fn().mockResolvedValue([
           { id: 'loc-a', name: 'A', squareId: 'sq-a' },
           { id: 'loc-b', name: 'B', squareId: 'sq-b' },
         ]),
       },
-      catalogMapping: { findMany: jest.fn().mockResolvedValue(mappings), updateMany: jest.fn() },
+      catalogMapping: { findMany: vi.fn().mockResolvedValue(mappings), updateMany: vi.fn() },
     };
     const squareInventory = {
-      batchFetchSquareCatalogObjects: jest
+      batchFetchSquareCatalogObjects: vi
         .fn()
         .mockResolvedValue(new Map([['v1', { variationPriceCents: 1000, variationCurrency: 'MXN' }]])),
-      resolvePriceForLocation: jest.fn().mockReturnValue({ priceCents: 1000, currency: 'MXN' }),
-      setVariationPrice: jest.fn().mockResolvedValue(undefined),
+      resolvePriceForLocation: vi.fn().mockReturnValue({ priceCents: 1000, currency: 'MXN' }),
+      setVariationPrice: vi.fn().mockResolvedValue(undefined),
     };
     const service = new InventoryMigrationService(prisma as any, squareInventory as any, {} as any, {} as any, {} as any, {} as any);
     return { service, prisma, squareInventory };

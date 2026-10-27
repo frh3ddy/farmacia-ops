@@ -20,6 +20,8 @@ export interface ReceiveTransferInput {
   lineReceipts?: { transferLineId: string; quantityReceived: number }[];
   syncToSquare?: boolean;
   receivedBy?: string;
+  /** Throws unless the caller may receive at this location (the transfer's destination). */
+  assertAccess?: (toLocationId: string) => void;
 }
 
 /**
@@ -203,6 +205,7 @@ export class TransferService {
     if (!transfer) {
       throw new NotFoundException(`Transfer ${input.transferId} not found`);
     }
+    input.assertAccess?.(transfer.toLocationId);
     if (transfer.status !== 'IN_TRANSIT') {
       throw new BadRequestException(`Transfer ${input.transferId} is ${transfer.status}, not IN_TRANSIT`);
     }

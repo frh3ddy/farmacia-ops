@@ -8,11 +8,17 @@ import {
   Param,
   HttpException,
   HttpStatus,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { EmployeeService } from './employee.service';
 import { LocationsService } from '../locations/locations.service';
 import { DeviceType } from '@prisma/client';
+import { AuthGuard, RoleGuard, Roles } from './guards/auth.guard';
+
+/** What AuthGuard attaches to the request: the validated session and its employee/locations. */
+type AuthedRequest = Awaited<ReturnType<AuthService['validateSession']>>;
 
 // ============================================================================
 // DTOs
@@ -169,19 +175,9 @@ export class AuthController {
   // Device Deactivation
   // --------------------------------------------------------------------------
   @Post('device/:deviceId/deactivate')
-  async deactivateDevice(
-    @Param('deviceId') deviceId: string,
-    @Headers('x-session-token') sessionToken: string
-  ) {
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
-    const { employee } = await this.authService.validateSession(sessionToken);
-    await this.authService.deactivateDevice(deviceId, employee.id);
+  @UseGuards(AuthGuard, RoleGuard)
+  async deactivateDevice(@Param('deviceId') deviceId: string, @Req() req: AuthedRequest) {
+    await this.authService.deactivateDevice(deviceId, req.employee.id);
 
     return {
       success: true,
@@ -193,18 +189,9 @@ export class AuthController {
   // Get Active Devices
   // --------------------------------------------------------------------------
   @Get('devices')
-  async getActiveDevices(
-    @Headers('x-session-token') sessionToken: string,
-    @Query('locationId') locationId?: string
-  ) {
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
-    const { employee, currentLocation } = await this.authService.validateSession(sessionToken);
+  @UseGuards(AuthGuard, RoleGuard)
+  async getActiveDevices(@Req() req: AuthedRequest, @Query('locationId') locationId?: string) {
+    const { employee, currentLocation } = req;
     const targetLocationId = locationId || currentLocation?.locationId;
     if (!targetLocationId) {
       throw new HttpException(
@@ -270,14 +257,8 @@ export class AuthController {
   // Refresh Session
   // --------------------------------------------------------------------------
   @Post('pin/refresh')
+  @UseGuards(AuthGuard, RoleGuard)
   async refreshSession(@Headers('x-session-token') sessionToken: string) {
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
     const result = await this.authService.refreshSession(sessionToken);
 
     return {
@@ -291,6 +272,7 @@ export class AuthController {
   // Switch Location
   // --------------------------------------------------------------------------
   @Post('switch-location')
+  @UseGuards(AuthGuard, RoleGuard)
   async switchLocation(
     @Body() body: SwitchLocationDto,
     @Headers('x-session-token') sessionToken: string
@@ -299,13 +281,6 @@ export class AuthController {
       throw new HttpException(
         { success: false, message: 'locationId is required' },
         HttpStatus.BAD_REQUEST
-      );
-    }
-
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required' },
-        HttpStatus.UNAUTHORIZED
       );
     }
 
@@ -325,16 +300,9 @@ export class AuthController {
   // Get Current Session
   // --------------------------------------------------------------------------
   @Get('me')
-  async getCurrentSession(@Headers('x-session-token') sessionToken: string) {
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
-    const { session, employee, currentLocation, accessibleLocations } =
-      await this.authService.validateSession(sessionToken);
+  @UseGuards(AuthGuard, RoleGuard)
+  async getCurrentSession(@Req() req: AuthedRequest) {
+    const { session, employee, currentLocation, accessibleLocations } = req;
 
     return {
       success: true,
@@ -397,8 +365,9 @@ export class AuthController {
   // Get Audit Logs
   // --------------------------------------------------------------------------
   @Get('audit-logs')
+  @UseGuards(AuthGuard, RoleGuard)
+  @Roles('OWNER')
   async getAuditLogs(
-    @Headers('x-session-token') sessionToken: string,
     @Query('locationId') locationId?: string,
     @Query('employeeId') employeeId?: string,
     @Query('action') action?: string,
@@ -406,21 +375,6 @@ export class AuthController {
     @Query('endDate') endDate?: string,
     @Query('limit') limit?: string
   ) {
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
-    const { currentLocation } = await this.authService.validateSession(sessionToken);
-    if (currentLocation?.role !== 'OWNER') {
-      throw new HttpException(
-        { success: false, message: 'Only owners can view audit logs' },
-        HttpStatus.FORBIDDEN
-      );
-    }
-
     const logs = await this.authService.getAuditLogs({
       locationId,
       employeeId,
@@ -441,24 +395,9 @@ export class AuthController {
   // Cleanup Expired Sessions (admin endpoint)
   // --------------------------------------------------------------------------
   @Post('sessions/cleanup')
-  async cleanupExpiredSessions(@Headers('x-session-token') sessionToken: string) {
-    if (!sessionToken) {
-      throw new HttpException(
-        { success: false, message: 'Session token required' },
-        HttpStatus.UNAUTHORIZED
-      );
-    }
-
-    // Validate session (should be OWNER)
-    const { currentLocation } = await this.authService.validateSession(sessionToken);
-    
-    if (currentLocation?.role !== 'OWNER') {
-      throw new HttpException(
-        { success: false, message: 'Only owners can perform this action' },
-        HttpStatus.FORBIDDEN
-      );
-    }
-
+  @UseGuards(AuthGuard, RoleGuard)
+  @Roles('OWNER')
+  async cleanupExpiredSessions() {
     const result = await this.authService.cleanupExpiredSessions();
 
     return {

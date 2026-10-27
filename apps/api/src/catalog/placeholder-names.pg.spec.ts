@@ -7,7 +7,7 @@ import { join } from 'path';
 import { PGlite } from '@electric-sql/pglite';
 import { isPlaceholderProductName } from './catalog.service';
 
-jest.setTimeout(60_000);
+
 
 const MIGRATION = join(__dirname, '../../../../prisma/migrations/20261024120000_fix_placeholder_product_names/migration.sql');
 

@@ -16,7 +16,7 @@ import { findSearchMatchIds, searchTokens, normalizeQuery, substringMatchSql } f
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { pg_trgm } = require('@electric-sql/pglite/contrib/pg_trgm') as { pg_trgm: Extension };
 
-jest.setTimeout(60_000);
+
 
 const MIGRATION = join(__dirname, '../../../../prisma/migrations/20261020120000_add_product_search_trgm/migration.sql');
 

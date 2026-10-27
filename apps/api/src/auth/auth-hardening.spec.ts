@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import { assert } from 'riteway/vitest';
 import { HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { hashPassword, verifyPassword, PASSWORD_ITERATIONS } from './password';
@@ -19,7 +20,7 @@ describe('password hashing', () => {
 describe('device activation lockout', () => {
   it('locks an email after 5 failed passwords, even with the right one', async () => {
     const employee = { id: 'e1', isActive: true, passwordHash: hashPassword('correcta'), assignments: [] };
-    const prisma = { employee: { findUnique: jest.fn().mockResolvedValue(employee) } };
+    const prisma = { employee: { findUnique: vi.fn().mockResolvedValue(employee) } };
     const auth = new AuthService(prisma as any);
     const attempt = (password: string) =>
       auth.activateDevice({ email: 'Owner@x.mx', password, deviceName: 'caja' } as any).catch((e) => e.getStatus());
@@ -41,5 +42,24 @@ describe('location scoping', () => {
   it('refuses another location to a non-owner', () => {
     expect(() => assertLocationAccess(manager, 'norte')).toThrow('Access denied');
     expect(() => assertLocationAccess(owner, 'norte')).not.toThrow();
+  });
+
+  test('non-owner without a current location', () => {
+    // Regression: a session whose location assignment was deactivated has no
+    // currentLocation, and scopedLocationId read that as "all locations".
+    const orphaned = { currentLocation: undefined, accessibleLocations: [] };
+    let actual: unknown;
+    try {
+      actual = scopedLocationId(orphaned);
+    } catch (e) {
+      actual = (e as Error).message;
+    }
+
+    assert({
+      given: 'an employee whose session has no current location',
+      should: 'refuse instead of returning every location',
+      actual,
+      expected: 'Access denied to this location',
+    });
   });
 });

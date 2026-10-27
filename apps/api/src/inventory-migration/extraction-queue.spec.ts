@@ -5,11 +5,11 @@ import { InventoryMigrationService, extractionProgress, latestApprovedByProduct 
 function setup() {
   const prisma = {
     location: {
-      findMany: jest.fn().mockResolvedValue([{ id: 'loc-centro', name: 'Centro', squareId: 'sq-centro' }]),
+      findMany: vi.fn().mockResolvedValue([{ id: 'loc-centro', name: 'Centro', squareId: 'sq-centro' }]),
     },
     catalogMapping: {
       // Already in the DB's orderBy order: variation asc, location-scoped first.
-      findMany: jest.fn().mockResolvedValue([
+      findMany: vi.fn().mockResolvedValue([
         { squareVariationId: 'v-a', productId: 'p1', locationId: 'loc-centro' },
         { squareVariationId: 'v-a', productId: 'p-stale-global', locationId: null },
         { squareVariationId: 'v-b', productId: 'p2', locationId: null },
@@ -18,11 +18,11 @@ function setup() {
       ]),
     },
     costApproval: {
-      findMany: jest.fn().mockResolvedValue([{ productId: 'p2' }]),
+      findMany: vi.fn().mockResolvedValue([{ productId: 'p2' }]),
     },
   };
   const squareInventory = {
-    fetchSquareInventory: jest.fn().mockResolvedValue([{ catalogObjectId: 'v-a', quantity: 3 }]),
+    fetchSquareInventory: vi.fn().mockResolvedValue([{ catalogObjectId: 'v-a', quantity: 3 }]),
   };
   const service = new InventoryMigrationService(prisma as any, squareInventory as any, {} as any, {} as any, {} as any, {} as any);
   return { service, prisma };
@@ -76,7 +76,7 @@ describe('getExtractionQueue', () => {
 describe('executeInventoryMigration gate', () => {
   it('refuses to start while the extraction session has unreviewed products', async () => {
     const { service } = setup();
-    jest.spyOn(service as any, 'validateCutoverInput').mockResolvedValue({ valid: true, errors: [] });
+    vi.spyOn(service as any, 'validateCutoverInput').mockResolvedValue({ valid: true, errors: [] });
 
     await expect(
       service.executeInventoryMigration(
