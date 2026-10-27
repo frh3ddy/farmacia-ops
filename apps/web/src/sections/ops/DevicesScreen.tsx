@@ -11,6 +11,8 @@ type Device = {
   isActive: boolean;
   lastActiveAt: string | null;
   activatedAt: string;
+  /** Locked out after repeated wrong PINs; unlocks by itself after 15 minutes. */
+  pinLocked: boolean;
 };
 
 export function DevicesScreen() {
@@ -54,8 +56,31 @@ export function DevicesScreen() {
     }
   };
 
+  const handleUnlock = async (device: Device) => {
+    setError(null);
+    try {
+      await apiFetch(`/auth/device/${device.id}/unlock`, { method: "POST" });
+      setDevices(prev => prev.map(d => (d.id === device.id ? { ...d, pinLocked: false } : d)));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to unlock device");
+    }
+  };
+
   const columns: Column<Device>[] = [
-    { key: "name", header: "Name" },
+    {
+      key: "name",
+      header: "Name",
+      render: (v, device) => (
+        <span className="flex items-center gap-2">
+          {v as string}
+          {device.pinLocked && (
+            <span className="rounded-full border border-(--color-warning) bg-(--color-warning-bg) px-2 py-0.5 text-xs font-medium text-(--color-warning)">
+              Locked
+            </span>
+          )}
+        </span>
+      ),
+    },
     { key: "type", header: "Type" },
     { key: "activatedAt", header: "Activated", render: v => new Date(v as string).toLocaleString() },
     { key: "lastActiveAt", header: "Last active", render: v => (v ? new Date(v as string).toLocaleString() : "—") },
@@ -63,12 +88,19 @@ export function DevicesScreen() {
       key: "id",
       header: "Actions",
       render: (_v, device) => (
-        <button
-          onClick={() => setDeactivating(device)}
-          className="text-(--color-destructive) hover:opacity-80"
-        >
-          Deactivate
-        </button>
+        <span className="flex gap-4">
+          {device.pinLocked && (
+            <button onClick={() => handleUnlock(device)} className="text-(--color-ink) hover:opacity-80">
+              Unlock
+            </button>
+          )}
+          <button
+            onClick={() => setDeactivating(device)}
+            className="text-(--color-destructive) hover:opacity-80"
+          >
+            Deactivate
+          </button>
+        </span>
       ),
     },
   ];
