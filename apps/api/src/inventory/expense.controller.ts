@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { ExpenseService } from './expense.service';
 import { ExpenseType } from '@prisma/client';
-import { AuthGuard, LocationGuard, Roles, Public, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, Public, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 /**
  * Parse a date string that could be either:

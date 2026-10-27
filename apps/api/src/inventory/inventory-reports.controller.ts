@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InventoryReportsService } from './inventory-reports.service';
-import { AuthGuard, LocationGuard, Roles, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 // Helper to set date to end of day (23:59:59.999) to include all records from that day
 function endOfDay(date: Date): Date {
