@@ -23,17 +23,7 @@ async function main() {
   console.log('[DEBUG] [WORKER_MAIN] Process PID:', process.pid);
   console.log('[DEBUG] [WORKER_MAIN] Environment:', process.env.NODE_ENV || 'development');
   
-  // Debug: Check for Square environment variables
-  console.log('[DEBUG] [WORKER_MAIN] Checking Square environment variables...');
-  console.log('[DEBUG] [WORKER_MAIN] SQUARE_ACCESS_TOKEN exists:', !!process.env.SQUARE_ACCESS_TOKEN);
-  console.log('[DEBUG] [WORKER_MAIN] SQUARE_ACCESS_TOKEN length:', process.env.SQUARE_ACCESS_TOKEN?.length || 0);
-  console.log('[DEBUG] [WORKER_MAIN] SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set');
-  console.log('[DEBUG] [WORKER_MAIN] All SQUARE_* variables:', 
-    Object.keys(process.env)
-      .filter(key => key.startsWith('SQUARE_'))
-      .map(key => `${key}: ${process.env[key] ? '***' + process.env[key]!.slice(-4) : 'not set'}`)
-      .join(', ') || 'none found'
-  );
+  console.log('[WORKER_MAIN] SQUARE_ACCESS_TOKEN set:', !!process.env.SQUARE_ACCESS_TOKEN, '· SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set');
 
   // Run connection tests on startup
   console.log('[DEBUG] [WORKER_MAIN] Running connection tests...\n');

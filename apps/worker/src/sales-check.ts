@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import type { Queue } from 'bullmq';
 import { getSquareClient } from './catalog.sync';
+import { paymentIdOf } from './failed-job';
 
 // Sales check (tasks/inventory-integrity-epic.md): every completed Square
 // payment must have become a Sale (Sale.squareId is the Square payment id),
@@ -79,5 +80,5 @@ export async function recordedPaymentIds(prisma: PrismaClient, paymentIds: strin
  * undefined for a failed id whose job data is gone, so those are skipped.
  */
 export function failedJobPaymentIds(jobs: Array<{ data?: any } | undefined>): Set<string> {
-  return new Set(jobs.map((job) => job?.data?.payload?.object?.payment?.id).filter((id): id is string => !!id));
+  return new Set(jobs.map(paymentIdOf).filter((id): id is string => !!id));
 }

@@ -2,7 +2,7 @@ import { Job } from 'bullmq';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
-import { SquareClient, SquareEnvironment } from 'square';
+import { getSquareClient } from './catalog.sync';
 import {
   InsufficientInventoryError,
   DatabaseTransactionError,
@@ -43,81 +43,6 @@ export function getPrisma(): PrismaClient {
     debugLog('[DEBUG] [SALE_WORKER] Prisma client initialized');
   }
   return prisma;
-}
-
-// Lazy initialization of Square client (only when needed)
-let squareClient: SquareClient | null = null;
-
-function getSquareClient(): SquareClient {
-  if (!squareClient) {
-    debugLog('[DEBUG] [SQUARE_CLIENT] Initializing Square client...');
-    debugLog('[DEBUG] [SQUARE_CLIENT] Checking for SQUARE_ACCESS_TOKEN...');
-    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN exists:', !!process.env.SQUARE_ACCESS_TOKEN);
-    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ACCESS_TOKEN length:', process.env.SQUARE_ACCESS_TOKEN?.length || 0);
-    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set (will use Production)');
-    
-    let squareAccessToken = process.env.SQUARE_ACCESS_TOKEN;
-    
-    // Trim whitespace in case there are spaces in the token value
-    if (squareAccessToken) {
-      squareAccessToken = squareAccessToken.trim();
-      debugLog('[DEBUG] [SQUARE_CLIENT] Token after trim length:', squareAccessToken.length);
-      
-      // Check for spaces in the token (common issue)
-      if (squareAccessToken.includes(' ')) {
-        console.warn('[DEBUG] [SQUARE_CLIENT] ⚠️ WARNING: Token contains spaces! This might cause issues.');
-        console.warn('[DEBUG] [SQUARE_CLIENT] Token preview (first 10 chars):', squareAccessToken.substring(0, 10) + '...');
-      }
-    }
-    
-    if (!squareAccessToken) {
-      console.error('[DEBUG] [SQUARE_CLIENT] ERROR: SQUARE_ACCESS_TOKEN is not set');
-      console.error('[DEBUG] [SQUARE_CLIENT] All environment variables starting with SQUARE_:');
-      const squareVars = Object.keys(process.env).filter(key => key.startsWith('SQUARE_'));
-      if (squareVars.length === 0) {
-        console.error('[DEBUG] [SQUARE_CLIENT]   No SQUARE_* variables found in process.env');
-      } else {
-        squareVars.forEach(key => {
-          const value = process.env[key];
-          console.error(`[DEBUG] [SQUARE_CLIENT]   ${key}: ${value ? '***' + value.slice(-4) + ` (length: ${value.length})` : 'not set'}`);
-        });
-      }
-      throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
-    }
-
-    // Determine Square environment: use Sandbox for staging/dev, Production otherwise
-    let squareEnvironment: SquareEnvironment;
-    const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-    const railwayEnv = process.env.RAILWAY_ENVIRONMENT?.toLowerCase();
-    const squareEnv = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-
-    if (
-      squareEnv === 'sandbox' ||
-      nodeEnv === 'development' ||
-      nodeEnv === 'dev' ||
-      railwayEnv === 'staging' ||
-      railwayEnv === 'development'
-    ) {
-      squareEnvironment = SquareEnvironment.Sandbox;
-    } else if (squareEnv === 'production') {
-      squareEnvironment = SquareEnvironment.Production;
-    } else {
-      // Default to Production for safety
-      squareEnvironment = SquareEnvironment.Production;
-    }
-
-    debugLog('[DEBUG] [SQUARE_CLIENT] Creating Square client with environment:', squareEnvironment);
-    debugLog('[DEBUG] [SQUARE_CLIENT] NODE_ENV:', nodeEnv || 'not set');
-    debugLog('[DEBUG] [SQUARE_CLIENT] RAILWAY_ENVIRONMENT:', railwayEnv || 'not set');
-    debugLog('[DEBUG] [SQUARE_CLIENT] SQUARE_ENVIRONMENT:', squareEnv || 'not set');
-    squareClient = new SquareClient({
-      token: squareAccessToken,
-      environment: squareEnvironment,
-      version: '2025-01-23', // pinned so an SDK bump can't silently change behavior
-    });
-    debugLog('[DEBUG] [SQUARE_CLIENT] ✅ Square client initialized');
-  }
-  return squareClient;
 }
 
 // ============================================================================
@@ -465,7 +390,6 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   if (!payload) {
     console.error('[DEBUG] ERROR: payload is missing from job.data');
-    console.error('[DEBUG] Full job.data:', JSON.stringify(job.data, null, 2));
     throw new SaleValidationError(
       'Missing payload in job data',
       { jobData: JSON.stringify(job.data) },
@@ -502,8 +426,6 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   if (!payment) {
     console.error('[DEBUG] ERROR: Payment object is missing');
-    console.error('[DEBUG] Full payload structure:', JSON.stringify(payload, null, 2));
-    console.error('[DEBUG] Full job.data structure:', JSON.stringify(job.data, null, 2));
     throw new SaleValidationError(
       'Missing payment object in payload',
       { payload: JSON.stringify(payload), jobData: JSON.stringify(job.data) },
@@ -522,7 +444,6 @@ export async function processSaleJob(job: Job): Promise<void> {
   
   if (!payment.id) {
     console.error('[DEBUG] ERROR: Payment object missing id');
-    console.error('[DEBUG] Payment object:', JSON.stringify(payment, null, 2));
     throw new SaleValidationError(
       'Payment object missing id',
       { payment: JSON.stringify(payment) },

@@ -59,7 +59,7 @@ Each Yastás line creates a `YastasOperation` with the payment id, and `squareId
 
 ---
 
-## Log without payment data or secrets
+## ✅ Log without payment data or secrets
 
 **Requirements**:
 - Given a failed sale job, should log its id, payment id, attempt and error — not the job data

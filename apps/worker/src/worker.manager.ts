@@ -1,6 +1,7 @@
 import { Worker, Queue, Job } from 'bullmq';
 import { WorkerConfig, WORKERS } from './worker.config';
 import { debugLog } from './debug-log';
+import { describeFailedJob } from './failed-job';
 
 interface ManagedWorker {
   config: WorkerConfig;
@@ -90,14 +91,7 @@ export class WorkerManager {
               console.error(`[WORKER_MANAGER] A failed job in ${config.queueName} has no data left (expired or removed)`);
               continue;
             }
-            console.error(`[DEBUG] [WORKER_MANAGER] Failed job details:`, {
-              id: failedJob.id,
-              name: failedJob.name,
-              attemptsMade: failedJob.attemptsMade,
-              failedReason: failedJob.failedReason,
-              stacktrace: failedJob.stacktrace,
-              data: JSON.stringify(failedJob.data, null, 2),
-            });
+            console.error(`[WORKER_MANAGER] Failed job in ${config.queueName}:`, describeFailedJob(failedJob));
           }
         }
       } catch (error) {
@@ -188,21 +182,8 @@ export class WorkerManager {
     });
 
     worker.on('failed', (job, err) => {
-      console.error(`[DEBUG] [WORKER_MANAGER] ========================================`);
-      console.error(`[DEBUG] [WORKER_MANAGER] ❌ [${config.queueName}] Job ${job?.id} FAILED`);
-      console.error(`[DEBUG] [WORKER_MANAGER] Error name:`, err.name);
-      console.error(`[DEBUG] [WORKER_MANAGER] Error message:`, err.message);
-      console.error(`[DEBUG] [WORKER_MANAGER] Error stack:`, err.stack);
-      if (job) {
-        console.error(`[DEBUG] [WORKER_MANAGER] Failed job ID:`, job.id);
-        console.error(`[DEBUG] [WORKER_MANAGER] Failed job name:`, job.name);
-        console.error(`[DEBUG] [WORKER_MANAGER] Failed job data:`, JSON.stringify(job.data, null, 2));
-        console.error(`[DEBUG] [WORKER_MANAGER] Failed job attemptsMade:`, job.attemptsMade);
-        console.error(`[DEBUG] [WORKER_MANAGER] Failed job opts.attempts:`, job.opts.attempts);
-        console.error(`[DEBUG] [WORKER_MANAGER] Failed job returnvalue:`, job.returnvalue);
-        console.error(`[DEBUG] [WORKER_MANAGER] Failed job failedReason:`, job.failedReason);
-      }
-      console.error(`[DEBUG] [WORKER_MANAGER] ========================================`);
+      console.error(`[WORKER_MANAGER] ❌ [${config.queueName}] Job failed:`, describeFailedJob(job ?? {}, err));
+      debugLog(err.stack);
     });
 
     worker.on('error', (err) => {
