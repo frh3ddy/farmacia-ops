@@ -564,7 +564,7 @@ export async function processSaleJob(job: Job): Promise<void> {
   }
   // A purely-Yastás order never creates a Sale row, so the check above can't
   // catch a redelivered webhook for it — check YastasOperation too.
-  const existingYastasOp = await getPrisma().yastasOperation.findUnique({
+  const existingYastasOp = await getPrisma().yastasOperation.findFirst({
     where: { squareId },
   });
   if (existingYastasOp) {
@@ -732,6 +732,7 @@ export async function processSaleJob(job: Job): Promise<void> {
               employeeId: item.employeeId,
               locationId: location.id,
               squareId: squareId,
+              squareLineUid: item.lineUid,
               direction: 'IN',
               faceAmount: item.faceAmount,
               occurredAt: createdAt,

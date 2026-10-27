@@ -48,7 +48,7 @@ Done: the mapping is `toSaleLines` (`apps/worker/src/sale-lines.ts`); `sale.work
 
 ---
 
-## Record orders with several Yastás lines
+## ✅ Record orders with several Yastás lines
 
 Each Yastás line creates a `YastasOperation` with the payment id, and `squareId` is unique, so the second line rolls back the whole sale and every retry fails. Rare, but it happens (confirmed 2026-10-27).
 
