@@ -48,7 +48,7 @@ model Device {
   id           String     @id @default(uuid())
   locationId   String
   name         String // "iPad Pro - Front Counter"
-  deviceToken  String     @unique // dt_<uuid> format
+  deviceToken  String     @unique // SHA-256 (hex) of the dt_<uuid> token the device keeps
   type         DeviceType @default(FIXED)
   isActive     Boolean    @default(true)
   lastActiveAt DateTime?
@@ -124,8 +124,8 @@ enum EmployeeRole {
 model EmployeeSession {
   id             String   @id @default(uuid())
   employeeId     String
-  deviceToken    String // Links to device
-  sessionToken   String   @unique // st_<uuid> format
+  deviceToken    String // Device.deviceToken (a hash) of the device it was created on
+  sessionToken   String   @unique // SHA-256 (hex) of the st_<uuid> token the client keeps
   locationId     String // Current location context
   expiresAt      DateTime
   createdAt      DateTime @default(now())
