@@ -1,11 +1,15 @@
-import { Job } from 'bullmq';
-import { processSaleJob } from './sale.worker';
+import { Job, Queue } from 'bullmq';
+import { getPrisma, processSaleJob } from './sale.worker';
+import { integrityDeps, runIntegrityChecks } from './integrity-run';
 import { debugLog } from './debug-log';
 
 export interface WorkerConfig {
   queueName: string;
-  processor: (job: Job) => Promise<any>;
+  /** queue(name): another registered queue, e.g. the integrity job reads the sales queue's failed jobs. */
+  processor: (job: Job, queue: (name: string) => Queue) => Promise<any>;
   concurrency?: number;
+  /** Repeat this queue's job on a cron pattern (BullMQ job scheduler). */
+  schedule?: { pattern: string; tz: string };
   options?: {
     attempts?: number;
     backoff?: {
@@ -34,6 +38,17 @@ export const WORKERS: WorkerConfig[] = [
         delay: 2000,
       },
     },
+  },
+  {
+    // Nightly integrity check (tasks/inventory-integrity-epic.md). One attempt:
+    // a failed run is recorded and the next night's run tries again.
+    queueName: 'integrity',
+    processor: async (_job: Job, queue) => {
+      await runIntegrityChecks(integrityDeps(getPrisma(), queue('sales')));
+    },
+    concurrency: 1,
+    schedule: { pattern: '0 3 * * *', tz: 'America/Mexico_City' },
+    options: { attempts: 1 },
   },
   // Add more workers here as needed:
   // {

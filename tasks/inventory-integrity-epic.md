@@ -71,7 +71,7 @@ Consumption rows don't record the order they were taken in (one `createMany`, sa
 
 ---
 
-## Nightly integrity job
+## ✅ Nightly integrity job
 
 Run both checks every night in the worker and store the result for the web banner.
 

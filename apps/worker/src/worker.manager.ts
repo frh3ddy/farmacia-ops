@@ -56,7 +56,13 @@ export class WorkerManager {
       this.workers.push(managedWorker);
       this.setupWorkerEvents(managedWorker);
       console.log(`[DEBUG] [WORKER_MANAGER] ✅ Registered worker: ${config.queueName}`);
-      
+
+      // Upsert, keyed by queue name: restarts and deploys keep one schedule.
+      if (config.schedule) {
+        await managedWorker.queue.upsertJobScheduler(`${config.queueName}-nightly`, config.schedule, { name: config.queueName });
+        console.log(`[WORKER_MANAGER] ${config.queueName} scheduled: ${config.schedule.pattern} (${config.schedule.tz})`);
+      }
+
       // Check queue status
       try {
         const waiting = await managedWorker.queue.getWaitingCount();
@@ -98,6 +104,12 @@ export class WorkerManager {
     console.log('[DEBUG] [WORKER_MANAGER] ========================================');
   }
 
+  private queueFor(name: string): Queue {
+    const managed = this.workers.find((w) => w.config.queueName === name);
+    if (!managed) throw new Error(`No registered queue "${name}"`);
+    return managed.queue;
+  }
+
   /**
    * Create a worker and its associated queue
    */
@@ -126,7 +138,7 @@ export class WorkerManager {
     
     const worker = new Worker(
       config.queueName,
-      config.processor,
+      (job) => config.processor(job, (name) => this.queueFor(name)),
       {
         connection: this.redisConfig,
         concurrency: config.concurrency ?? 5,
