@@ -43,7 +43,7 @@ describe('LocationGuard', () => {
       given: 'a manager naming another location in the URL path',
       should: 'refuse the request',
       actual: await outcome(managerRequest({ params: { locationId: 'norte' } })),
-      expected: 'Access denied to this location',
+      expected: 'No tienes acceso a esta sucursal',
     });
   });
 
@@ -54,7 +54,7 @@ describe('LocationGuard', () => {
       given: 'a manager sending their own location in the query and another in the body',
       should: 'refuse the request',
       actual: await outcome(managerRequest({ query: { locationId: 'centro' }, body: { locationId: 'norte' } })),
-      expected: 'Access denied to this location',
+      expected: 'No tienes acceso a esta sucursal',
     });
   });
 });

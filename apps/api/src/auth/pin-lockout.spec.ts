@@ -47,7 +47,7 @@ async function wrongPins(auth: AuthService, deviceToken: string, times: number) 
 
 describe('PIN login lockout', () => {
   test('repeated wrong PINs', async () => {
-    // Regression: a wrong PIN only threw "Invalid PIN" (recordFailedPINAttempt
+    // Regression: a wrong PIN only threw "PIN incorrecto" (recordFailedPINAttempt
     // was never called), so a device could try every 4-digit PIN in minutes.
     const auth = authAtCentro();
     await wrongPins(auth, 'dt_caja', 5);

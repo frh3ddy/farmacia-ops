@@ -25,7 +25,7 @@ describe('dev tools in production', () => {
       given: 'the production environment',
       should: 'refuse, saying the tool would change real data',
       actual: attempt('production'),
-      expected: 'Disabled in production: this dev tool changes real stock, cost or sales.',
+      expected: 'Desactivado en producción: esta herramienta cambia existencias, costos o ventas reales.',
     });
   });
 

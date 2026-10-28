@@ -49,11 +49,11 @@ describe('matching a custom-amount line', () => {
         await match({ body: { productId: 'luz' } }),
       ],
       expected: [
-        [403, 'Access denied to this location'],
-        [409, 'This line is already matched'],
+        [403, 'No tienes acceso a esta sucursal'],
+        [409, 'Esta línea ya está asignada a un producto'],
         [404, 'Sale line not found'],
-        [400, 'Choose a product'],
-        [400, 'Pago de luz has no stock to take'],
+        [400, 'Elige un producto'],
+        [400, 'Pago de luz no tiene existencias'],
       ],
     });
   });

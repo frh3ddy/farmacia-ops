@@ -47,11 +47,11 @@ describe('recording a return', () => {
         await record({ payload: body([{ saleItemId: 'si-jarabe', quantity: 1 }], { clientRequestId: undefined }) }),
       ],
       expected: [
-        [403, 'Access denied to this location'],
+        [403, 'No tienes acceso a esta sucursal'],
         [404, 'Sale not found'],
-        [400, 'Only 1 left to return for item si-jarabe'],
-        [400, 'Only 0 left to return for item si-other'],
-        [400, 'Choose at least one item to return'],
+        [400, 'Solo puedes devolver 1 del artículo si-jarabe'],
+        [400, 'Solo puedes devolver 0 del artículo si-other'],
+        [400, 'Elige al menos un artículo para devolver'],
         [400, 'clientRequestId is required'],
       ],
     });

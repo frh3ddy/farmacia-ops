@@ -31,13 +31,13 @@ describe('createAdjustment effectiveDate', () => {
       given: 'an effectiveDate tomorrow',
       should: 'reject it',
       actual: await errorOf(() => service.createAdjustment({ ...base, type: 'FOUND', quantity: 1, unitCost: 1, effectiveDate: tomorrow })),
-      expected: 'Adjustment effectiveDate cannot be in the future',
+      expected: 'La fecha del ajuste no puede ser futura',
     });
   });
 });
 
 describe('createAdjustment input', () => {
-  const rejected = 'Quantity must be a non-zero whole number';
+  const rejected = 'La cantidad debe ser un número entero distinto de cero';
 
   test('a quantity that is not a whole number', async () => {
     assert({
@@ -65,7 +65,7 @@ describe('createAdjustment input', () => {
       given: 'an adjustment of type OTHER with no notes saying what happened',
       should: 'refuse it',
       actual: await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'OTHER', quantity: -1, notes: '  ' })),
-      expected: 'Notes are required for an OTHER adjustment',
+      expected: 'Escribe una nota para un ajuste de tipo Otro',
     });
   });
 
@@ -78,7 +78,7 @@ describe('createAdjustment input', () => {
         await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'DAMAGE', quantity: -1, reason: long })),
         await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'DAMAGE', quantity: -1, notes: long })),
       ],
-      expected: Array(2).fill('Reason and notes must be 500 characters or fewer'),
+      expected: Array(2).fill('El motivo y las notas deben tener 500 caracteres o menos'),
     });
   });
 
@@ -87,7 +87,7 @@ describe('createAdjustment input', () => {
       given: 'stock added at a negative unit cost',
       should: 'refuse it before writing anything',
       actual: await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'FOUND', quantity: 5, unitCost: -3 })),
-      expected: 'Unit cost must be zero or more',
+      expected: 'El costo unitario debe ser cero o mayor',
     });
   });
 });

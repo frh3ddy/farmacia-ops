@@ -40,7 +40,7 @@ describe('location scoping', () => {
   });
 
   it('refuses another location to a non-owner', () => {
-    expect(() => assertLocationAccess(manager, 'norte')).toThrow('Access denied');
+    expect(() => assertLocationAccess(manager, 'norte')).toThrow('No tienes acceso a esta sucursal');
     expect(() => assertLocationAccess(owner, 'norte')).not.toThrow();
   });
 
@@ -59,7 +59,7 @@ describe('location scoping', () => {
       given: 'an employee whose session has no current location',
       should: 'refuse instead of returning every location',
       actual,
-      expected: 'Access denied to this location',
+      expected: 'No tienes acceso a esta sucursal',
     });
   });
 });
