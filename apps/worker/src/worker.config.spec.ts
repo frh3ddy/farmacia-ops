@@ -1,8 +1,8 @@
 import type { Job, Queue } from 'bullmq';
 import { WORKERS } from './worker.config';
-import { processMatchJob, processSaleJob } from './sale.worker';
+import { processMatchJob, processRefundJob, processReturnJob, processSaleJob } from './sale.worker';
 
-jest.mock('./sale.worker', () => ({ getPrisma: jest.fn(), processSaleJob: jest.fn(), processMatchJob: jest.fn() }));
+jest.mock('./sale.worker', () => ({ getPrisma: jest.fn(), processSaleJob: jest.fn(), processMatchJob: jest.fn(), processReturnJob: jest.fn(), processRefundJob: jest.fn() }));
 
 describe('WORKERS', () => {
   const integrity = WORKERS.find((w) => w.queueName === 'integrity');
@@ -16,13 +16,15 @@ describe('WORKERS', () => {
     expect(integrity?.concurrency).toBe(1);
   });
 
-  it('given a sales-queue job, runs a match job as a match and anything else as a sale', async () => {
+  it('given a sales-queue job, runs matches, returns and Square refunds by name and anything else as a sale', async () => {
     const sales = WORKERS.find((w) => w.queueName === 'sales')!;
     const run = (name: string) => sales.processor({ id: name, name, data: {} } as Job, () => ({}) as Queue);
 
     await run('match-sale-line');
+    await run('record-return');
+    await run('square-refund');
     await run('process-sale');
 
-    expect([jest.mocked(processMatchJob).mock.calls.length, jest.mocked(processSaleJob).mock.calls.length]).toEqual([1, 1]);
+    expect([processMatchJob, processReturnJob, processRefundJob, processSaleJob].map((fn) => jest.mocked(fn).mock.calls.length)).toEqual([1, 1, 1, 1]);
   });
 });

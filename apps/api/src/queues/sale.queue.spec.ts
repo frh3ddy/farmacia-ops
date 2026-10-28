@@ -38,4 +38,32 @@ describe('SaleQueue', () => {
       expected: [['match-sale-line', { lineId: 'l-1', productId: 'crema', matchedBy: 'emp-mgr' }]],
     });
   });
+
+  test('return jobs', async () => {
+    const add = vi.fn();
+    vi.mocked(Queue).mockImplementationOnce(function (this: any) { this.add = add; } as any);
+    const data = { saleId: 's-1', items: [{ saleItemId: 'si-1', quantity: 1 }], returnedBy: 'emp-1', clientRequestId: 'req-1' };
+    await new SaleQueue().enqueueReturn(data);
+
+    assert({
+      given: 'a customer return',
+      should: 'queue it under the name the worker dispatches on (worker.config.ts)',
+      actual: add.mock.calls,
+      expected: [['record-return', data]],
+    });
+  });
+
+  test('refund jobs', async () => {
+    const add = vi.fn();
+    vi.mocked(Queue).mockImplementationOnce(function (this: any) { this.add = add; } as any);
+    const event = { type: 'refund.updated', event_id: 'evt-r', data: { object: { refund: { id: 'rf-1' } } } };
+    await new SaleQueue().enqueueRefund(event);
+
+    assert({
+      given: 'a Square refund event',
+      should: 'queue it under the name the worker dispatches on, once per event',
+      actual: add.mock.calls,
+      expected: [['square-refund', { squareEventId: 'evt-r', payload: event.data }, { jobId: 'evt-r' }]],
+    });
+  });
 });

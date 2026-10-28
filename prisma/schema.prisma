@@ -462,8 +462,45 @@ model Sale {
 
   items          SaleItem[]
   unmatchedLines UnmatchedSaleLine[]
+  returns        SaleReturn[]
 
   location Location @relation(fields: [locationId], references: [id])
+}
+
+/// Items a customer brought back from a sale. Revenue and cost are what the
+/// returned units took off the sale's totals.
+model SaleReturn {
+  id              String   @id @default(uuid())
+  saleId          String
+  clientRequestId String   @unique // one per return request, so a resend records once
+  reason          String?
+  returnedBy      String? // Employee ID
+  returnedAt      DateTime @default(now())
+  revenue         Decimal
+  cost            Decimal
+
+  sale  Sale             @relation(fields: [saleId], references: [id])
+  items SaleReturnItem[]
+
+  @@index([saleId])
+  @@index([returnedAt])
+}
+
+/// One returned sale item: its units went back to stock through the RETURN adjustment.
+model SaleReturnItem {
+  id           String  @id @default(uuid())
+  returnId     String
+  saleItemId   String
+  adjustmentId String  @unique
+  quantity     Int
+  revenue      Decimal
+  cost         Decimal
+
+  saleReturn SaleReturn          @relation(fields: [returnId], references: [id])
+  saleItem   SaleItem            @relation(fields: [saleItemId], references: [id])
+  adjustment InventoryAdjustment @relation(fields: [adjustmentId], references: [id])
+
+  @@index([saleItemId])
 }
 
 /// A Square custom-amount line (no catalog item): counted in the sale's
@@ -498,6 +535,8 @@ model SaleItem {
   price    Decimal
   cost     Decimal
 
+  squareLineUid String? // the Square order line, so a Square return finds what it takes back
+
   sale    Sale    @relation(fields: [saleId], references: [id])
   product Product @relation(fields: [productId], references: [id])
 
@@ -505,6 +544,9 @@ model SaleItem {
   consumptions InventoryConsumption[]
 
   matchedFrom UnmatchedSaleLine?
+  returns     SaleReturnItem[]
+
+  @@index([squareLineUid])
 }
 
 // ============================================================================
@@ -593,6 +635,8 @@ model InventoryAdjustment {
   @@index([type])
   @@index([adjustedAt])
   @@index([effectiveDate])
+
+  saleReturnItem SaleReturnItem?
 }
 
 enum AdjustmentType {

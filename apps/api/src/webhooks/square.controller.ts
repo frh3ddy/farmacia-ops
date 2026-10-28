@@ -99,9 +99,18 @@ import {
         return res.status(HttpStatus.BAD_REQUEST).send('Invalid JSON');
       }
 
+      // A refund counts once Square completes it; created and updated can both say so (the worker records it once).
+      if (event.type === 'refund.created' || event.type === 'refund.updated') {
+        if (event.data?.object?.refund?.status !== 'COMPLETED') {
+          return res.status(HttpStatus.OK).send('Ignored');
+        }
+        await this.saleQueue.enqueueRefund(event);
+        return res.status(HttpStatus.OK).send('Accepted');
+      }
+
       // Only process relevant events
       if (event.type !== 'payment.created') {
-        this.logger.debug(`Ignoring event type ${event.type} (expected payment.created)`);
+        this.logger.debug(`Ignoring event type ${event.type} (expected payment.created or a refund)`);
         return res.status(HttpStatus.OK).send('Ignored');
       }
 

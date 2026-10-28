@@ -13,7 +13,7 @@ export type OrderLine = {
 };
 
 export type SaleLines = {
-  saleItems: Array<{ productId: string; quantitySold: number; salePrice: Prisma.Decimal }>;
+  saleItems: Array<{ productId: string; quantitySold: number; salePrice: Prisma.Decimal; lineUid: string | null }>;
   /** Yastás service items: never a Sale or SaleItem, never FIFO (vision.md). */
   yastasLines: Array<{ employeeId: string; faceAmount: Prisma.Decimal; lineUid: string | null }>;
   /** Custom amounts (no catalog item): counted in revenue, cost pending until matched to a product. */
@@ -66,7 +66,7 @@ export function toSaleLines(
       continue;
     }
 
-    result.saleItems.push({ productId: mapped.productId, quantitySold: quantity, salePrice: total.div(quantity) });
+    result.saleItems.push({ productId: mapped.productId, quantitySold: quantity, salePrice: total.div(quantity), lineUid: line.uid ?? null });
   }
 
   return result;

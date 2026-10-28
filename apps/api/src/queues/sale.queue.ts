@@ -50,10 +50,27 @@ export class SaleQueue {
     return job;
   }
 
+  /** A completed Square refund (a return or exchange made in Square); the worker takes back what came back. */
+  async enqueueRefund(event: any) {
+    return this.queue.add('square-refund', { squareEventId: event.event_id, payload: event.data }, { jobId: event.event_id });
+  }
+
   /** A custom-amount line matched to a product; the worker takes its stock and cost. */
   async enqueueMatch(data: { lineId: string; productId: string; matchedBy: string }) {
     // No jobId: the worker's conditional update keeps a line from matching twice,
     // and a fixed id would block a retry while a failed match is kept.
     return this.queue.add('match-sale-line', data);
+  }
+
+  /** A customer return made by hand; the worker restocks and updates the sale. */
+  async enqueueReturn(data: {
+    saleId: string;
+    items: Array<{ saleItemId: string; quantity: number }>;
+    reason?: string;
+    returnedBy: string;
+    clientRequestId: string;
+  }) {
+    // The worker records a clientRequestId once, so no jobId is needed.
+    return this.queue.add('record-return', data);
   }
 }
