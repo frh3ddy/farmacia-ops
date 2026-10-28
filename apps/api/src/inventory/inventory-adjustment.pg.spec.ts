@@ -209,8 +209,8 @@ describe('InventoryAdjustmentService Square sync (Postgres)', () => {
     await prisma.catalogMapping.create({ data: { productId, squareVariationId: `v-${productId}` } });
     const sentChange = (call = 0) => {
       const request = batchCreateChanges.mock.calls[call][0];
-      const { fromState, toState, quantity, locationId: squareLocation } = request.changes[0].adjustment;
-      return { idempotencyKey: request.idempotencyKey, fromState, toState, quantity, squareLocation };
+      const { fromState, toState, quantity, fromLocationId, toLocationId } = request.changes[0].adjustment;
+      return { idempotencyKey: request.idempotencyKey, fromState, toState, quantity, fromLocationId, toLocationId };
     };
     return { synced, productId, batchCreateChanges, sentChange };
   }
@@ -224,7 +224,7 @@ describe('InventoryAdjustmentService Square sync (Postgres)', () => {
       should: 'send it as waste at the location, keyed on the adjustment, and record it as synced',
       actual: [sentChange(), squareSync, (await prisma.inventoryAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } })).squareSynced],
       expected: [
-        { idempotencyKey: adjustment.id, fromState: 'IN_STOCK', toState: 'WASTE', quantity: '2', squareLocation: 'SQ-CENTRO' },
+        { idempotencyKey: adjustment.id, fromState: 'IN_STOCK', toState: 'WASTE', quantity: '2', fromLocationId: 'SQ-CENTRO', toLocationId: 'SQ-CENTRO' },
         { synced: true },
         true,
       ],
@@ -240,6 +240,31 @@ describe('InventoryAdjustmentService Square sync (Postgres)', () => {
       should: 'send it as an unlinked return back into stock',
       actual: [sentChange().fromState, sentChange().toState],
       expected: ['UNLINKED_RETURN', 'IN_STOCK'],
+    });
+  });
+
+  test('boxes broken into loose units', async () => {
+    const { synced, productId, sentChange } = await syncedProduct();
+    await synced.createAdjustment({ locationId, productId, type: 'BREAK_BULK_OUT', quantity: -1, syncToSquare: true });
+
+    assert({
+      given: 'boxes leaving stock to become loose units',
+      should: 'send them as removed from tracking, not as waste',
+      actual: [sentChange().fromState, sentChange().toState],
+      expected: ['IN_STOCK', 'NONE'],
+    });
+  });
+
+  test("a transfer's outgoing leg", async () => {
+    const { synced, productId, batchCreateChanges } = await syncedProduct();
+    const { adjustment, squareSync } = await synced.createAdjustment({ locationId, productId, type: 'TRANSFER_OUT', quantity: -1, syncToSquare: true });
+    const retried = await synced.retrySquareSync(adjustment.id);
+
+    assert({
+      given: 'a transfer shipment, synced or retried on its own',
+      should: 'not reach Square — the transfer sends the move when it is received',
+      actual: [batchCreateChanges.mock.calls.length, squareSync?.synced, retried.synced],
+      expected: [0, false, false],
     });
   });
 
