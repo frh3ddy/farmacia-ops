@@ -2098,6 +2098,10 @@ export class InventoryMigrationService {
    * failure leave the item still live in Square while gone locally, so a
    * future catalog sync would silently resurrect it with the discontinued
    * flag lost.
+   *
+   * A product with stock or sales history (at a location already cut over)
+   * is kept, still discontinued: deleting it would erase batches, sales and
+   * their costs from the books. With its Square item gone, nothing revives it.
    */
   private async finalizeDiscontinuedProductDeletion(productId: string, catalogObjectId: string): Promise<void> {
     try {
@@ -2107,16 +2111,23 @@ export class InventoryMigrationService {
       return;
     }
 
+    const history = await Promise.all([
+      this.prisma.inventory.count({ where: { productId } }),
+      this.prisma.saleItem.count({ where: { productId } }),
+      this.prisma.inventoryAdjustment.count({ where: { productId } }),
+      this.prisma.inventoryReceiving.count({ where: { productId } }),
+      this.prisma.transfer.count({ where: { productId } }),
+    ]);
+    if (history.some((count) => count > 0)) {
+      this.logger.log(`[SQUARE_DELETE] Deleted Square catalog item; kept discontinued Product ${productId} for its history`);
+      return;
+    }
+
     await this.prisma.$transaction([
       this.prisma.costApproval.deleteMany({ where: { productId } }),
       this.prisma.supplierProduct.deleteMany({ where: { productId } }),
       this.prisma.supplierCostHistory.deleteMany({ where: { productId } }),
-      this.prisma.saleReturnItem.deleteMany({ where: { saleItem: { productId } } }),
-      this.prisma.inventory.deleteMany({ where: { productId } }),
-      this.prisma.saleItem.deleteMany({ where: { productId } }),
       this.prisma.placement.deleteMany({ where: { productId } }),
-      this.prisma.inventoryAdjustment.deleteMany({ where: { productId } }),
-      this.prisma.inventoryReceiving.deleteMany({ where: { productId } }),
       this.prisma.product.delete({ where: { id: productId } }),
     ]);
     this.logger.log(`[SQUARE_DELETE] Deleted Square catalog item and local Product ${productId}`);

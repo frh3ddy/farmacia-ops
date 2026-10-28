@@ -28,7 +28,6 @@ interface CreateAdjustmentDto {
   notes?: string;
   unitCost?: number;
   effectiveDate?: string;
-  adjustedBy?: string;
   syncToSquare?: boolean; // If true, also update Square inventory
   clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
 }
