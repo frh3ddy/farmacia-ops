@@ -8,7 +8,7 @@ import { join } from 'path';
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import type { Job } from 'bullmq';
-import { getPrisma, processMatchJob, processReturnJob, processSaleJob } from './sale.worker';
+import { getPrisma, processMatchJob, processRefundJob, processReturnJob, processSaleJob } from './sale.worker';
 import { SaleValidationError } from './errors';
 import { booksMismatches, loadBooks } from './books-check';
 
@@ -17,7 +17,9 @@ const { pg_trgm } = require('@electric-sql/pglite/contrib/pg_trgm');
 
 // Returns push their stock change to Square; record the calls instead.
 const batchCreateChanges = jest.fn(async (_request: unknown) => ({}));
-jest.mock('./square-client', () => ({ getSquareClient: () => ({ inventory: { batchCreateChanges } }) }));
+// A refund's order is fetched from Square.
+const getOrder = jest.fn(async (_request: { orderId: string }): Promise<{ order?: object }> => ({}));
+jest.mock('./square-client', () => ({ getSquareClient: () => ({ inventory: { batchCreateChanges }, orders: { get: getOrder } }) }));
 
 jest.setTimeout(120_000);
 
@@ -47,13 +49,43 @@ afterAll(async () => {
   await db?.close();
 });
 
-const job = (lineItems: object[], paymentId = 'p-1', squareLocationId = 'SQ-CENTRO') =>
+const job = (lineItems: object[], paymentId = 'p-1', squareLocationId = 'SQ-CENTRO', returns?: object[]) =>
   ({
     id: `evt-${paymentId}`,
     data: {
       payload: {
         object: { payment: { id: paymentId, location_id: squareLocationId, order_id: `o-${paymentId}`, created_at: '2026-10-27T18:00:00Z' } },
-        _testOrderData: { id: `o-${paymentId}`, lineItems },
+        _testOrderData: { id: `o-${paymentId}`, lineItems, returns },
+      },
+    },
+  }) as unknown as Job;
+
+// What came back, as Square's return order lists it: each line points at the sold line.
+const returnLine = (uid: string, sourceLineItemUid: string, quantity: string, centavos: number) => ({
+  uid,
+  sourceLineItemUid,
+  quantity,
+  totalMoney: { amount: centavos, currency: 'MXN' },
+});
+
+const refundJob = (refund: { id: string; order_id: string; payment_id: string; amount: number; status?: string; reason?: string }) =>
+  ({
+    id: `evt-${refund.id}`,
+    name: 'square-refund',
+    data: {
+      payload: {
+        object: {
+          refund: {
+            id: refund.id,
+            status: refund.status ?? 'COMPLETED',
+            order_id: refund.order_id,
+            payment_id: refund.payment_id,
+            location_id: 'SQ-CENTRO',
+            reason: refund.reason,
+            amount_money: { amount: refund.amount, currency: 'MXN' },
+            created_at: '2026-10-28T18:00:00Z',
+          },
+        },
       },
     },
   }) as unknown as Job;
@@ -297,4 +329,99 @@ test('a return puts the units back in Square, once, retrying when Square fails',
     synced: [true, null],
     returns: 1,
   });
+});
+
+test('an exchange where the customer pays the difference', async () => {
+  const prisma = getPrisma();
+  // p-1 sold 2 jarabes at $45 (one already returned by hand). The customer brings
+  // the other back and takes pastillas for $60, paying $15: Square sends one
+  // payment whose order lists the pastillas and, under returns, the jarabe.
+  const p1 = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-1' } });
+  const pastillas = await prisma.product.create({ data: { name: 'Pastillas' } });
+  await prisma.catalogMapping.create({ data: { squareVariationId: 'v-pastillas', productId: pastillas.id } });
+  await prisma.inventory.create({ data: { productId: pastillas.id, locationId: p1.locationId, quantity: 5, unitCost: 20, receivedAt: new Date('2026-10-01') } });
+  const exchange = job([line('v-pastillas', '1', 6000)], 'p-5', 'SQ-CENTRO', [
+    { uid: 'ret-1', returnLineItems: [returnLine('rli-1', 'uid-v-jarabe', '1', 4500)] },
+  ]);
+  batchCreateChanges.mockClear();
+
+  await processSaleJob(exchange);
+  await processSaleJob(exchange); // redelivered
+
+  const p5 = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-5' } });
+  const p1After = await prisma.sale.findUniqueOrThrow({ where: { id: p1.id } });
+  const back = await prisma.saleReturn.findUniqueOrThrow({ where: { clientRequestId: 'square-return-line:rli-1' }, include: { items: { include: { adjustment: true } } } });
+  expect({
+    newSale: [p5.totalRevenue.toString(), p5.totalCost.toString()],
+    // the jarabe comes off p-1 at its sold price and cost (22 / 2)
+    original: [Number(p1.totalRevenue) - Number(p1After.totalRevenue), Number(p1.totalCost) - Number(p1After.totalCost)],
+    back: back.items.map((i) => [i.quantity, i.adjustment.type, i.adjustment.squareSynced]),
+    // Square restocked it itself
+    squareCalls: batchCreateChanges.mock.calls.length,
+    books: booksMismatches(await loadBooks(prisma)),
+  }).toEqual({
+    newSale: ['60', '20'],
+    original: [45, 11],
+    back: [[1, 'RETURN', true]],
+    squareCalls: 0,
+    books: [],
+  });
+});
+
+test('a Square refund: a matched and an unmatched custom amount back, and an exchange item out', async () => {
+  const prisma = getPrisma();
+  // p-4 sold a $16 custom amount (still unmatched) and 2 crema roja at $15 (matched, cost 6 each).
+  const p4 = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-4' } });
+  getOrder.mockResolvedValue({
+    order: {
+      id: 'ro-1',
+      lineItems: [line('v-pastillas', '1', 2000)],
+      returns: [{ returnLineItems: [returnLine('rli-2', 'uid-c1', '1', 1600), returnLine('rli-3', 'uid-c2', '1', 1500)] }],
+    },
+  });
+  const refund = refundJob({ id: 'rf-1', order_id: 'ro-1', payment_id: 'p-4', amount: 1100, reason: 'Cambio de producto' });
+
+  await processRefundJob(refund);
+  await processRefundJob(refund); // refund.created and refund.updated both arrive
+
+  const p4After = await prisma.sale.findUniqueOrThrow({ where: { id: p4.id } });
+  const returns = await prisma.saleReturn.findMany({ where: { saleId: p4.id }, include: { items: true }, orderBy: { revenue: 'asc' } });
+  const exchange = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'rf-1' } });
+  expect({
+    returns: returns.map((r) => [r.reason, r.revenue.toString(), r.cost.toString(), r.items.length]),
+    original: [p4After.totalRevenue.toString(), p4After.totalCost.toString()],
+    exchange: [exchange.totalRevenue.toString(), exchange.totalCost.toString()],
+    books: booksMismatches(await loadBooks(prisma)),
+  }).toEqual({
+    // the matched crema goes back to stock; the unmatched $16 only takes revenue back
+    returns: [
+      ['Cambio de producto', '15', '6', 1],
+      ['Cambio de producto', '16', '0', 0],
+    ],
+    original: ['15', '6'],
+    exchange: ['20', '20'],
+    books: [],
+  });
+});
+
+test('an amount-only refund, a refund still pending, and a return of a sale never recorded', async () => {
+  const prisma = getPrisma();
+  const p5 = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-5' } });
+  getOrder.mockResolvedValue({ order: { id: 'ro-2' } });
+  const refund = refundJob({ id: 'rf-2', order_id: 'ro-2', payment_id: 'p-5', amount: 500, reason: 'Cobro accidental' });
+
+  await processRefundJob(refund);
+  await processRefundJob(refund);
+  await processRefundJob(refundJob({ id: 'rf-3', order_id: 'ro-2', payment_id: 'p-5', amount: 900, status: 'PENDING' }));
+  // sold before sales were recorded: nothing to take it from
+  getOrder.mockResolvedValue({ order: { id: 'ro-4', returns: [{ returnLineItems: [returnLine('rli-4', 'uid-unknown', '1', 900)] }] } });
+  await processRefundJob(refundJob({ id: 'rf-4', order_id: 'ro-4', payment_id: 'p-old', amount: 900 }));
+
+  const after = await prisma.sale.findUniqueOrThrow({ where: { id: p5.id } });
+  expect({
+    revenue: Number(p5.totalRevenue) - Number(after.totalRevenue),
+    cost: Number(p5.totalCost) - Number(after.totalCost),
+    returns: await prisma.saleReturn.count({ where: { saleId: p5.id } }),
+    unknown: await prisma.saleReturn.count({ where: { clientRequestId: 'square-return-line:rli-4' } }),
+  }).toEqual({ revenue: 5, cost: 0, returns: 1, unknown: 0 });
 });

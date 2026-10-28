@@ -24,7 +24,7 @@ describe('toSaleLines', () => {
     const mappings = new Map([['v-jarabe', product('jarabe')]]);
 
     expect(plain(toSaleLines([line('v-jarabe', '3', 10000)], mappings, context))).toEqual({
-      saleItems: [{ productId: 'jarabe', quantitySold: 3, salePrice: new Prisma.Decimal(100).div(3).toString() }],
+      saleItems: [{ productId: 'jarabe', quantitySold: 3, salePrice: new Prisma.Decimal(100).div(3).toString(), lineUid: 'uid-v-jarabe' }],
       yastasLines: [],
       customLines: [],
     });
@@ -34,7 +34,7 @@ describe('toSaleLines', () => {
     const mappings = new Map([['v-jarabe', product('jarabe')], ['v-yastas', yastas('emp-1')]]);
 
     expect(plain(toSaleLines([line('v-jarabe', '1', 5000), line('v-yastas', '1', 25000)], mappings, context))).toEqual({
-      saleItems: [{ productId: 'jarabe', quantitySold: 1, salePrice: '50' }],
+      saleItems: [{ productId: 'jarabe', quantitySold: 1, salePrice: '50', lineUid: 'uid-v-jarabe' }],
       yastasLines: [{ employeeId: 'emp-1', faceAmount: '250', lineUid: 'uid-v-yastas' }],
       customLines: [],
     });
