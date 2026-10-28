@@ -1,4 +1,4 @@
-import { failedJobPaymentIds, recordedPaymentIds, salesMismatches, type SalesCheckInput } from './sales-check';
+import { failedJobPaymentIds, recordedPaymentIds, salesCheckScope, salesMismatches, type SalesCheckInput } from './sales-check';
 
 const cutoff = new Date('2026-10-27T08:30:00Z');
 
@@ -75,5 +75,38 @@ describe('recordedPaymentIds', () => {
       where: { squareId: { in: ['p-sold', 'p-yastas', 'p-lost'] } },
       select: { squareId: true },
     });
+  });
+});
+
+describe('salesCheckScope', () => {
+  const window = { from: new Date('2026-11-10T08:30:00Z'), cutoff: new Date('2026-11-12T08:00:00Z') };
+  const centro = { id: 'centro', squareId: 'SQ-CENTRO' };
+  const norte = { id: 'norte', squareId: 'SQ-NORTE' };
+  const lock = (locationId: string | null, cutoverDate: string) => ({ locationId, cutoverDate: new Date(cutoverDate) });
+  const scope = (locks: ReturnType<typeof lock>[], startedAt?: string) =>
+    salesCheckScope([centro, norte], locks, startedAt, window).map((s) => [s.locationId, s.from.toISOString()]);
+
+  it('given sales recording has not started, checks nothing (no sales are recorded before every cutover)', () => {
+    expect(scope([lock('centro', '2026-10-01')])).toEqual([]);
+  });
+
+  it('given recording started, checks only cut-over locations, from the latest of window, cutover and start', () => {
+    expect(scope([lock('centro', '2026-10-01'), lock('norte', '2026-11-11T12:00:00Z')], '2026-11-01')).toEqual([
+      ['centro', '2026-11-10T08:30:00.000Z'],
+      ['norte', '2026-11-11T12:00:00.000Z'],
+    ]);
+    expect(scope([lock('centro', '2026-10-01')], '2026-11-11T15:00:00Z')).toEqual([['centro', '2026-11-11T15:00:00.000Z']]);
+  });
+
+  it('given a lock with no location (all locations), covers every location', () => {
+    expect(scope([lock(null, '2026-10-01')], '2026-11-01').map(([id]) => id)).toEqual(['centro', 'norte']);
+  });
+
+  it('given recording starts after the cutoff, checks nothing yet', () => {
+    expect(scope([lock('centro', '2026-10-01')], '2026-11-12T09:00:00Z')).toEqual([]);
+  });
+
+  it('given a start that is not a date, fails the check instead of silently checking nothing', () => {
+    expect(() => scope([], 'next monday')).toThrow(/SALES_RECORDING_STARTED_AT/);
   });
 });
