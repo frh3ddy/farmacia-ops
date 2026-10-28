@@ -49,4 +49,11 @@ export class SaleQueue {
 
     return job;
   }
+
+  /** A custom-amount line matched to a product; the worker takes its stock and cost. */
+  async enqueueMatch(data: { lineId: string; productId: string; matchedBy: string }) {
+    // No jobId: the worker's conditional update keeps a line from matching twice,
+    // and a fixed id would block a retry while a failed match is kept.
+    return this.queue.add('match-sale-line', data);
+  }
 }

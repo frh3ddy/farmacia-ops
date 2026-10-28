@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "../../lib/apiFetch";
 
-type ProductOption = {
+export type ProductOption = {
   id: string;
   name: string;
   sku: string | null;
@@ -16,7 +16,7 @@ const inputClass =
 const labelClass = "mb-2 block text-sm font-medium text-(--color-ink-secondary)";
 
 /** Debounced name/SKU search over GET /products, pick one result. */
-function ProductPicker({
+export function ProductPicker({
   label,
   selected,
   onSelect,

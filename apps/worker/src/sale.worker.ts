@@ -50,6 +50,7 @@ export function getPrisma(): PrismaClient {
 // ============================================================================
 
 interface SaleItemOutput {
+  id: string;
   saleId: string;
   productId: string;
   quantity: number;
@@ -260,6 +261,7 @@ async function processSaleItem(
   await recordInventoryConsumption(saleItem.id, costResult.consumedBatches, client);
 
   return {
+    id: saleItem.id,
     saleId: saleItem.saleId,
     productId: saleItem.productId,
     quantity: saleItem.quantity,
@@ -316,10 +318,11 @@ async function recordInventoryConsumption(
 }
 
 /**
- * Calculate total revenue, total cost, and gross profit for a sale
+ * Calculate total revenue, total cost, and gross profit for a sale.
+ * Custom amounts add revenue only: their cost is pending until matched.
  */
-function calculateSaleTotals(saleItems: SaleItemOutput[]): SaleTotals {
-  let totalRevenue = new Prisma.Decimal(0);
+function calculateSaleTotals(saleItems: SaleItemOutput[], customLines: Array<{ amount: Prisma.Decimal }>): SaleTotals {
+  let totalRevenue = customLines.reduce((sum, l) => sum.add(l.amount), new Prisma.Decimal(0));
   let totalCost = new Prisma.Decimal(0);
 
   for (const saleItem of saleItems) {
@@ -548,14 +551,11 @@ export async function processSaleJob(job: Job): Promise<void> {
     }
   }
 
-  const { saleItems: lineItems, yastasLines: yastasLineItems, skipped } = toSaleLines(orderLineItems, mappings, {
+  const { saleItems: lineItems, yastasLines: yastasLineItems, customLines } = toSaleLines(orderLineItems, mappings, {
     orderId,
     squareId,
     locationId,
   });
-  if (skipped.length > 0) {
-    console.warn(`[SALE_WORKER] ${skipped.length} line(s) with no catalog item not recorded for payment ${squareId}`);
-  }
   debugLog('[DEBUG] Total line items mapped:', lineItems.length, 'Yastás line items:', yastasLineItems.length);
 
   // Phase 3 & 4: Create Sale Record and Process Items (all in transaction)
@@ -626,7 +626,7 @@ export async function processSaleJob(job: Job): Promise<void> {
           debugLog(`[DEBUG] [TX] ✓ YastasOperation ${operation.id} + WalletMovement recorded`);
         }
 
-        if (lineItems.length === 0) {
+        if (lineItems.length === 0 && customLines.length === 0) {
           // Pure-Yastás order — no Sale/SaleItem rows at all.
           return { saleId: null, itemCount: 0 };
         }
@@ -690,9 +690,15 @@ export async function processSaleJob(job: Job): Promise<void> {
           }
         }
 
+        if (customLines.length > 0) {
+          await tx.unmatchedSaleLine.createMany({
+            data: customLines.map((l) => ({ saleId: sale.id, squareLineUid: l.lineUid, description: l.description, quantity: l.quantity, amount: l.amount })),
+          });
+        }
+
         // Calculate sale totals
         debugLog('[DEBUG] [TX] Calculating sale totals...');
-        const totals = calculateSaleTotals(saleItems);
+        const totals = calculateSaleTotals(saleItems, customLines);
         debugLog('[DEBUG] [TX] Sale totals:', {
           totalRevenue: totals.totalRevenue.toString(),
           totalCost: totals.totalCost.toString(),
@@ -772,4 +778,37 @@ export async function processSaleJob(job: Job): Promise<void> {
       error,
     );
   }
+}
+/**
+ * Matches a custom-amount line to a product: takes its stock and cost the way the
+ * sale would have (FIFO, shortfall cover) and adds the cost to the sale. Revenue
+ * is unchanged — it was counted when the sale arrived. Matching twice is a no-op.
+ */
+export async function processMatchJob(job: Job<{ lineId: string; productId: string; matchedBy: string }>): Promise<void> {
+  const { lineId, productId, matchedBy } = job.data;
+  await getPrisma().$transaction(async (tx) => {
+    const line = await tx.unmatchedSaleLine.findUniqueOrThrow({ where: { id: lineId }, include: { sale: true } });
+    if (line.matchedSaleItemId) return;
+
+    const item = await processSaleItem(
+      line.saleId,
+      productId,
+      line.sale.locationId,
+      line.quantity,
+      line.amount.div(line.quantity),
+      line.sale.squareId,
+      tx,
+    );
+    // Conditional, so two jobs racing on one line can't both match it.
+    const { count } = await tx.unmatchedSaleLine.updateMany({
+      where: { id: lineId, matchedSaleItemId: null },
+      data: { matchedSaleItemId: item.id, matchedAt: new Date(), matchedBy },
+    });
+    if (count === 0) throw new DatabaseTransactionError(`Sale line ${lineId} was matched by another job`);
+
+    await tx.sale.update({
+      where: { id: line.saleId },
+      data: { totalCost: { increment: item.cost }, grossProfit: { decrement: item.cost } },
+    });
+  });
 }

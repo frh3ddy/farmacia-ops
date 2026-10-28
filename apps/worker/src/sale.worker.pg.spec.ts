@@ -8,7 +8,7 @@ import { join } from 'path';
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import type { Job } from 'bullmq';
-import { getPrisma, processSaleJob } from './sale.worker';
+import { getPrisma, processMatchJob, processSaleJob } from './sale.worker';
 import { SaleValidationError } from './errors';
 import { booksMismatches, loadBooks } from './books-check';
 
@@ -146,4 +146,70 @@ test('a Yastás payment at a location with no wallet', async () => {
 
   // A setup problem, not a database failure: it must keep its type.
   await expect(processSaleJob(job([line('v-luz', '1', 25000)], 'p-3', 'SQ-NORTE'))).rejects.toThrow(SaleValidationError);
+});
+
+test('an order of only custom amounts', async () => {
+  const prisma = getPrisma();
+  // Staff typed $16 with no description, and a 2 × $15 'crema roja'.
+  const lines = [
+    { uid: 'uid-c1', quantity: '1', totalMoney: { amount: 1600, currency: 'MXN' } },
+    { uid: 'uid-c2', note: 'crema roja', quantity: '2', totalMoney: { amount: 3000, currency: 'MXN' } },
+  ];
+  await processSaleJob(job(lines, 'p-4'));
+  await processSaleJob(job(lines, 'p-4')); // redelivered
+
+  const sale = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-4' }, include: { items: true, unmatchedLines: true } });
+  expect({
+    revenue: sale.totalRevenue.toString(),
+    cost: sale.totalCost.toString(),
+    profit: sale.grossProfit.toString(),
+    items: sale.items.length,
+    pending: sale.unmatchedLines.map((l) => [l.squareLineUid, l.description, l.quantity, l.amount.toString()]).sort(),
+    books: booksMismatches(await loadBooks(prisma)),
+  }).toEqual({
+    revenue: '46',
+    cost: '0',
+    profit: '46',
+    items: 0,
+    pending: [
+      ['uid-c1', null, 1, '16'],
+      ['uid-c2', 'crema roja', 2, '30'],
+    ],
+    books: [],
+  });
+});
+
+test('matching a custom amount to a product', async () => {
+  const prisma = getPrisma();
+  const sale = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-4' } });
+  const crema = await prisma.unmatchedSaleLine.findFirstOrThrow({ where: { squareLineUid: 'uid-c2' } });
+  const product = await prisma.product.create({ data: { name: 'Crema roja' } });
+  const batch = await prisma.inventory.create({
+    data: { productId: product.id, locationId: sale.locationId, quantity: 5, unitCost: 6, receivedAt: new Date('2026-10-01') },
+  });
+  const match = { id: 'match-1', name: 'match-sale-line', data: { lineId: crema.id, productId: product.id, matchedBy: 'emp-mgr' } } as unknown as Job;
+
+  await processMatchJob(match);
+  await processMatchJob(match); // a second click, or a retried job
+
+  const after = await prisma.sale.findUniqueOrThrow({ where: { id: sale.id }, include: { items: true } });
+  const line = await prisma.unmatchedSaleLine.findUniqueOrThrow({ where: { id: crema.id } });
+  expect({
+    // revenue was counted when the sale arrived; matching adds only the cost
+    revenue: after.totalRevenue.toString(),
+    cost: after.totalCost.toString(),
+    profit: after.grossProfit.toString(),
+    items: after.items.map((i) => [i.productId, i.quantity, i.price.toString(), i.cost.toString()]),
+    line: { matched: line.matchedSaleItemId === after.items[0]?.id, matchedBy: line.matchedBy },
+    stockLeft: (await prisma.inventory.findUniqueOrThrow({ where: { id: batch.id } })).quantity,
+    books: booksMismatches(await loadBooks(prisma)),
+  }).toEqual({
+    revenue: '46',
+    cost: '12',
+    profit: '34',
+    items: [[product.id, 2, '15', '12']],
+    line: { matched: true, matchedBy: 'emp-mgr' },
+    stockLeft: 3,
+    books: [],
+  });
 });

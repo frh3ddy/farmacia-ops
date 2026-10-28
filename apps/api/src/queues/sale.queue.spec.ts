@@ -25,4 +25,17 @@ describe('SaleQueue', () => {
       expected: opts.defaultJobOptions.removeOnFail.age,
     });
   });
+
+  test('match jobs', async () => {
+    const add = vi.fn();
+    vi.mocked(Queue).mockImplementationOnce(function (this: any) { this.add = add; } as any);
+    await new SaleQueue().enqueueMatch({ lineId: 'l-1', productId: 'crema', matchedBy: 'emp-mgr' });
+
+    assert({
+      given: 'a matched custom-amount line',
+      should: 'queue it under the name the worker dispatches on (worker.config.ts)',
+      actual: add.mock.calls,
+      expected: [['match-sale-line', { lineId: 'l-1', productId: 'crema', matchedBy: 'emp-mgr' }]],
+    });
+  });
 });
