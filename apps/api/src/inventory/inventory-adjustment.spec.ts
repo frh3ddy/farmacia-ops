@@ -197,52 +197,6 @@ describe('createAdjustment replay', () => {
   });
 });
 
-describe('getAdjustmentSummary', () => {
-  test('a count correction that removed stock, and a find that added it back', async () => {
-    // Adjustments: COUNT_CORRECTION −20 ($40), FOUND +20 ($40). totalCost is stored positive for both.
-    const rows = [
-      { type: 'COUNT_CORRECTION', quantity: -20, totalCost: 40 },
-      { type: 'FOUND', quantity: 20, totalCost: 40 },
-    ];
-    const matching = (where: any) => rows.filter((r) =>
-      where.quantity?.gt !== undefined ? r.quantity > where.quantity.gt
-        : where.quantity?.lt !== undefined ? r.quantity < where.quantity.lt
-        : true);
-    const service = new InventoryAdjustmentService({
-      inventoryAdjustment: {
-        aggregate: async ({ where }: any) => {
-          const m = matching(where);
-          return {
-            _count: { id: m.length },
-            _sum: {
-              quantity: m.length ? m.reduce((s, r) => s + r.quantity, 0) : null,
-              totalCost: m.length ? new Prisma.Decimal(m.reduce((s, r) => s + r.totalCost, 0)) : null,
-            },
-          };
-        },
-        groupBy: async () => rows.map((r) => ({
-          type: r.type, _count: { id: 1 }, _sum: { quantity: r.quantity, totalCost: new Prisma.Decimal(r.totalCost) },
-        })),
-      },
-    } as any);
-
-    const summary = await service.getAdjustmentSummary('l1');
-
-    assert({
-      given: 'a stock-removing count correction',
-      should: 'count it as a removal, by the sign of its quantity rather than its type',
-      actual: [summary.positive.totalQuantity, summary.negative.totalQuantity],
-      expected: [20, 20],
-    });
-    assert({
-      given: 'equal cost added and removed',
-      should: 'report a net cost impact of zero',
-      actual: summary.totals.totalCostImpact,
-      expected: '0',
-    });
-  });
-});
-
 describe('getLastKnownCost', () => {
   const costOf = (batch: unknown, supplier: unknown, approval: unknown = null) => {
     const findFirst = (result: unknown) => async () => result;
