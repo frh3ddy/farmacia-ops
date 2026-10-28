@@ -208,7 +208,7 @@ export class InventoryAdjustmentService {
     // client-supplied dedup key and return the existing result instead of
     // applying the delta twice.
     if (input.clientRequestId) {
-      const existing = await this.findByClientRequestId(input.clientRequestId);
+      const existing = await this.findByClientRequestId(input);
       if (existing) {
         this.logger.log(`[ADJUSTMENT] Duplicate clientRequestId ${input.clientRequestId} — returning existing adjustment ${existing.adjustment.id}`);
         return existing;
@@ -222,6 +222,12 @@ export class InventoryAdjustmentService {
     }
     if (input.unitCost != null && !(typeof input.unitCost === 'number' && input.unitCost >= 0)) {
       throw new BadRequestException('Unit cost must be zero or more');
+    }
+    if (input.type === 'OTHER' && !input.notes?.trim()) {
+      throw new BadRequestException('Notes are required for an OTHER adjustment');
+    }
+    if ((input.reason?.length ?? 0) > 500 || (input.notes?.length ?? 0) > 500) {
+      throw new BadRequestException('Reason and notes must be 500 characters or fewer');
     }
 
     // Check if product exists
@@ -250,9 +256,19 @@ export class InventoryAdjustmentService {
       throw new BadRequestException('Adjustment effectiveDate cannot be in the future');
     }
 
-    // Check cutover lock
-    const isLocked = await this.checkCutoverLock(input.locationId, input.effectiveDate || new Date());
-    if (isLocked) {
+    // Finishing a location's cutover writes its lock. Before that, the cutover
+    // will set the location's opening stock from Square's counts, which would
+    // count an adjustment's stock change a second time (or drop it).
+    const lock = await this.prisma.cutoverLock.findFirst({
+      where: { OR: [{ locationId: input.locationId }, { locationId: null }], isLocked: true },
+      orderBy: { cutoverDate: 'desc' },
+    });
+    if (!lock) {
+      throw new BadRequestException(
+        'This location has not been cut over yet. Adjustments start once its cutover is complete.'
+      );
+    }
+    if ((input.effectiveDate || new Date()) <= lock.cutoverDate) {
       throw new BadRequestException(
         'Cannot make adjustments before the cutover date. The inventory for this location is locked.'
       );
@@ -277,7 +293,7 @@ export class InventoryAdjustmentService {
       // insert hits the unique dedup key and its transaction rolled back.
       // (meta.target's shape varies with the driver adapter, so look the key up instead.)
       if (input.clientRequestId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const existing = await this.findByClientRequestId(input.clientRequestId);
+        const existing = await this.findByClientRequestId(input);
         if (existing) return existing;
       }
       throw error;
@@ -386,26 +402,7 @@ export class InventoryAdjustmentService {
       `[ADJUSTMENT] Negative adjustment ${result.id}: removed ${quantityToRemove} units from ${consumedBatches.length} batches, total cost ${totalCost.toString()}`
     );
 
-    // Optionally sync to Square
-    let squareSync: { synced: boolean; error?: string } | undefined;
-    if (input.syncToSquare) {
-      squareSync = await this.syncToSquare(
-        result.id,
-        input.locationId,
-        input.productId,
-        input.quantity, // negative
-        input.type // Pass the adjustment type for proper state transition
-      );
-
-      await this.prisma.inventoryAdjustment.update({
-        where: { id: result.id },
-        data: {
-          squareSynced: squareSync.synced,
-          squareSyncedAt: squareSync.synced ? new Date() : null,
-          squareSyncError: squareSync.error || null,
-        },
-      });
-    }
+    const squareSync = input.syncToSquare ? await this.recordSquareSync(result) : undefined;
 
     return {
       adjustment: {
@@ -440,19 +437,16 @@ export class InventoryAdjustmentService {
     input: CreateAdjustmentInput,
     previousTotal: number
   ): Promise<AdjustmentResult> {
-    // Unit cost is required for positive adjustments
-    if (!input.unitCost && input.unitCost !== 0) {
-      // Try to get the last known cost from supplier or previous inventory
-      const lastCost = await this.getLastKnownCost(input.productId, input.locationId);
-      if (!lastCost) {
-        throw new BadRequestException(
-          'Unit cost is required for positive adjustments. No previous cost history found.'
-        );
-      }
-      input.unitCost = lastCost;
+    // Unit cost is required for positive adjustments; fall back to the last known
+    // cost (a looked-up 0 is no cost — only the caller can say an item is free)
+    const unitCostValue = input.unitCost ?? ((await this.getLastKnownCost(input.productId, input.locationId)) || null);
+    if (unitCostValue == null) {
+      throw new BadRequestException(
+        'Unit cost is required for positive adjustments. No previous cost history found.'
+      );
     }
-
-    const totalCost = new Prisma.Decimal(input.unitCost).mul(input.quantity);
+    const unitCost = new Prisma.Decimal(unitCostValue);
+    const totalCost = unitCost.mul(input.quantity);
 
     // Execute in transaction
     const result = await this.prisma.$transaction(async (tx) => {
@@ -463,7 +457,7 @@ export class InventoryAdjustmentService {
           productId: input.productId,
           quantity: input.quantity,
           receivedAt: input.effectiveDate || new Date(),
-          unitCost: new Prisma.Decimal(input.unitCost!),
+          unitCost,
           source: 'ADJUSTMENT',
         },
       });
@@ -477,7 +471,7 @@ export class InventoryAdjustmentService {
           quantity: input.quantity,
           reason: input.reason,
           notes: input.notes,
-          unitCost: new Prisma.Decimal(input.unitCost!),
+          unitCost,
           totalCost: totalCost,
           createdBatchId: inventoryBatch.id,
           effectiveDate: input.effectiveDate || new Date(),
@@ -493,26 +487,7 @@ export class InventoryAdjustmentService {
       `[ADJUSTMENT] Positive adjustment ${result.adjustment.id}: added ${input.quantity} units as batch ${result.inventoryBatch.id}, cost ${totalCost.toString()}`
     );
 
-    // Optionally sync to Square
-    let squareSync: { synced: boolean; error?: string } | undefined;
-    if (input.syncToSquare) {
-      squareSync = await this.syncToSquare(
-        result.adjustment.id,
-        input.locationId,
-        input.productId,
-        input.quantity, // positive
-        input.type // Pass the adjustment type for proper state transition
-      );
-
-      await this.prisma.inventoryAdjustment.update({
-        where: { id: result.adjustment.id },
-        data: {
-          squareSynced: squareSync.synced,
-          squareSyncedAt: squareSync.synced ? new Date() : null,
-          squareSyncError: squareSync.error || null,
-        },
-      });
-    }
+    const squareSync = input.syncToSquare ? await this.recordSquareSync(result.adjustment) : undefined;
 
     return {
       adjustment: {
@@ -548,26 +523,30 @@ export class InventoryAdjustmentService {
     }
 
     if (adjustment.squareSynced) {
-      return { synced: true, error: 'Already synced' };
+      return { synced: true };
     }
+    return this.recordSquareSync(adjustment);
+  }
 
+  /** Pushes a committed adjustment to Square and records the outcome on it. */
+  private async recordSquareSync(adjustment: {
+    id: string; locationId: string; productId: string; quantity: number; type: AdjustmentType;
+  }): Promise<{ synced: boolean; error?: string }> {
     const result = await this.syncToSquare(
-      adjustmentId,
+      adjustment.id,
       adjustment.locationId,
       adjustment.productId,
       adjustment.quantity,
       adjustment.type
     );
-
     await this.prisma.inventoryAdjustment.update({
-      where: { id: adjustmentId },
+      where: { id: adjustment.id },
       data: {
         squareSynced: result.synced,
         squareSyncedAt: result.synced ? new Date() : null,
         squareSyncError: result.error || null,
       },
     });
-
     return result;
   }
 
@@ -575,12 +554,21 @@ export class InventoryAdjustmentService {
   // Helper methods
   // --------------------------------------------------------------------------
 
-  private async findByClientRequestId(clientRequestId: string): Promise<AdjustmentResult | null> {
+  private async findByClientRequestId(input: CreateAdjustmentInput): Promise<AdjustmentResult | null> {
     const existing = await this.prisma.inventoryAdjustment.findUnique({
-      where: { clientRequestId },
+      where: { clientRequestId: input.clientRequestId },
       include: { createdBatch: true, consumptions: true },
     });
     if (!existing) return null;
+    // A replay repeats its request exactly. Anything else reusing the key is a
+    // client bug — or a probe for another location's adjustment.
+    const sameRequest = existing.locationId === input.locationId
+      && existing.productId === input.productId
+      && existing.type === input.type
+      && existing.quantity === input.quantity;
+    if (!sameRequest) {
+      throw new ConflictException('This clientRequestId was already used for a different adjustment');
+    }
 
     const currentTotal = await this.prisma.inventory.aggregate({
       where: { productId: existing.productId, locationId: existing.locationId, quantity: { gt: 0 } },
@@ -614,20 +602,6 @@ export class InventoryAdjustmentService {
           }))
         : undefined,
     };
-  }
-
-  private async checkCutoverLock(locationId: string, effectiveDate: Date): Promise<boolean> {
-    const lock = await this.prisma.cutoverLock.findFirst({
-      where: {
-        OR: [
-          { locationId }, // Specific location lock
-          { locationId: null }, // Global lock
-        ],
-        cutoverDate: { gte: effectiveDate },
-        isLocked: true,
-      },
-    });
-    return !!lock;
   }
 
   private async getLastKnownCost(productId: string, locationId: string): Promise<number | null> {

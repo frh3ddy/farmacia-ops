@@ -416,7 +416,7 @@ model Inventory {
   locationId String
   productId  String
 
-  quantity    Int
+  quantity    Int // CHECK (quantity >= 0) — Inventory_quantity_nonnegative, in SQL only (Prisma doesn't model it)
   receivedAt  DateTime
   unitCost    Decimal
   source      String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"

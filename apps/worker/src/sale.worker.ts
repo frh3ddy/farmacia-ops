@@ -204,24 +204,16 @@ async function deductInventory(
     ', ',
   );
 
-  const updated = await client.$queryRaw<Array<{ id: string; quantity: number }>>(
+  // A batch can't go negative: the Inventory_quantity_nonnegative CHECK
+  // rejects this UPDATE, and with it the sale's transaction.
+  await client.$executeRaw(
     Prisma.sql`
       UPDATE "Inventory" AS inv
       SET quantity = inv.quantity - v.qty
       FROM (VALUES ${rows}) AS v(id, qty)
       WHERE inv.id = v.id
-      RETURNING inv.id, inv.quantity
     `,
   );
-
-  // Validate quantity doesn't go negative (database constraint should enforce)
-  const negative = updated.filter((row) => row.quantity < 0);
-  if (negative.length > 0) {
-    throw new DatabaseTransactionError(
-      `Inventory quantity went negative for batch(es): ` +
-        negative.map((row) => `${row.id} (${row.quantity})`).join(', '),
-    );
-  }
 }
 
 /**

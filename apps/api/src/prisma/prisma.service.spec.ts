@@ -2,8 +2,10 @@ import { assert } from 'riteway/vitest';
 import { PrismaService } from './prisma.service';
 
 // Nothing listens on this port; neither test opens a connection.
+afterEach(() => vi.unstubAllEnvs());
+
 const serviceWithPool = () => {
-  process.env.DATABASE_URL = 'postgresql://postgres@127.0.0.1:1/none';
+  vi.stubEnv('DATABASE_URL', 'postgresql://postgres@127.0.0.1:1/none');
   const service = new PrismaService();
   return { service, pool: service['pool'] };
 };
