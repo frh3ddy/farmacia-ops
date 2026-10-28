@@ -21,7 +21,7 @@ export class SaleReturnsController {
 
   /** Recent sales to return from, with what is left of each item. */
   @Get('recent')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER') // staff return in Square; by hand is the owner's fallback
   async recent(@Req() req: RoleGuardedRequest, @Query('locationId') locationId?: string, @Query('days') days?: string) {
     const scoped = scopedLocationId(req, locationId);
     const since = new Date(Date.now() - Math.min(Number(days) || 3, 14) * DAY_MS);
@@ -38,7 +38,7 @@ export class SaleReturnsController {
 
   /** The worker restocks and updates the sale, so this only queues the return. */
   @Post(':saleId/returns')
-  @Roles('OWNER', 'MANAGER', 'CASHIER')
+  @Roles('OWNER') // staff return in Square; by hand is the owner's fallback
   @HttpCode(202)
   async record(@Req() req: RoleGuardedRequest, @Param('saleId') saleId: string, @Body() body: ReturnBody) {
     const sale = await this.prisma.sale.findUnique({ where: { id: saleId }, include: { items: { include: { returns: true } } } });

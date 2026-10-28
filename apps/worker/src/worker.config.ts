@@ -28,7 +28,7 @@ export const WORKERS: WorkerConfig[] = [
     processor: (job: Job) => {
       debugLog('[DEBUG] [WORKER_CONFIG] Sales worker processor called for job:', job.id);
       debugLog('[DEBUG] [WORKER_CONFIG] Job data keys:', Object.keys(job.data || {}));
-      // Matching a custom amount and recording a return change a sale, so they share this queue.
+      // Matching a custom amount, a return and a Square refund change a sale, so they share this queue.
       if (job.name === 'match-sale-line') return processMatchJob(job);
       if (job.name === 'record-return') return processReturnJob(job);
       if (job.name === 'square-refund') return processRefundJob(job);

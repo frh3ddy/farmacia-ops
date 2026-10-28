@@ -425,3 +425,32 @@ test('an amount-only refund, a refund still pending, and a return of a sale neve
     unknown: await prisma.saleReturn.count({ where: { clientRequestId: 'square-return-line:rli-4' } }),
   }).toEqual({ revenue: 5, cost: 0, returns: 1, unknown: 0 });
 });
+
+test('a Square refund repeating a line already returned, and a line with no uid', async () => {
+  const prisma = getPrisma();
+  // Both p-1 jarabes are back (one by hand, one in the exchange); p-4's matched crema has 1 left.
+  const p4 = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-4' } });
+  getOrder.mockResolvedValue({
+    order: {
+      id: 'ro-5',
+      returns: [
+        {
+          returnLineItems: [
+            returnLine('rli-5', 'uid-v-jarabe', '1', 4500),
+            { ...returnLine('rli-x', 'uid-c2', '1', 1500), uid: undefined },
+            returnLine('rli-6', 'uid-c2', '1', 1500),
+          ],
+        },
+      ],
+    },
+  });
+
+  await processRefundJob(refundJob({ id: 'rf-5', order_id: 'ro-5', payment_id: 'p-1', amount: 6000 }));
+
+  expect({
+    jarabe: await prisma.saleReturn.count({ where: { clientRequestId: 'square-return-line:rli-5' } }),
+    noUid: await prisma.saleReturn.count({ where: { clientRequestId: 'square-return-line:undefined' } }),
+    // the rest of the refund is still taken back
+    crema: Number(p4.totalRevenue) - Number((await prisma.sale.findUniqueOrThrow({ where: { id: p4.id } })).totalRevenue),
+  }).toEqual({ jarabe: 0, noUid: 0, crema: 15 });
+});
