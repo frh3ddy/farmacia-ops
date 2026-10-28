@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
+import { assertCutOver } from './cutover-gate';
 import { buildTransferLines, resolveQuantityReceived } from './transfer';
 import { SquareClient, SquareEnvironment } from 'square';
 
@@ -151,6 +152,9 @@ export class TransferService {
     if (!product) throw new NotFoundException(`Product ${input.productId} not found`);
     if (!fromLocation) throw new NotFoundException(`Location ${input.fromLocationId} not found`);
     if (!toLocation) throw new NotFoundException(`Location ${input.toLocationId} not found`);
+    // The origin is checked by its TRANSFER_OUT adjustment; the destination would
+    // otherwise receive stock its cutover will count again.
+    await assertCutOver(this.prisma, input.toLocationId);
 
     const reason = input.reason ?? `Transfer to ${toLocation.name}`;
 

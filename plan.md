@@ -5,3 +5,4 @@
 - ✅ [Worker Hardening](tasks/worker-hardening-epic.md) — keep test sales out of production stock, fix Yastás payments in the sales check and multi-line orders, test the sale mapping, clean logs and dead code
 - ✅ [Dev Tools in Production](tasks/dev-tools-production-epic.md) — test sales, test inventory, catalog cleanup and full wipe refused in production
 - 📋 [Sale Accuracy](tasks/sale-accuracy-epic.md) — custom-amount lines matched later, Square refunds and hand returns put stock and revenue back
+- 📋 [Labor Timecards](tasks/labor-timecards-epic.md) — move payroll hours from Square's deprecated Shifts endpoints to Timecards before Square retires them

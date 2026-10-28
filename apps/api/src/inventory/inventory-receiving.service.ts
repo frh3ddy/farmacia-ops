@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
+import { assertCutOver } from './cutover-gate';
 
 // ============================================================================
 // Types
@@ -202,6 +203,8 @@ export class InventoryReceivingService {
     if (!location) {
       throw new NotFoundException(`Location ${input.locationId} not found`);
     }
+
+    await assertCutOver(this.prisma, input.locationId);
 
     // Check supplier if provided
     if (input.supplierId) {

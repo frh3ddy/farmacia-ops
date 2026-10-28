@@ -51,6 +51,21 @@ describe('TransferService (Postgres, Square recorded)', () => {
     });
   });
 
+  test('shipping to a location not cut over yet', async () => {
+    const { transfers, productId } = await transferSetup();
+    const { id: oriente } = await prisma.location.create({ data: { squareId: 'SQ-ORIENTE', name: 'Oriente' } });
+
+    const error = await transfers.ship({ productId, fromLocationId: centro, toLocationId: oriente, quantity: 6 })
+      .then(() => undefined, (e: Error) => e.message);
+
+    assert({
+      given: 'a transfer to a location whose cutover has not finished',
+      should: 'refuse it before taking any stock from the origin',
+      actual: [error, (await prisma.inventory.aggregate({ where: { productId }, _sum: { quantity: true } }))._sum.quantity],
+      expected: ['Esta sucursal aún no ha hecho su corte. Los movimientos de inventario se podrán registrar cuando termine.', 10],
+    });
+  });
+
   test('receiving less than was shipped', async () => {
     const { transfers, batchCreateChanges, productId } = await transferSetup();
     const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 });
