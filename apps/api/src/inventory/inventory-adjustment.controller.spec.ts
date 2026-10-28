@@ -126,7 +126,7 @@ describe('InventoryAdjustmentController.getAdjustment', () => {
       given: 'a manager asking for an adjustment at a store they are not assigned to',
       should: 'refuse it',
       actual: await outcome(controller.getAdjustment('a1', managerRequest())),
-      expected: 'Access denied to this location',
+      expected: 'No tienes acceso a esta sucursal',
     });
   });
 

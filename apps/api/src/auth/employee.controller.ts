@@ -104,7 +104,7 @@ export class EmployeeController {
     // Only OWNER can create other OWNERs
     if (body.role === 'OWNER' && currentLocation.role !== 'OWNER') {
       throw new HttpException(
-        { success: false, message: 'Only owners can create other owners' },
+        { success: false, message: 'Solo los propietarios pueden crear otros propietarios' },
         HttpStatus.FORBIDDEN
       );
     }
@@ -213,7 +213,7 @@ export class EmployeeController {
     // Prevent self-deactivation
     if (employeeId === currentEmployee.id) {
       throw new HttpException(
-        { success: false, message: 'Cannot deactivate yourself' },
+        { success: false, message: 'No puedes desactivarte a ti mismo' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -242,7 +242,7 @@ export class EmployeeController {
     // Validate PIN format
     if (!body.pin || !/^\d{4,6}$/.test(body.pin)) {
       throw new HttpException(
-        { success: false, message: 'PIN must be 4-6 digits' },
+        { success: false, message: 'El PIN debe tener de 4 a 6 dígitos' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -268,7 +268,7 @@ export class EmployeeController {
         ROLE_HIERARCHY[targetAssignment.role as EmployeeRole] >= ROLE_HIERARCHY[currentLocation.role as EmployeeRole]
       ) {
         throw new HttpException(
-          { success: false, message: 'Cannot manage employees of equal or higher role' },
+          { success: false, message: 'No puedes administrar empleados con un rol igual o superior al tuyo' },
           HttpStatus.FORBIDDEN
         );
       }
@@ -318,7 +318,7 @@ export class EmployeeController {
 
     if (!body.password || body.password.length < 8) {
       throw new HttpException(
-        { success: false, message: 'Password must be at least 8 characters' },
+        { success: false, message: 'La contraseña debe tener al menos 8 caracteres' },
         HttpStatus.BAD_REQUEST
       );
     }

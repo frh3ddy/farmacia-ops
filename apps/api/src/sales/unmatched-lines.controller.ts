@@ -32,11 +32,11 @@ export class UnmatchedLinesController {
     const line = await this.prisma.unmatchedSaleLine.findUnique({ where: { id }, include: { sale: true } });
     if (!line) throw new NotFoundException('Sale line not found');
     assertLocationAccess(req, line.sale.locationId);
-    if (line.matchedSaleItemId) throw new ConflictException('This line is already matched');
+    if (line.matchedSaleItemId) throw new ConflictException('Esta línea ya está asignada a un producto');
 
     const product = body?.productId ? await this.prisma.product.findUnique({ where: { id: body.productId } }) : null;
-    if (!product) throw new BadRequestException('Choose a product');
-    if (!product.tracksInventory) throw new BadRequestException(`${product.name} has no stock to take`);
+    if (!product) throw new BadRequestException('Elige un producto');
+    if (!product.tracksInventory) throw new BadRequestException(`${product.name} no tiene existencias`);
 
     await this.saleQueue.enqueueMatch({ lineId: line.id, productId: product.id, matchedBy: req.employee.id });
     return { success: true, queued: true };

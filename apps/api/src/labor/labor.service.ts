@@ -316,7 +316,7 @@ export class LaborService {
 
     if (period.startDate > period.endDate) {
       throw new HttpException(
-        { success: false, message: 'startDate must be before or equal to endDate' },
+        { success: false, message: 'La fecha de inicio debe ser anterior o igual a la de fin' },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -444,7 +444,7 @@ export class LaborService {
 
     if (updates.startAt === undefined && updates.endAt === undefined) {
       throw new HttpException(
-        { success: false, message: 'Provide startAt and/or endAt' },
+        { success: false, message: 'Indica la hora de entrada, la de salida o ambas' },
         HttpStatus.BAD_REQUEST,
       );
     }

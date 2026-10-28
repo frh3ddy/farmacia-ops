@@ -174,16 +174,16 @@ export class ProductsService {
 
     // Validate inputs
     if (!name || name.trim().length === 0) {
-      throw new BadRequestException('Product name is required');
+      throw new BadRequestException('El nombre del producto es obligatorio');
     }
     if (sellingPrice < 0) {
-      throw new BadRequestException('Selling price cannot be negative');
+      throw new BadRequestException('El precio de venta no puede ser negativo');
     }
     if (costPrice !== undefined && costPrice < 0) {
-      throw new BadRequestException('Cost price cannot be negative');
+      throw new BadRequestException('El costo no puede ser negativo');
     }
     if (initialStock !== undefined && initialStock < 0) {
-      throw new BadRequestException('Initial stock cannot be negative');
+      throw new BadRequestException('Las existencias iniciales no pueden ser negativas');
     }
 
     // Check SKU uniqueness if provided
@@ -192,7 +192,7 @@ export class ProductsService {
         where: { sku },
       });
       if (existingProduct) {
-        throw new BadRequestException(`A product with SKU "${sku}" already exists`);
+        throw new BadRequestException(`Ya existe un producto con el SKU "${sku}"`);
       }
     }
 
@@ -590,7 +590,7 @@ export class ProductsService {
     this.logger.log(`[PRODUCT] Updating price for product ${productId} to $${sellingPrice} ${CURRENCY}${applyToAllLocations ? ' (all locations)' : ''}`);
 
     if (sellingPrice < 0) {
-      throw new BadRequestException('Selling price cannot be negative');
+      throw new BadRequestException('El precio de venta no puede ser negativo');
     }
 
     // Find product with catalog mapping
@@ -1417,7 +1417,7 @@ export class ProductsService {
 
     if (looseProductId) {
       if (looseProductId === productId) {
-        throw new BadRequestException('A product cannot be its own looseProduct');
+        throw new BadRequestException('Un producto no puede ser su propio producto suelto');
       }
       const looseProduct = await this.prisma.product.findUnique({ where: { id: looseProductId } });
       if (!looseProduct) {
@@ -1425,7 +1425,7 @@ export class ProductsService {
       }
     }
     if (quantity !== undefined && quantity <= 0) {
-      throw new BadRequestException('quantity must be positive');
+      throw new BadRequestException('La cantidad debe ser mayor que cero');
     }
 
     return this.prisma.product.update({

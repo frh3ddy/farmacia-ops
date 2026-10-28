@@ -79,7 +79,7 @@ export class EmployeeService {
       });
       if (existing) {
         throw new HttpException(
-          { success: false, message: 'Email already in use' },
+          { success: false, message: 'Ese correo ya está en uso' },
           HttpStatus.CONFLICT
         );
       }
@@ -98,7 +98,7 @@ export class EmployeeService {
     if (password) {
       if (password.length < 8) {
         throw new HttpException(
-          { success: false, message: 'Password must be at least 8 characters' },
+          { success: false, message: 'La contraseña debe tener al menos 8 caracteres' },
           HttpStatus.BAD_REQUEST
         );
       }
@@ -189,7 +189,7 @@ export class EmployeeService {
       });
       if (existing) {
         throw new HttpException(
-          { success: false, message: 'Email already in use' },
+          { success: false, message: 'Ese correo ya está en uso' },
           HttpStatus.CONFLICT
         );
       }
@@ -382,7 +382,7 @@ export class EmployeeService {
   private validatePIN(pin: string) {
     if (!/^\d{4,6}$/.test(pin)) {
       throw new HttpException(
-        { success: false, message: 'PIN must be 4-6 digits' },
+        { success: false, message: 'El PIN debe tener de 4 a 6 dígitos' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -409,7 +409,7 @@ export class EmployeeService {
       if (employee.pin && employee.pinSalt) {
         if (this.authService.verifyPIN(pin, employee.pin, employee.pinSalt)) {
           throw new HttpException(
-            { success: false, message: 'PIN already in use at this location' },
+            { success: false, message: 'Ese PIN ya está en uso en esta sucursal' },
             HttpStatus.CONFLICT
           );
         }
@@ -514,7 +514,7 @@ export class EmployeeService {
   async setPassword(employeeId: string, password: string, setBy?: string) {
     if (password.length < 8) {
       throw new HttpException(
-        { success: false, message: 'Password must be at least 8 characters' },
+        { success: false, message: 'La contraseña debe tener al menos 8 caracteres' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -790,7 +790,7 @@ export class EmployeeService {
     const status = await this.getSetupStatus();
     if (!status.needsSetup) {
       throw new HttpException(
-        { success: false, message: 'Setup has already been completed. An owner account already exists.' },
+        { success: false, message: 'La configuración inicial ya se completó: ya existe una cuenta de propietario' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -798,28 +798,28 @@ export class EmployeeService {
     // Validate inputs
     if (!input.ownerName || input.ownerName.trim().length < 2) {
       throw new HttpException(
-        { success: false, message: 'Owner name must be at least 2 characters' },
+        { success: false, message: 'El nombre del propietario debe tener al menos 2 caracteres' },
         HttpStatus.BAD_REQUEST
       );
     }
 
     if (!input.ownerEmail || !input.ownerEmail.includes('@')) {
       throw new HttpException(
-        { success: false, message: 'Valid email is required' },
+        { success: false, message: 'Escribe un correo válido' },
         HttpStatus.BAD_REQUEST
       );
     }
 
     if (!input.ownerPassword || input.ownerPassword.length < 6) {
       throw new HttpException(
-        { success: false, message: 'Password must be at least 6 characters' },
+        { success: false, message: 'La contraseña debe tener al menos 6 caracteres' },
         HttpStatus.BAD_REQUEST
       );
     }
 
     if (!input.ownerPin || !/^\d{4,6}$/.test(input.ownerPin)) {
       throw new HttpException(
-        { success: false, message: 'PIN must be 4-6 digits' },
+        { success: false, message: 'El PIN debe tener de 4 a 6 dígitos' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -827,7 +827,7 @@ export class EmployeeService {
     // Must provide either locationId or locationName
     if (!input.locationId && (!input.locationName || input.locationName.trim().length < 2)) {
       throw new HttpException(
-        { success: false, message: 'Either select an existing location or provide a new location name (at least 2 characters)' },
+        { success: false, message: 'Elige una sucursal existente o escribe el nombre de una nueva (al menos 2 caracteres)' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -844,7 +844,7 @@ export class EmployeeService {
         });
         if (!location) {
           throw new HttpException(
-            { success: false, message: 'Selected location not found' },
+            { success: false, message: 'No se encontró la sucursal elegida' },
             HttpStatus.NOT_FOUND
           );
         }

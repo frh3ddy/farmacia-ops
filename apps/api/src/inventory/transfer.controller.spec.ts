@@ -33,7 +33,7 @@ describe('TransferController.ship', () => {
       given: 'a manager shipping from a store they are not assigned to',
       should: 'refuse the shipment',
       actual: await outcome(controller.ship(body as any, managerRequest())),
-      expected: 'Access denied to this location',
+      expected: 'No tienes acceso a esta sucursal',
     });
     assert({
       given: 'a refused shipment',
@@ -69,7 +69,7 @@ describe('TransferController.receive', () => {
       given: 'a manager receiving a transfer headed to a different store',
       should: 'refuse the receipt',
       actual: await outcome(controller.receive('t1', {} as any, managerRequest())),
-      expected: 'Access denied to this location',
+      expected: 'No tienes acceso a esta sucursal',
     });
     assert({
       given: 'a refused receipt',

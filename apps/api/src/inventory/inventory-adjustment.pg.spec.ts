@@ -96,7 +96,7 @@ describe('InventoryAdjustmentService.createAdjustment (Postgres)', () => {
       given: 'a batch emptied after it was read',
       should: 'refuse the removal as a retryable conflict',
       actual: error,
-      expected: 'Stock changed while recording this adjustment — please retry',
+      expected: 'Las existencias cambiaron mientras se registraba el ajuste. Inténtalo de nuevo.',
     });
     assert({
       given: 'the refused removal',
@@ -319,7 +319,7 @@ describe('InventoryAdjustmentService.createAdjustment cutover (Postgres)', () =>
       given: 'a location whose cutover has not finished',
       should: 'refuse the adjustment, since the cutover would count that stock again',
       actual: [error, await prisma.inventory.count({ where: { productId } })],
-      expected: ['This location has not been cut over yet. Adjustments start once its cutover is complete.', 0],
+      expected: ['Esta sucursal aún no ha hecho su corte. Los ajustes se podrán registrar cuando termine.', 0],
     });
   });
 
@@ -356,7 +356,7 @@ describe('InventoryAdjustmentService.createAdjustment cutover (Postgres)', () =>
       given: 'an adjustment dated before the location\'s cutover',
       should: 'refuse it',
       actual: error,
-      expected: 'Cannot make adjustments before the cutover date. The inventory for this location is locked.',
+      expected: 'No se pueden registrar ajustes con fecha anterior al corte: el inventario de esta sucursal está cerrado hasta esa fecha.',
     });
   });
 });

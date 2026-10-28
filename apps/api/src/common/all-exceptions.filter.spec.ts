@@ -30,8 +30,8 @@ describe('AllExceptionsFilter', () => {
     assert({
       given: 'a request refused with 403',
       should: 'log who asked for what, and why it was refused',
-      actual: warningsFor(refused(HttpStatus.FORBIDDEN, 'Access denied to this location')),
-      expected: ['[ACCESS] 403 GET /inventory/reports/cogs employee=e1 ip=10.0.0.7: Access denied to this location'],
+      actual: warningsFor(refused(HttpStatus.FORBIDDEN, 'No tienes acceso a esta sucursal')),
+      expected: ['[ACCESS] 403 GET /inventory/reports/cogs employee=e1 ip=10.0.0.7: No tienes acceso a esta sucursal'],
     });
   });
 
