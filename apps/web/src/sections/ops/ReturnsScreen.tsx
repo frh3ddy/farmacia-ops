@@ -166,7 +166,7 @@ export function ReturnsHistoryScreen() {
           {returns.map(r => (
             <li key={r.id} className="p-3 text-sm">
               <p className="font-medium text-(--color-ink)">
-                {r.items.map(i => `${i.quantity} × ${i.saleItem.product.name}`).join(", ")} · ${Number(r.revenue).toFixed(2)}
+                {r.items.length ? r.items.map(i => `${i.quantity} × ${i.saleItem.product.name}`).join(", ") : "Solo importe"} · ${Number(r.revenue).toFixed(2)}
               </p>
               <p className="text-(--color-ink-tertiary)">
                 {dateTime(r.returnedAt)} · {r.sale.location.name} · {r.returnedByName ?? "—"}

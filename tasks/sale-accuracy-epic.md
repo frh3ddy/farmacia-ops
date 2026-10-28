@@ -32,18 +32,39 @@ Progress:
 
 ---
 
-## Record Square refunds
+## ✅ Record Square refunds, returns and exchanges
+
+Decision (owner, 2026-10-27): staff do returns in Square (refund permission on their role, Staff → Team → Permissions), so Square's money and stock stay right; the app follows Square. The by-hand screen (task 3) is set aside.
+
+Square check (2026-10-27, MCP, real data):
+- A refund carries `payment_id` (our `Sale.squareId`) and `order_id`, a return order with `returns[].return_line_items` (what came back, each with `source_line_item_uid`, the sold line; none has a `catalog_object_id` on a custom amount) and `line_items` (what the customer took instead, for an exchange: VOLFENAC $65 back, Diclofenaco crema $58 out, $7 refunded).
+- An exchange where the customer pays the difference is a plain `payment.created` (Oriente, Dulce damy $1 back, Trident $3 out, $2 paid) whose order holds both `line_items` and `returns`; there is no refund.
+- Square restocks itself (SOLD → RETURNED_BY_CUSTOMER → IN_STOCK). That restock change carries no refund or order id, so the app can't tell a restocked unit from one that wasn't; it assumes Square restocked.
+- Square's test events reuse one `event_id` (`13b867cf-…`) and fake ids, so they only prove the URL and signature; test with a real refund.
 
 **Requirements**:
-- Given a Square refund on a recorded sale (`refund.created` / `refund.updated` reaching COMPLETED), should reduce that sale's revenue by the refunded amount, once per refund id
-- Given a refund with returned line items, should put each returned item back into stock as a `RETURN` batch at the cost it was sold at
-- Given a refund without line items (amount only), should reduce revenue without moving stock
-- Given the webhook, should queue refund events durably like payments (2xx only after queueing, idempotent on `event_id`)
-- Given the nightly sales check, should flag a Square refund with no matching record
+- ✅ Given `refund.created` or `refund.updated` with status COMPLETED, should queue it (2xx after queueing) and record it once, whichever arrives first; other statuses are ignored
+- ✅ Given a returned product line, should take it off the sale it was sold on (found through `source_line_item_uid`) and put the units back as a `RETURN` batch at their sold unit cost
+- ✅ Given a returned custom amount, should take its amount off the sale without moving stock — or, once matched to a product, return it like a product
+- ✅ Given a refund with no return lines (amount only), should take its amount off the paid sale
+- ✅ Given an exchange in a refund, should record what the customer took as a sale keyed on the refund id, with FIFO cost
+- ✅ Given an exchange where the customer pays the difference, should record the returns in the payment's order as well as its sale
+- ✅ Given a return made in Square, should not push stock to Square and should show as up to date in the returns history
+- ✅ Given a return of a line with no recorded sale (sold before recording started), should record nothing and log why
+
+Done: `SaleItem.squareLineUid` (migration `20261028160000_sale_item_square_line`); the webhook queues completed refunds as `square-refund` jobs (`SaleQueue.enqueueRefund`); the worker's `processRefundJob` and `recordSquareReturns`, and `processSaleJob` takes back an order's returns before recording its sale. Each returned line is one `SaleReturn` keyed `square-return-line:<uid>`; an amount-only refund is keyed `square-refund:<id>`.
+
+Square webhook subscription: `refund.created` and `refund.updated` both on (owner added `refund.created` 2026-10-27).
+
+Known gaps:
+- A return of something sold before sales recording started puts nothing back in the app's stock, though Square restocks it; the next recount corrects it. Add a plain `RETURN` adjustment at the product's last cost if this turns out to be frequent after go-live.
+- If staff turn off restock on an itemized refund in Square, the app still restocks.
 
 ---
 
-## ✅ Employee returns screen (by hand)
+## ⏸ Employee returns screen (by hand)
+
+Set aside 2026-10-27 on `feature/employee-returns` (not merged): returns go through Square instead. Task 2 builds on this branch's `recordReturn`, `SaleReturn` and `saleItemNet`; the screens and `POST /api/sales/:saleId/returns` can be dropped or kept for owners when task 2 merges.
 
 **Requirements**:
 - Given any employee (not only managers) at their location, should find a recent sale and return some or all of its items, with a reason — the owner decided employees can do returns without the owner's PIN, so the audit list below is the control

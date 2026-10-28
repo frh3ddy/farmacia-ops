@@ -1,5 +1,5 @@
 import { Job, Queue } from 'bullmq';
-import { getPrisma, processMatchJob, processReturnJob, processSaleJob } from './sale.worker';
+import { getPrisma, processMatchJob, processRefundJob, processReturnJob, processSaleJob } from './sale.worker';
 import { integrityDeps, runIntegrityChecks } from './integrity-run';
 import { debugLog } from './debug-log';
 
@@ -31,6 +31,7 @@ export const WORKERS: WorkerConfig[] = [
       // Matching a custom amount and recording a return change a sale, so they share this queue.
       if (job.name === 'match-sale-line') return processMatchJob(job);
       if (job.name === 'record-return') return processReturnJob(job);
+      if (job.name === 'square-refund') return processRefundJob(job);
       return processSaleJob(job);
     },
     concurrency: 5,

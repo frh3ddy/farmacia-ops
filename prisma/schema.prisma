@@ -535,6 +535,8 @@ model SaleItem {
   price    Decimal
   cost     Decimal
 
+  squareLineUid String? // the Square order line, so a Square return finds what it takes back
+
   sale    Sale    @relation(fields: [saleId], references: [id])
   product Product @relation(fields: [productId], references: [id])
 
@@ -543,6 +545,8 @@ model SaleItem {
 
   matchedFrom UnmatchedSaleLine?
   returns     SaleReturnItem[]
+
+  @@index([squareLineUid])
 }
 
 // ============================================================================

@@ -10,7 +10,7 @@ import {
   UnmappedVariationError,
 } from './errors';
 import { mapVariationToProduct, type MappedProduct } from './catalog.mapper';
-import { toSaleLines } from './sale-lines';
+import { toSaleLines, type OrderLine } from './sale-lines';
 import { consumeBatchesFifo, type ConsumedBatch, type FifoConsumptionResult } from './fifo';
 import { debugLog } from './debug-log';
 
@@ -237,6 +237,7 @@ async function processSaleItem(
   quantitySold: number,
   salePrice: Prisma.Decimal | string | number,
   squareId: string,
+  squareLineUid: string | null,
   client: Prisma.TransactionClient,
 ): Promise<SaleItemOutput> {
   // Step 1: Calculate FIFO cost (this queries inventory)
@@ -253,6 +254,7 @@ async function processSaleItem(
       quantity: quantitySold,
       price: salePrice,
       cost: costResult.totalCost, // Immutable - never recalculated
+      squareLineUid,
     },
   });
 
@@ -519,12 +521,31 @@ export async function processSaleJob(job: Job): Promise<void> {
     }
   }
 
-  // Extract line items from order
-  debugLog('[DEBUG] Extracting line items from order...');
-  const orderLineItems = order.lineItems || [];
-  debugLog('[DEBUG] Found', orderLineItems.length, 'line items in order');
+  // An exchange where the customer pays the difference: the order also lists what came back.
+  await recordSquareReturns(returnLines(order), 'Cambio en Square');
+  await recordOrderSale(order, { orderId, squareId, locationId, createdAt });
+}
 
-  if (!orderLineItems || orderLineItems.length === 0) {
+/** What a Square order took back: its `returns`' lines, each pointing at the sold line. */
+type ReturnLine = {
+  uid?: string | null;
+  sourceLineItemUid?: string | null;
+  quantity?: string | null;
+  totalMoney?: { amount?: bigint | number | null } | null;
+};
+type SquareOrder = { lineItems?: OrderLine[] | null; returns?: Array<{ returnLineItems?: ReturnLine[] | null }> | null };
+
+const returnLines = (order: SquareOrder) => (order.returns ?? []).flatMap((r) => r.returnLineItems ?? []);
+
+/** Records an order's line items as a sale: FIFO stock and cost, Yastás lines and custom amounts. */
+async function recordOrderSale(
+  order: SquareOrder,
+  { orderId, squareId, locationId, createdAt }: { orderId: string; squareId: string; locationId: string; createdAt: Date },
+): Promise<void> {
+  const orderLineItems = order.lineItems || [];
+
+  if (orderLineItems.length === 0) {
+    if (returnLines(order).length > 0) return; // only took items back
     console.error('[DEBUG] ERROR: Order has no line items');
     throw new SaleValidationError(
       'Order has no line items',
@@ -665,6 +686,7 @@ export async function processSaleJob(job: Job): Promise<void> {
               lineItem.quantitySold,
               new Prisma.Decimal(lineItem.salePrice),
               squareId,
+              lineItem.lineUid,
               tx,
             );
             debugLog(`[DEBUG] [TX] ✓ Line item ${i + 1} processed:`, {
@@ -797,6 +819,7 @@ export async function processMatchJob(job: Job<{ lineId: string; productId: stri
       line.quantity,
       line.amount.div(line.quantity),
       line.sale.squareId,
+      null, // a return finds it through the matched line
       tx,
     );
     // Conditional, so two jobs racing on one line can't both match it.
@@ -831,14 +854,21 @@ export async function processReturnJob(job: Job<ReturnJobData>): Promise<void> {
   await syncReturnToSquare(job.data.clientRequestId);
 }
 
-async function recordReturn({ saleId, items, reason, returnedBy, clientRequestId }: ReturnJobData): Promise<void> {
+/**
+ * A return as recordReturn takes it. `squareRestocked`: Square already put the
+ * units back (a return made in Square). `amountOnly`: money back with no stock
+ * (a custom amount, or a refund of an amount); `items` is then empty.
+ */
+type ReturnInput = Omit<ReturnJobData, 'returnedBy'> & { returnedBy?: string; squareRestocked?: boolean; amountOnly?: Prisma.Decimal };
+
+async function recordReturn({ saleId, items, reason, returnedBy, clientRequestId, squareRestocked, amountOnly }: ReturnInput): Promise<void> {
   await getPrisma().$transaction(async (tx) => {
     if (await tx.saleReturn.findUnique({ where: { clientRequestId } })) return;
     // Jobs run concurrently: lock the sale so two returns can't both pass the "left to return" check.
     await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`;
     const sale = await tx.sale.findUniqueOrThrow({ where: { id: saleId }, include: { items: { include: { returns: true } } } });
 
-    let revenue = new Prisma.Decimal(0);
+    let revenue = amountOnly ?? new Prisma.Decimal(0);
     let cost = new Prisma.Decimal(0);
     const returned = [];
     for (const { saleItemId, quantity } of items) {
@@ -863,6 +893,7 @@ async function recordReturn({ saleId, items, reason, returnedBy, clientRequestId
           reason: reason ?? 'Customer return',
           notes: `saleId=${saleId}`,
           adjustedBy: returnedBy,
+          ...(squareRestocked && { squareSynced: true, squareSyncedAt: new Date() }),
         },
       });
       const itemRevenue = item.price.mul(quantity);
@@ -878,6 +909,87 @@ async function recordReturn({ saleId, items, reason, returnedBy, clientRequestId
       data: { totalRevenue: { decrement: revenue }, totalCost: { decrement: cost }, grossProfit: { decrement: revenue.sub(cost) } },
     });
   });
+}
+
+/**
+ * Takes back what a Square order returned, against the sale each line was sold
+ * on. Square restocked the units itself, so nothing is sent back to it. A line
+ * sold before sales were recorded has no sale to take it from and is skipped.
+ */
+async function recordSquareReturns(lines: ReturnLine[], reason: string): Promise<void> {
+  const prisma = getPrisma();
+  for (const line of lines) {
+    const source = line.sourceLineItemUid;
+    const clientRequestId = `square-return-line:${line.uid}`;
+    const quantity = line.quantity ? parseInt(line.quantity, 10) : 1;
+    // A custom amount matched later took its stock through its matched sale item.
+    const item = source
+      ? await prisma.saleItem.findFirst({ where: { OR: [{ squareLineUid: source }, { matchedFrom: { is: { squareLineUid: source } } }] } })
+      : null;
+    if (item) {
+      await recordReturn({ saleId: item.saleId, items: [{ saleItemId: item.id, quantity }], reason, clientRequestId, squareRestocked: true });
+      continue;
+    }
+    const custom = source ? await prisma.unmatchedSaleLine.findFirst({ where: { squareLineUid: source } }) : null;
+    if (custom) {
+      await recordReturn({ saleId: custom.saleId, items: [], reason, clientRequestId, amountOnly: centavos(line.totalMoney?.amount) });
+      continue;
+    }
+    console.warn(`[SALE_WORKER] Square return line ${line.uid} has no recorded sale line (${source}); nothing taken back`);
+  }
+}
+
+const centavos = (amount: bigint | number | null | undefined) => new Prisma.Decimal(String(amount ?? 0)).div(100);
+
+/** A Square refund webhook event's refund (snake_case, as Square sends it). */
+type SquareRefund = {
+  id: string;
+  status: string;
+  order_id?: string;
+  payment_id?: string;
+  location_id: string;
+  reason?: string;
+  amount_money?: { amount?: number };
+  created_at?: string;
+};
+
+/**
+ * A refund made in Square: takes back what its order returned and records what
+ * the customer took instead (an exchange) as a sale keyed on the refund. A
+ * refund with nothing returned takes its amount off the paid sale. Each part is
+ * recorded once, so refund.created and refund.updated can both arrive.
+ */
+export async function processRefundJob(job: Job): Promise<void> {
+  const refund: SquareRefund | undefined = job.data?.payload?.object?.refund;
+  if (!refund?.id || !refund.order_id) {
+    throw new SaleValidationError('Refund event missing refund id or order_id', { jobId: job.id });
+  }
+  if (refund.status !== 'COMPLETED') return;
+
+  const { order } = await getSquareClient().orders.get({ orderId: refund.order_id });
+  if (!order) throw new SaleValidationError(`Order ${refund.order_id} not found in Square`, { refundId: refund.id });
+
+  const reason = refund.reason?.trim() || 'Reembolso en Square';
+  const lines = returnLines(order);
+  await recordSquareReturns(lines, reason);
+
+  if (lines.length === 0) {
+    const sale = refund.payment_id ? await getPrisma().sale.findUnique({ where: { squareId: refund.payment_id } }) : null;
+    if (!sale) {
+      console.warn(`[SALE_WORKER] Refund ${refund.id} is for payment ${refund.payment_id}, which has no recorded sale; nothing taken back`);
+    } else {
+      await recordReturn({ saleId: sale.id, items: [], reason, clientRequestId: `square-refund:${refund.id}`, amountOnly: centavos(refund.amount_money?.amount) });
+    }
+  }
+
+  if (order.lineItems?.length && !(await getPrisma().sale.findUnique({ where: { squareId: refund.id } }))) {
+    await recordOrderSale(order, {
+      orderId: refund.order_id,
+      squareId: refund.id,
+      locationId: refund.location_id,
+      createdAt: refund.created_at ? new Date(refund.created_at) : new Date(),
+    });
+  }
 }
 
 /**
