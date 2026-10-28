@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException, ConflictException, NotFoundExc
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, AdjustmentType } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
+import { assertCutOver } from './cutover-gate';
 
 // ============================================================================
 // Types
@@ -252,23 +253,7 @@ export class InventoryAdjustmentService {
       throw new BadRequestException('La fecha del ajuste no puede ser futura');
     }
 
-    // Finishing a location's cutover writes its lock. Before that, the cutover
-    // will set the location's opening stock from Square's counts, which would
-    // count an adjustment's stock change a second time (or drop it).
-    const lock = await this.prisma.cutoverLock.findFirst({
-      where: { OR: [{ locationId: input.locationId }, { locationId: null }], isLocked: true },
-      orderBy: { cutoverDate: 'desc' },
-    });
-    if (!lock) {
-      throw new BadRequestException(
-        'Esta sucursal aún no ha hecho su corte. Los ajustes se podrán registrar cuando termine.'
-      );
-    }
-    if ((input.effectiveDate || new Date()) <= lock.cutoverDate) {
-      throw new BadRequestException(
-        'No se pueden registrar ajustes con fecha anterior al corte: el inventario de esta sucursal está cerrado hasta esa fecha.'
-      );
-    }
+    await assertCutOver(this.prisma, input.locationId, input.effectiveDate);
 
     try {
       if (input.quantity < 0) {
