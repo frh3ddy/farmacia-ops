@@ -53,6 +53,7 @@ Every Square payment must have become a `Sale` (`Sale.squareId` is the Square pa
 - Given a payment whose sale job failed (e.g. `SaleValidationError` for a payment with no order), should report it as a failed job to replay, not as a lost sale
 - Given a payment received after the check's cutoff (still in the queue), should not report it
 - Given Square unreachable, should log that the check could not run and try again the next night, not retry in a loop (handled by the nightly job: `loadSalesCheck` throws, the job logs it)
+- Given sales not being recorded yet (they start only once every location is cut over), should check nothing: only locations with a `CutoverLock`, and only payments after both that location's cutover date and `SALES_RECORDING_STARTED_AT` (a worker variable, set when recording is turned on; unset = no sales check). Added 2026-10-27 (`salesCheckScope`).
 
 ---
 

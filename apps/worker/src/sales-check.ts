@@ -37,25 +37,55 @@ export function salesMismatches({ payments, recordedPaymentIds, failedJobPayment
     }));
 }
 
-/** Reads one window of Square payments for every app location, and what the app recorded for them. */
+/**
+ * Where, and since when, a Square payment must have a sale: sales are recorded
+ * only once every location is cut over, so only cut-over locations (a
+ * CutoverLock; one with no location covers all) and only from the latest of the
+ * window, the location's cutover and `startedAt` (SALES_RECORDING_STARTED_AT).
+ * Not started: nothing to check.
+ */
+export function salesCheckScope(
+  locations: Array<{ id: string; squareId: string | null }>,
+  locks: Array<{ locationId: string | null; cutoverDate: Date }>,
+  startedAt: string | undefined,
+  window: { from: Date; cutoff: Date },
+): Array<{ locationId: string; squareId: string; from: Date }> {
+  if (!startedAt) return [];
+  const started = new Date(startedAt);
+  if (isNaN(started.getTime())) throw new Error(`SALES_RECORDING_STARTED_AT is not a date: ${startedAt}`);
+
+  return locations.flatMap((location) => {
+    const cutovers = locks.filter((l) => l.locationId === location.id || l.locationId === null).map((l) => l.cutoverDate.getTime());
+    if (!location.squareId || cutovers.length === 0) return [];
+    const from = new Date(Math.max(window.from.getTime(), started.getTime(), ...cutovers));
+    return from < window.cutoff ? [{ locationId: location.id, squareId: location.squareId, from }] : [];
+  });
+}
+
+/** Reads one window of Square payments for the checked locations, and what the app recorded for them. */
 export async function loadSalesCheck(
   prisma: PrismaClient,
   salesQueue: Pick<Queue, 'getFailed'>,
   window: { from: Date; cutoff: Date },
 ): Promise<SalesCheckInput> {
-  const locations = await prisma.location.findMany({ where: { squareId: { not: null } }, select: { id: true, squareId: true } });
+  const scope = salesCheckScope(
+    await prisma.location.findMany({ where: { squareId: { not: null } }, select: { id: true, squareId: true } }),
+    await prisma.cutoverLock.findMany({ where: { isLocked: true }, select: { locationId: true, cutoverDate: true } }),
+    process.env.SALES_RECORDING_STARTED_AT,
+    window,
+  );
 
   const payments: SquarePayment[] = [];
-  for (const location of locations) {
+  for (const location of scope) {
     const page = await getSquareClient().payments.list({
-      locationId: location.squareId!,
-      beginTime: window.from.toISOString(),
+      locationId: location.squareId,
+      beginTime: location.from.toISOString(),
       endTime: window.cutoff.toISOString(),
       sortOrder: 'ASC',
     });
     for await (const payment of page) {
       if (payment.id && payment.status && payment.createdAt) {
-        payments.push({ id: payment.id, locationId: location.id, status: payment.status, createdAt: payment.createdAt });
+        payments.push({ id: payment.id, locationId: location.locationId, status: payment.status, createdAt: payment.createdAt });
       }
     }
   }
