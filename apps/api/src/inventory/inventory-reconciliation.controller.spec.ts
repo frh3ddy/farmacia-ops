@@ -23,3 +23,33 @@ describe('InventoryReconciliationController routes', () => {
     });
   });
 });
+
+describe('InventoryReconciliationController.getSaleItemConsumption', () => {
+  test("a sale item's FIFO trail", async () => {
+    const managerRequest = {
+      currentLocation: { role: 'MANAGER', locationId: 'centro' },
+      accessibleLocations: [{ locationId: 'centro', isActive: true }],
+    } as any; // fixture: only the fields the controller reads
+    const consumption = (batchLocationId: string) => ({
+      batchLocationId,
+      unitCost: { toString: () => '2' },
+      totalCost: { toString: () => '2' },
+      batchReceivedAt: new Date('2026-10-01'),
+      consumedAt: new Date('2026-10-02'),
+      quantityConsumed: 1,
+    });
+    const outcomeAt = (locationId: string) => {
+      const service = { getSaleItemConsumption: vi.fn().mockResolvedValue([consumption(locationId)]) };
+      return new InventoryReconciliationController(service as any)
+        .getSaleItemConsumption('si1', managerRequest)
+        .then(() => 'done', (e: any) => e.response?.message ?? e.message);
+    };
+
+    assert({
+      given: "a manager of Centro opening a Norte sale item's batches, then a Centro one's",
+      should: "refuse Norte's and show Centro's",
+      actual: [await outcomeAt('norte'), await outcomeAt('centro')],
+      expected: ['No tienes acceso a esta sucursal', 'done'],
+    });
+  });
+});

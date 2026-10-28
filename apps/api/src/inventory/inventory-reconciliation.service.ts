@@ -104,6 +104,7 @@ export class InventoryReconciliationService {
         inventory: {
           select: {
             id: true,
+            locationId: true,
             receivedAt: true,
             source: true,
             costSource: true,
@@ -118,6 +119,7 @@ export class InventoryReconciliationService {
     return consumptions.map(c => ({
       consumptionId: c.id,
       inventoryBatchId: c.inventoryId,
+      batchLocationId: c.inventory.locationId,
       batchReceivedAt: c.inventory.receivedAt,
       batchSource: c.inventory.source,
       batchCostSource: c.inventory.costSource,

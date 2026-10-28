@@ -54,3 +54,21 @@ describe('InventoryReportsController.getDashboardSummary', () => {
     });
   });
 });
+
+describe('InventoryReportsController.getBatchDetail', () => {
+  test('a batch by id', async () => {
+    const outcomeAt = (locationId: string) => {
+      const reports = { getBatchDetail: vi.fn().mockResolvedValue({ batchId: 'b1', locationId }) };
+      return new InventoryReportsController(reports as any)
+        .getBatchDetail('b1', requestAs('MANAGER'))
+        .then(() => 'done', (e: any) => e.response?.message ?? e.message);
+    };
+
+    assert({
+      given: "a manager of Centro opening one of Norte's batches, then one of Centro's",
+      should: "refuse Norte's and show Centro's",
+      actual: [await outcomeAt('norte'), await outcomeAt('centro')],
+      expected: ['No tienes acceso a esta sucursal', 'done'],
+    });
+  });
+});

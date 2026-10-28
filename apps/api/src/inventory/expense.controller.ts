@@ -32,6 +32,17 @@ function parseDateString(dateStr: string): Date {
   return new Date(dateStr);
 }
 
+/** A 400 naming the valid types unless `type` is one of them. */
+function assertExpenseType(type: unknown): void {
+  const validTypes = Object.values(ExpenseType);
+  if (!validTypes.includes(type as ExpenseType)) {
+    throw new HttpException(
+      { success: false, message: `Invalid expense type. Must be one of: ${validTypes.join(', ')}` },
+      HttpStatus.BAD_REQUEST
+    );
+  }
+}
+
 // DTOs
 interface CreateExpenseDto {
   locationId: string;
@@ -151,13 +162,7 @@ export class ExpenseController {
       );
     }
 
-    const validTypes = Object.values(ExpenseType);
-    if (!validTypes.includes(body.type)) {
-      throw new HttpException(
-        { success: false, message: `Invalid expense type. Must be one of: ${validTypes.join(', ')}` },
-        HttpStatus.BAD_REQUEST
-      );
-    }
+    assertExpenseType(body.type);
 
     const expense = await this.expenseService.createExpense({
       locationId,
@@ -213,6 +218,7 @@ export class ExpenseController {
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async updateExpense(@Param('id') id: string, @Body() body: Partial<CreateExpenseDto>, @Req() req: GuardedRequest) {
     assertLocationAccess(req, (await this.expenseService.getExpense(id)).locationId);
+    if (body.type !== undefined) assertExpenseType(body.type);
     const expense = await this.expenseService.updateExpense(id, {
       type: body.type,
       amount: body.amount,

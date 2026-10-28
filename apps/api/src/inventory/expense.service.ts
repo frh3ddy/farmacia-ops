@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, ExpenseType } from '@prisma/client';
 
@@ -43,6 +43,13 @@ interface ExpenseSummary {
   }>;
 }
 
+/** The controller's DTO is a plain interface, so nothing has checked what the client sent. */
+function assertAmount(amount: unknown): void {
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+    throw new BadRequestException('El monto del gasto debe ser un número mayor que cero');
+  }
+}
+
 // ============================================================================
 // Service
 // ============================================================================
@@ -58,16 +65,14 @@ export class ExpenseService {
   // --------------------------------------------------------------------------
   async createExpense(input: CreateExpenseInput) {
     this.logger.log(`[EXPENSE] Creating ${input.type} expense: $${input.amount}`);
+    assertAmount(input.amount);
 
     // Idempotent replay: the offline-queue (iOS) may retry a write whose
     // original response was lost after it actually committed. Recognize the
     // client-supplied dedup key and return the existing row instead of
     // creating a duplicate expense.
     if (input.clientRequestId) {
-      const existing = await this.prisma.expense.findUnique({
-        where: { clientRequestId: input.clientRequestId },
-        include: { location: { select: { id: true, name: true } } },
-      });
+      const existing = await this.findByClientRequestId(input);
       if (existing) {
         this.logger.log(`[EXPENSE] Duplicate clientRequestId ${input.clientRequestId} — returning existing expense ${existing.id}`);
         return existing;
@@ -92,15 +97,41 @@ export class ExpenseService {
       include: {
         location: { select: { id: true, name: true } },
       },
+    }).catch(async (error) => {
+      // Two copies of the same replay raced past the lookup above; the loser's
+      // insert hits the unique dedup key.
+      if (input.clientRequestId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.findByClientRequestId(input);
+        if (existing) return existing;
+      }
+      throw error;
     });
 
     return expense;
+  }
+
+  private async findByClientRequestId(input: CreateExpenseInput) {
+    const existing = await this.prisma.expense.findUnique({
+      where: { clientRequestId: input.clientRequestId },
+      include: { location: { select: { id: true, name: true } } },
+    });
+    if (!existing) return null;
+    // A replay repeats its request exactly. Anything else reusing the key is a
+    // client bug — or a probe for another location's expense.
+    const sameRequest = existing.locationId === input.locationId
+      && existing.type === input.type
+      && existing.amount.equals(input.amount);
+    if (!sameRequest) {
+      throw new ConflictException('This clientRequestId was already used for a different expense');
+    }
+    return existing;
   }
 
   // --------------------------------------------------------------------------
   // Update expense
   // --------------------------------------------------------------------------
   async updateExpense(id: string, updates: Partial<CreateExpenseInput>) {
+    if (updates.amount !== undefined) assertAmount(updates.amount);
     const expense = await this.prisma.expense.update({
       where: { id },
       data: {
