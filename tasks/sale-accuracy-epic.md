@@ -14,7 +14,7 @@ Follows the open questions in `tasks/worker-hardening-epic.md`, answered by the 
 
 ---
 
-## Record custom-amount lines for later matching
+## ✅ Record custom-amount lines for later matching
 
 **Requirements**:
 - Given a sale with a custom-amount line, should record its description and amount, count it in the sale's revenue, and leave its cost pending
@@ -28,7 +28,7 @@ Square check (2026-10-27): 500 orders Oct 17–27 had one custom-amount line (`i
 Progress:
 - ✅ Recording — `toSaleLines` returns `customLines`; the worker writes them as `UnmatchedSaleLine` rows and counts them in revenue (migration `20261028130000_unmatched_sale_line`).
 - ✅ Matching — `POST /api/sales/unmatched-lines/:id/match` (owner/manager, own location) queues a `match-sale-line` job on the `sales` queue; the worker's `processMatchJob` runs the sale's FIFO path and adds the cost (migration `20261028140000_unmatched_sale_line_match`). `GET /api/sales/unmatched-lines` lists pending lines.
-- Screen — next.
+- ✅ Screen — Ops → "Montos sin producto" (`UnmatchedLinesScreen.tsx`) lists pending lines and assigns a product, reusing Sueltos' `ProductPicker`.
 
 ---
 

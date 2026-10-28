@@ -30,6 +30,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "catalog-mappings", label: "Catalog Mappings", status: "ready" },
       { id: "catalog-sync", label: "Catalog Sync", status: "ready" },
       { id: "products-without-cost", label: "Products without cost", status: "ready" },
+      { id: "unmatched-lines", label: "Montos sin producto", status: "ready" },
       { id: "category-keywords", label: "Symptom Keywords", status: "ready" },
       { id: "devices", label: "Devices", status: "ready" },
     ],

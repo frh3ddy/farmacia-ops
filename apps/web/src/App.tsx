@@ -15,6 +15,7 @@ import { CatalogSyncScreen } from "./sections/ops/CatalogSyncScreen";
 import { CategoryKeywordsScreen } from "./sections/ops/CategoryKeywordsScreen";
 import { DevicesScreen } from "./sections/ops/DevicesScreen";
 import { YastasScreen } from "./sections/ops/YastasScreen";
+import { UnmatchedLinesScreen } from "./sections/ops/UnmatchedLinesScreen";
 import { SalesTestScreen } from "./sections/dev-tools/SalesTestScreen";
 import { TestInventoryScreen } from "./sections/dev-tools/TestInventoryScreen";
 import { InventoryAgingScreen } from "./sections/reports/InventoryAgingScreen";
@@ -25,6 +26,7 @@ const SCREENS: Record<string, ComponentType> = {
   products: ProductsScreen,
   "add-product": AddProductScreen,
   "products-without-cost": ProductsWithoutCostScreen,
+  "unmatched-lines": UnmatchedLinesScreen,
   "break-bulk": BreakBulkScreen,
   transfers: TransfersScreen,
   "catalog-search": CatalogSearchScreen,
