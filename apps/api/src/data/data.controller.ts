@@ -174,7 +174,10 @@ export class DataController {
       // 6. Delete Inventory (references products)
       const deletedInventory = await this.prisma.inventory.deleteMany({});
       
-      // 7. Delete SaleItem (references products) - need to delete sales first or sale items
+      // 7. Delete SaleItem (references products) - need to delete sales first or sale items.
+      // Returns reference sale items and adjustments, so they go first.
+      await this.prisma.saleReturnItem.deleteMany({});
+      await this.prisma.saleReturn.deleteMany({});
       const deletedSaleItems = await this.prisma.saleItem.deleteMany({});
       
       // 8. Delete Placement (references products)
@@ -285,6 +288,8 @@ export class DataController {
         const supplierCostHistory = await tx.supplierCostHistory.deleteMany({});
         const supplierProduct = await tx.supplierProduct.deleteMany({});
         const inventoryReceiving = await tx.inventoryReceiving.deleteMany({});
+        const saleReturnItem = await tx.saleReturnItem.deleteMany({});
+        const saleReturn = await tx.saleReturn.deleteMany({});
         const inventoryAdjustment = await tx.inventoryAdjustment.deleteMany({});
         const saleItem = await tx.saleItem.deleteMany({});
         const inventory = await tx.inventory.deleteMany({});
@@ -325,6 +330,8 @@ export class DataController {
           inventoryAdjustment: inventoryAdjustment.count,
           saleItem: saleItem.count,
           inventory: inventory.count,
+          saleReturnItem: saleReturnItem.count,
+          saleReturn: saleReturn.count,
           unmatchedSaleLine: unmatchedSaleLine.count,
           sale: sale.count,
           extractionBatch: extractionBatch.count,

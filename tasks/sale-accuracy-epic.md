@@ -43,10 +43,19 @@ Progress:
 
 ---
 
-## Employee returns screen (by hand)
+## ✅ Employee returns screen (by hand)
 
 **Requirements**:
 - Given any employee (not only managers) at their location, should find a recent sale and return some or all of its items, with a reason — the owner decided employees can do returns without the owner's PIN, so the audit list below is the control
 - Given a return, should put the items back into stock at their sold cost and reduce the sale's revenue, using the same path as Square refunds
 - Given a return, should record who made it and when; the owner sees all returns per location
 - Given an item returned more times than it was sold on that sale, should refuse it
+- Given a return, should leave the books check balanced (each returned item is a `RETURN` adjustment that creates its batch) and show in the COGS and margin reports as units, revenue and cost taken back
+- Given a resent return request (same client key), should record it once
+- Given a return, should put its units back in Square's stock, like adjustments and recounts do, once even when retried
+
+Design: like matching, the api validates and queues a `record-return` job on the `sales` queue; the worker writes the batch, adjustment, `SaleReturn` and the sale's new totals in one transaction. Returned stock goes in as the newest batch at the item's sold unit cost. Custom-amount lines can be returned only once matched (they have no stock until then). Square's stock count goes up too (`UNLINKED_RETURN → IN_STOCK`, keyed on the adjustment, like the api's adjustments); a Square failure retries the job, and the returns history shows any return Square wasn't updated for.
+
+Done: `SaleReturnsController` (`GET /api/sales/recent`, `POST /api/sales/:saleId/returns` for owner/manager/cashier at their location; `GET /api/sales/returns` for owner/manager), the worker's `processReturnJob` (locks the sale row; migration `20261028150000_sale_return`), COGS and margin reports net of returns (`saleItemNet`), and Ops → "Devoluciones" / "Historial de devoluciones" (`ReturnsScreen.tsx`). Returns count in the sale's period. Square refunds (task 2) should reuse `processReturnJob`.
+
+Known gap (task 1): COGS and margin reports add up sale items, so a pending custom amount shows in P&L revenue but not in those per-product reports until it is matched.

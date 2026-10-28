@@ -1,5 +1,5 @@
 import { Job, Queue } from 'bullmq';
-import { getPrisma, processMatchJob, processSaleJob } from './sale.worker';
+import { getPrisma, processMatchJob, processReturnJob, processSaleJob } from './sale.worker';
 import { integrityDeps, runIntegrityChecks } from './integrity-run';
 import { debugLog } from './debug-log';
 
@@ -28,8 +28,10 @@ export const WORKERS: WorkerConfig[] = [
     processor: (job: Job) => {
       debugLog('[DEBUG] [WORKER_CONFIG] Sales worker processor called for job:', job.id);
       debugLog('[DEBUG] [WORKER_CONFIG] Job data keys:', Object.keys(job.data || {}));
-      // Matching a custom-amount line reuses the sale's FIFO path, so it shares this queue.
-      return job.name === 'match-sale-line' ? processMatchJob(job) : processSaleJob(job);
+      // Matching a custom amount and recording a return change a sale, so they share this queue.
+      if (job.name === 'match-sale-line') return processMatchJob(job);
+      if (job.name === 'record-return') return processReturnJob(job);
+      return processSaleJob(job);
     },
     concurrency: 5,
     // Retries come from the api, which queues these jobs (apps/api/src/queues/sale.queue.ts).

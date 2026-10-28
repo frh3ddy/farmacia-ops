@@ -56,4 +56,16 @@ export class SaleQueue {
     // and a fixed id would block a retry while a failed match is kept.
     return this.queue.add('match-sale-line', data);
   }
+
+  /** A customer return made by hand; the worker restocks and updates the sale. */
+  async enqueueReturn(data: {
+    saleId: string;
+    items: Array<{ saleItemId: string; quantity: number }>;
+    reason?: string;
+    returnedBy: string;
+    clientRequestId: string;
+  }) {
+    // The worker records a clientRequestId once, so no jobId is needed.
+    return this.queue.add('record-return', data);
+  }
 }

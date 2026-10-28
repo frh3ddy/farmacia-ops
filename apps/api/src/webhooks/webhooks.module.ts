@@ -5,11 +5,12 @@ import { SalesTestService } from './sales-test.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { UnmatchedLinesController } from '../sales/unmatched-lines.controller';
+import { SaleReturnsController } from '../sales/sale-returns.controller';
 
 @Module({
   imports: [AuthModule],
-  // UnmatchedLinesController lives here because it shares this module's SaleQueue.
-  controllers: [SquareWebhookController, SalesTestController, UnmatchedLinesController],
+  // The sales controllers live here because they share this module's SaleQueue.
+  controllers: [SquareWebhookController, SalesTestController, UnmatchedLinesController, SaleReturnsController],
   providers: [SaleQueue, SalesTestService, PrismaService],
 })
 export class WebhooksModule {}

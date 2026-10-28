@@ -812,3 +812,123 @@ export async function processMatchJob(job: Job<{ lineId: string; productId: stri
     });
   });
 }
+
+export type ReturnJobData = {
+  saleId: string;
+  items: Array<{ saleItemId: string; quantity: number }>;
+  reason?: string;
+  returnedBy: string;
+  clientRequestId: string;
+};
+
+/**
+ * Records a customer return: each item goes back to stock as a RETURN batch at
+ * its sold unit cost, and the sale's revenue, cost and profit drop by what came
+ * back. Then Square's count goes up too. A resent request records nothing twice.
+ */
+export async function processReturnJob(job: Job<ReturnJobData>): Promise<void> {
+  await recordReturn(job.data);
+  await syncReturnToSquare(job.data.clientRequestId);
+}
+
+async function recordReturn({ saleId, items, reason, returnedBy, clientRequestId }: ReturnJobData): Promise<void> {
+  await getPrisma().$transaction(async (tx) => {
+    if (await tx.saleReturn.findUnique({ where: { clientRequestId } })) return;
+    // Jobs run concurrently: lock the sale so two returns can't both pass the "left to return" check.
+    await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`;
+    const sale = await tx.sale.findUniqueOrThrow({ where: { id: saleId }, include: { items: { include: { returns: true } } } });
+
+    let revenue = new Prisma.Decimal(0);
+    let cost = new Prisma.Decimal(0);
+    const returned = [];
+    for (const { saleItemId, quantity } of items) {
+      const item = sale.items.find((i) => i.id === saleItemId);
+      const alreadyReturned = item?.returns.reduce((n, r) => n + r.quantity, 0) ?? 0;
+      if (!item || !(quantity > 0) || alreadyReturned + quantity > item.quantity) {
+        throw new SaleValidationError('Return exceeds what is left of the sale item', { saleId, saleItemId, quantity, alreadyReturned });
+      }
+      const unitCost = item.cost.div(item.quantity);
+      const batch = await tx.inventory.create({
+        data: { productId: item.productId, locationId: sale.locationId, quantity, unitCost, receivedAt: new Date(), source: 'ADJUSTMENT' },
+      });
+      const adjustment = await tx.inventoryAdjustment.create({
+        data: {
+          locationId: sale.locationId,
+          productId: item.productId,
+          type: 'RETURN',
+          quantity,
+          unitCost,
+          totalCost: unitCost.mul(quantity),
+          createdBatchId: batch.id,
+          reason: reason ?? 'Customer return',
+          notes: `saleId=${saleId}`,
+          adjustedBy: returnedBy,
+        },
+      });
+      const itemRevenue = item.price.mul(quantity);
+      const itemCost = unitCost.mul(quantity);
+      revenue = revenue.add(itemRevenue);
+      cost = cost.add(itemCost);
+      returned.push({ saleItemId, adjustmentId: adjustment.id, quantity, revenue: itemRevenue, cost: itemCost });
+    }
+
+    await tx.saleReturn.create({ data: { saleId, clientRequestId, reason, returnedBy, revenue, cost, items: { create: returned } } });
+    await tx.sale.update({
+      where: { id: saleId },
+      data: { totalRevenue: { decrement: revenue }, totalCost: { decrement: cost }, grossProfit: { decrement: revenue.sub(cost) } },
+    });
+  });
+}
+
+/**
+ * Puts a return's units back in Square's stock, like the api does for
+ * adjustments (inventory-adjustment.service.ts syncToSquare). Keyed on the
+ * adjustment, so a retry never doubles them. A Square failure fails the job so
+ * BullMQ retries it; a product or location Square doesn't know is recorded instead.
+ */
+async function syncReturnToSquare(clientRequestId: string): Promise<void> {
+  const prisma = getPrisma();
+  const saleReturn = await prisma.saleReturn.findUniqueOrThrow({
+    where: { clientRequestId },
+    include: { items: { include: { adjustment: { include: { location: { select: { squareId: true } } } } } } },
+  });
+
+  for (const { adjustment } of saleReturn.items) {
+    if (adjustment.squareSynced) continue;
+    const mapping = await prisma.catalogMapping.findFirst({ where: { productId: adjustment.productId }, select: { squareVariationId: true } });
+    const record = (squareSyncError: string | null) =>
+      prisma.inventoryAdjustment.update({
+        where: { id: adjustment.id },
+        data: { squareSynced: !squareSyncError, squareSyncedAt: squareSyncError ? null : new Date(), squareSyncError },
+      });
+    if (!adjustment.location.squareId || !mapping) {
+      await record(!mapping ? 'Product not mapped to Square catalog' : 'Location not linked to Square');
+      continue;
+    }
+
+    try {
+      const response = await getSquareClient().inventory.batchCreateChanges({
+        idempotencyKey: adjustment.id,
+        changes: [
+          {
+            type: 'ADJUSTMENT',
+            adjustment: {
+              catalogObjectId: mapping.squareVariationId,
+              locationId: adjustment.location.squareId,
+              quantity: adjustment.quantity.toString(),
+              fromState: 'UNLINKED_RETURN',
+              toState: 'IN_STOCK',
+              occurredAt: adjustment.adjustedAt.toISOString(),
+              referenceId: `adjustment-RETURN-${adjustment.id}`,
+            },
+          },
+        ],
+      });
+      if (response.errors?.length) throw new Error(response.errors.map((e) => e.detail || e.code).join('; '));
+      await record(null);
+    } catch (error) {
+      await record(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+}

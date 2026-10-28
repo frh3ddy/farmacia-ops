@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { saleItemNet } from './sale-item-net';
 
 // ============================================================================
 // Types
@@ -148,6 +149,7 @@ export class InventoryReportsService {
                 category: { select: { id: true, name: true } },
               },
             },
+            returns: { select: { quantity: true, revenue: true, cost: true } },
           },
         },
       },
@@ -174,11 +176,10 @@ export class InventoryReportsService {
         const key = item.productId;
         const existing = productMap.get(key);
 
-        const itemRevenue = item.price.mul(item.quantity);
-        const itemCost = item.cost;
+        const { units, revenue: itemRevenue, cost: itemCost } = saleItemNet(item);
 
         if (existing) {
-          existing.unitsSold += item.quantity;
+          existing.unitsSold += units;
           existing.totalCost = existing.totalCost.add(itemCost);
           existing.totalRevenue = existing.totalRevenue.add(itemRevenue);
         } else {
@@ -188,7 +189,7 @@ export class InventoryReportsService {
             sku: item.product.sku,
             categoryId: item.product.categoryId,
             categoryName: item.product.category?.name || 'Uncategorized',
-            unitsSold: item.quantity,
+            unitsSold: units,
             totalCost: itemCost,
             totalRevenue: itemRevenue,
           });
@@ -196,7 +197,7 @@ export class InventoryReportsService {
 
         totalCOGS = totalCOGS.add(itemCost);
         totalRevenue = totalRevenue.add(itemRevenue);
-        totalUnitsSold += item.quantity;
+        totalUnitsSold += units;
       }
     }
 
@@ -488,6 +489,7 @@ export class InventoryReportsService {
         items: {
           include: {
             product: { select: { id: true, name: true } },
+            returns: { select: { quantity: true, revenue: true, cost: true } },
           },
         },
       },
@@ -515,8 +517,7 @@ export class InventoryReportsService {
       const dateKey = sale.createdAt.toISOString().split('T')[0];
 
       for (const item of sale.items) {
-        const revenue = item.price.mul(item.quantity);
-        const cost = item.cost;
+        const { units, revenue, cost } = saleItemNet(item);
 
         totalRevenue = totalRevenue.add(revenue);
         totalCost = totalCost.add(cost);
@@ -526,14 +527,14 @@ export class InventoryReportsService {
         if (existing) {
           existing.revenue = existing.revenue.add(revenue);
           existing.cost = existing.cost.add(cost);
-          existing.unitsSold += item.quantity;
+          existing.unitsSold += units;
         } else {
           productMap.set(item.productId, {
             productId: item.productId,
             productName: item.product.name,
             revenue,
             cost,
-            unitsSold: item.quantity,
+            unitsSold: units,
           });
         }
 

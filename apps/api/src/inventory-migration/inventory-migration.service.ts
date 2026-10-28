@@ -2111,6 +2111,7 @@ export class InventoryMigrationService {
       this.prisma.costApproval.deleteMany({ where: { productId } }),
       this.prisma.supplierProduct.deleteMany({ where: { productId } }),
       this.prisma.supplierCostHistory.deleteMany({ where: { productId } }),
+      this.prisma.saleReturnItem.deleteMany({ where: { saleItem: { productId } } }),
       this.prisma.inventory.deleteMany({ where: { productId } }),
       this.prisma.saleItem.deleteMany({ where: { productId } }),
       this.prisma.placement.deleteMany({ where: { productId } }),
