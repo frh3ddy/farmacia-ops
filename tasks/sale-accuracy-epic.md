@@ -59,12 +59,14 @@ Square webhook subscription: `refund.created` and `refund.updated` both on (owne
 Known gaps:
 - A return of something sold before sales recording started puts nothing back in the app's stock, though Square restocks it; the next recount corrects it. Add a plain `RETURN` adjustment at the product's last cost if this turns out to be frequent after go-live.
 - If staff turn off restock on an itemized refund in Square, the app still restocks.
+- A return at a different store than the sale restocks the sale's store in the app, while Square restocks the store taking the return. Hasn't happened yet (owner, 2026-10-27); if it starts, restock at the return order's location.
+- A Square return line already returned (e.g. by hand first) takes back only what is left and logs the rest; a line with no uid is logged and skipped. Either way the rest of the refund is still recorded.
 
 ---
 
-## ⏸ Employee returns screen (by hand)
+## ⏸ Returns screen (by hand, owners only)
 
-Set aside 2026-10-27 on `feature/employee-returns` (not merged): returns go through Square instead. Task 2 builds on this branch's `recordReturn`, `SaleReturn` and `saleItemNet`; the screens and `POST /api/sales/:saleId/returns` can be dropped or kept for owners when task 2 merges.
+Set aside 2026-10-27: returns go through Square instead. Merged with task 2 (which reuses `recordReturn`, `SaleReturn` and `saleItemNet`); "Devoluciones" (`GET /api/sales/recent`, `POST /api/sales/:saleId/returns`) is owners only, as a fallback; the history stays with owners and managers and lists Square's returns too.
 
 **Requirements**:
 - Given any employee (not only managers) at their location, should find a recent sale and return some or all of its items, with a reason — the owner decided employees can do returns without the owner's PIN, so the audit list below is the control

@@ -863,9 +863,9 @@ type ReturnInput = Omit<ReturnJobData, 'returnedBy'> & { returnedBy?: string; sq
 
 async function recordReturn({ saleId, items, reason, returnedBy, clientRequestId, squareRestocked, amountOnly }: ReturnInput): Promise<void> {
   await getPrisma().$transaction(async (tx) => {
-    if (await tx.saleReturn.findUnique({ where: { clientRequestId } })) return;
-    // Jobs run concurrently: lock the sale so two returns can't both pass the "left to return" check.
+    // Jobs run concurrently: lock the sale first, so two returns (or a resent one) can't both pass the checks.
     await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`;
+    if (await tx.saleReturn.findUnique({ where: { clientRequestId } })) return;
     const sale = await tx.sale.findUniqueOrThrow({ where: { id: saleId }, include: { items: { include: { returns: true } } } });
 
     let revenue = amountOnly ?? new Prisma.Decimal(0);
@@ -920,14 +920,28 @@ async function recordSquareReturns(lines: ReturnLine[], reason: string): Promise
   const prisma = getPrisma();
   for (const line of lines) {
     const source = line.sourceLineItemUid;
+    if (!line.uid) {
+      console.warn(`[SALE_WORKER] Square return line for ${source} has no uid to record it once by; nothing taken back`);
+      continue;
+    }
     const clientRequestId = `square-return-line:${line.uid}`;
     const quantity = line.quantity ? parseInt(line.quantity, 10) : 1;
     // A custom amount matched later took its stock through its matched sale item.
     const item = source
-      ? await prisma.saleItem.findFirst({ where: { OR: [{ squareLineUid: source }, { matchedFrom: { is: { squareLineUid: source } } }] } })
+      ? await prisma.saleItem.findFirst({
+          where: { OR: [{ squareLineUid: source }, { matchedFrom: { is: { squareLineUid: source } } }] },
+          include: { returns: { select: { quantity: true } } },
+        })
       : null;
     if (item) {
-      await recordReturn({ saleId: item.saleId, items: [{ saleItemId: item.id, quantity }], reason, clientRequestId, squareRestocked: true });
+      // Square already gave the money back, so take back what is left instead of failing the rest of the refund
+      // (e.g. the owner returned it by hand first).
+      const left = item.quantity - item.returns.reduce((n, r) => n + r.quantity, 0);
+      if (left < quantity) console.warn(`[SALE_WORKER] Square return line ${line.uid}: ${quantity} back but ${left} left on sale item ${item.id}`);
+      if (left > 0) {
+        const items = [{ saleItemId: item.id, quantity: Math.min(quantity, left) }];
+        await recordReturn({ saleId: item.saleId, items, reason, clientRequestId, squareRestocked: true });
+      }
       continue;
     }
     const custom = source ? await prisma.unmatchedSaleLine.findFirst({ where: { squareLineUid: source } }) : null;
