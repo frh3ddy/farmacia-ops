@@ -18,7 +18,7 @@
     "bullmq": "^5.0.0",
     "ioredis": "^5.3.2",
     "reflect-metadata": "^0.1.13",
-    "square": "^40.0.0"
+    "square": "^46.0.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.2",

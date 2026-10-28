@@ -1032,7 +1032,8 @@ async function syncReturnToSquare(clientRequestId: string): Promise<void> {
             type: 'ADJUSTMENT',
             adjustment: {
               catalogObjectId: mapping.squareVariationId,
-              locationId: adjustment.location.squareId,
+              fromLocationId: adjustment.location.squareId,
+              toLocationId: adjustment.location.squareId,
               quantity: adjustment.quantity.toString(),
               fromState: 'UNLINKED_RETURN',
               toState: 'IN_STOCK',
