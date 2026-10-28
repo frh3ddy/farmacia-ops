@@ -25,9 +25,9 @@ const record = async ({ request = cashier('centro'), found = sale as object | nu
 };
 
 describe('recording a return', () => {
-  test('a cashier at the sale’s location', async () => {
+  test('a return at the sale’s location', async () => {
     assert({
-      given: 'a cashier returning what is left of an item at their location',
+      given: 'what is left of an item, returned at the sale’s location',
       should: 'queue the return, recording who made it',
       actual: await record(),
       expected: [[{ saleId: 's-1', items: [{ saleItemId: 'si-jarabe', quantity: 1 }], reason: 'No le sirvió', returnedBy: 'emp-cajera', clientRequestId: 'req-1' }]],
@@ -61,9 +61,10 @@ describe('recording a return', () => {
     const roles = (method: 'recent' | 'record' | 'list') => Reflect.getMetadata(ROLES_KEY, SaleReturnsController.prototype[method]);
     assert({
       given: 'the returns routes',
-      should: 'let any till employee find a sale and return it, and owners and managers review returns',
+      // Staff return in Square; a return by hand is the owner's fallback.
+      should: 'let only owners find a sale and return it, and owners and managers review returns',
       actual: [roles('recent'), roles('record'), roles('list')],
-      expected: [['OWNER', 'MANAGER', 'CASHIER'], ['OWNER', 'MANAGER', 'CASHIER'], ['OWNER', 'MANAGER']],
+      expected: [['OWNER'], ['OWNER'], ['OWNER', 'MANAGER']],
     });
   });
 });
