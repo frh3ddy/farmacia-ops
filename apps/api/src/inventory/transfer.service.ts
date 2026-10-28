@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { assertCutOver } from './cutover-gate';
@@ -236,6 +236,17 @@ export class TransferService {
     let totalReceived = 0;
 
     await this.prisma.$transaction(async (tx) => {
+      // Claim the transfer first: a second receive racing past the check above
+      // (double tap, offline replay) finds it no longer in transit and rolls
+      // back instead of creating the destination stock again.
+      const { count } = await tx.transfer.updateMany({
+        where: { id: transfer.id, status: 'IN_TRANSIT' },
+        data: { status: 'RECEIVED', receivedAt: now },
+      });
+      if (count === 0) {
+        throw new ConflictException(`La transferencia ${input.transferId} ya se recibió`);
+      }
+
       for (const line of transfer.lines) {
         const quantityReceived = resolveQuantityReceived(line.quantity, overrideByLineId.get(line.id));
         if (quantityReceived > line.quantity) {
@@ -282,8 +293,6 @@ export class TransferService {
         });
         totalReceived += quantityReceived;
       }
-
-      await tx.transfer.update({ where: { id: transfer.id }, data: { status: 'RECEIVED', receivedAt: now } });
     });
 
     let squareSync: { synced: boolean; error?: string } | undefined;

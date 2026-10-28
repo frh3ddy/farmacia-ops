@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import { ExpenseService } from './expense.service';
 import { ExpenseType } from '@prisma/client';
-import { AuthGuard, LocationGuard, Roles, Public, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, Public, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 /**
  * Parse a date string that could be either:
@@ -193,8 +193,10 @@ export class ExpenseController {
   // --------------------------------------------------------------------------
   @Get(':id')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async getExpense(@Param('id') id: string) {
+  async getExpense(@Param('id') id: string, @Req() req: GuardedRequest) {
     const expense = await this.expenseService.getExpense(id);
+    // No locationId in the request for LocationGuard to check — check the record's.
+    assertLocationAccess(req, expense.locationId);
     return {
       success: true,
       data: {
@@ -209,7 +211,8 @@ export class ExpenseController {
   // --------------------------------------------------------------------------
   @Put(':id')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async updateExpense(@Param('id') id: string, @Body() body: Partial<CreateExpenseDto>) {
+  async updateExpense(@Param('id') id: string, @Body() body: Partial<CreateExpenseDto>, @Req() req: GuardedRequest) {
+    assertLocationAccess(req, (await this.expenseService.getExpense(id)).locationId);
     const expense = await this.expenseService.updateExpense(id, {
       type: body.type,
       amount: body.amount,
@@ -237,7 +240,8 @@ export class ExpenseController {
   // --------------------------------------------------------------------------
   @Delete(':id')
   @Roles('OWNER', 'ACCOUNTANT')
-  async deleteExpense(@Param('id') id: string) {
+  async deleteExpense(@Param('id') id: string, @Req() req: GuardedRequest) {
+    assertLocationAccess(req, (await this.expenseService.getExpense(id)).locationId);
     await this.expenseService.deleteExpense(id);
     return { success: true, message: 'Expense deleted' };
   }

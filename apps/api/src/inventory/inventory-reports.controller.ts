@@ -7,6 +7,7 @@ import {
   UseGuards,
   NotFoundException,
 } from '@nestjs/common';
+import { EmployeeRole } from '@prisma/client';
 import { InventoryReportsService } from './inventory-reports.service';
 import { AuthGuard, LocationGuard, Roles, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
@@ -16,6 +17,8 @@ function endOfDay(date: Date): Date {
   result.setUTCHours(23, 59, 59, 999);
   return result;
 }
+
+const PROFIT_LOSS_ROLES: EmployeeRole[] = ['OWNER', 'ACCOUNTANT'];
 
 @Controller('inventory/reports')
 @UseGuards(AuthGuard, LocationGuard)
@@ -157,7 +160,7 @@ export class InventoryReportsController {
   // Includes: Revenue, COGS, Gross Profit, Operating Expenses, Net Profit
   // --------------------------------------------------------------------------
   @Get('profit-loss')
-  @Roles('OWNER', 'ACCOUNTANT')
+  @Roles(...PROFIT_LOSS_ROLES)
   async getProfitAndLossReport(
     @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
@@ -180,7 +183,8 @@ export class InventoryReportsController {
   }
 
   // --------------------------------------------------------------------------
-  // Dashboard Summary (all key metrics in one call) - All authenticated users
+  // Dashboard Summary (all key metrics in one call) - All authenticated users;
+  // net profit and operating expenses only for OWNER, ACCOUNTANT
   // --------------------------------------------------------------------------
   @Get('dashboard')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
@@ -199,7 +203,11 @@ export class InventoryReportsController {
     // have UTC timestamps that fall on the next day
     const parsedEndDate = endDate ? endOfDay(new Date(endDate)) : undefined;
 
-    // Fetch all reports in parallel (including P&L for net profit)
+    // Net profit and expenses (payroll, rent) only for the roles that may open
+    // the P&L report itself.
+    const canSeeProfitLoss = PROFIT_LOSS_ROLES.includes(currentLocation.role);
+
+    // Fetch all reports in parallel
     const [cogs, valuation, adjustments, receivings, profitLoss] = await Promise.all([
       this.reportsService.getCOGSReport({
         locationId: targetLocationId,
@@ -217,11 +225,13 @@ export class InventoryReportsController {
         startDate: parsedStartDate,
         endDate: parsedEndDate,
       }),
-      this.reportsService.getProfitAndLossReport({
-        locationId: targetLocationId,
-        startDate: parsedStartDate,
-        endDate: parsedEndDate,
-      }),
+      canSeeProfitLoss
+        ? this.reportsService.getProfitAndLossReport({
+            locationId: targetLocationId,
+            startDate: parsedStartDate,
+            endDate: parsedEndDate,
+          })
+        : undefined,
     ]);
 
     return {
@@ -255,17 +265,19 @@ export class InventoryReportsController {
           totalQuantity: receivings.summary.totalQuantity,
           totalCost: receivings.summary.totalCost,
         },
-        // Operating Expenses (rent, payroll, utilities, etc.)
-        operatingExpenses: {
-          total: profitLoss.operatingExpenses.total,
-          byType: profitLoss.operatingExpenses.byType,
-          shrinkage: profitLoss.operatingExpenses.shrinkage,
-        },
-        // Net Profit (after all expenses)
-        netProfit: {
-          amount: profitLoss.netProfit.amount,
-          marginPercent: profitLoss.netProfit.marginPercent,
-        },
+        ...(profitLoss && {
+          // Operating Expenses (rent, payroll, utilities, etc.)
+          operatingExpenses: {
+            total: profitLoss.operatingExpenses.total,
+            byType: profitLoss.operatingExpenses.byType,
+            shrinkage: profitLoss.operatingExpenses.shrinkage,
+          },
+          // Net Profit (after all expenses)
+          netProfit: {
+            amount: profitLoss.netProfit.amount,
+            marginPercent: profitLoss.netProfit.marginPercent,
+          },
+        }),
       },
     };
   }
