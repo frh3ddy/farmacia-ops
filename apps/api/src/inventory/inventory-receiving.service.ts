@@ -76,7 +76,7 @@ export class InventoryReceivingService {
       this.squareClient = new SquareClient({
         token,
         environment: isSandbox ? SquareEnvironment.Sandbox : SquareEnvironment.Production,
-        version: '2025-01-23', // pinned so an SDK bump can't silently change behavior
+        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
       });
     }
     return this.squareClient;
@@ -131,7 +131,8 @@ export class InventoryReceivingService {
             type: 'ADJUSTMENT',
             adjustment: {
               catalogObjectId: catalogMapping.squareVariationId,
-              locationId: location.squareId,
+              fromLocationId: location.squareId,
+              toLocationId: location.squareId,
               quantity: quantity.toString(),
               fromState: 'NONE',
               toState: 'IN_STOCK',

@@ -9,7 +9,6 @@ interface ShipTransferDto {
   quantity: number;
   reason?: string;
   notes?: string;
-  syncToSquare?: boolean;
 }
 
 interface ReceiveTransferDto {
@@ -52,7 +51,6 @@ export class TransferController {
       quantity: body.quantity,
       reason: body.reason,
       notes: body.notes,
-      syncToSquare: body.syncToSquare ?? true,
       createdBy: currentEmployee?.id,
     });
 

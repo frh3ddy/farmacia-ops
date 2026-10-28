@@ -86,7 +86,7 @@ export class InventoryAdjustmentService {
       this.squareClient = new SquareClient({
         token,
         environment: isSandbox ? SquareEnvironment.Sandbox : SquareEnvironment.Production,
-        version: '2025-01-23', // pinned so an SDK bump can't silently change behavior
+        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
       });
     }
     return this.squareClient;
@@ -102,6 +102,13 @@ export class InventoryAdjustmentService {
     quantityChange: number,
     adjustmentType: string
   ): Promise<{ synced: boolean; error?: string }> {
+    // A transfer's legs aren't pushed one by one: receiving the transfer sends
+    // Square a single cross-location move (TransferService.syncReceiveToSquare),
+    // so the shipment never shows up as waste. No error, so nothing offers a retry.
+    if (adjustmentType === 'TRANSFER_OUT' || adjustmentType === 'TRANSFER_IN') {
+      return { synced: false };
+    }
+
     const client = this.getSquareClient();
     if (!client) {
       return { synced: false, error: 'Square client not configured' };
@@ -128,33 +135,20 @@ export class InventoryAdjustmentService {
         return { synced: false, error: 'Product not mapped to Square catalog' };
       }
 
-      // Determine the correct state transition based on adjustment type
-      // Square supported transitions:
-      // - NONE → IN_STOCK (receiving)
-      // - IN_STOCK → SOLD (sale)
-      // - IN_STOCK → WASTE (damage, expired, theft, write-off)
-      // - UNLINKED_RETURN → IN_STOCK (returns)
-      
+      // Square's state transitions (Inventory API "Supported state transitions"):
+      // - UNLINKED_RETURN → IN_STOCK: a customer return
+      // - NONE → IN_STOCK: any other stock added (found, loose units, count up)
+      // - IN_STOCK → NONE: boxes broken into loose units — removed from
+      //   tracking, not lost, so they stay out of Square's waste reports
+      // - IN_STOCK → WASTE: damage, theft, expired, write-off, count down
       let fromState: 'NONE' | 'IN_STOCK' | 'UNLINKED_RETURN';
-      let toState: 'IN_STOCK' | 'WASTE';
-      
+      let toState: 'IN_STOCK' | 'WASTE' | 'NONE';
       if (quantityChange > 0) {
-        // Positive adjustment (adding inventory)
-        // For RETURN type, use UNLINKED_RETURN → IN_STOCK
-        // For FOUND or other positive types, use NONE → IN_STOCK
-        if (adjustmentType === 'RETURN') {
-          fromState = 'UNLINKED_RETURN';
-          toState = 'IN_STOCK';
-        } else {
-          fromState = 'NONE';
-          toState = 'IN_STOCK';
-        }
+        fromState = adjustmentType === 'RETURN' ? 'UNLINKED_RETURN' : 'NONE';
+        toState = 'IN_STOCK';
       } else {
-        // Negative adjustment (removing inventory)
-        // Use IN_STOCK → WASTE for most negative adjustments
-        // (WASTE covers damage, expired, theft, write-off, etc.)
         fromState = 'IN_STOCK';
-        toState = 'WASTE';
+        toState = adjustmentType === 'BREAK_BULK_OUT' ? 'NONE' : 'WASTE';
       }
 
       // Call Square Inventory API
@@ -170,10 +164,12 @@ export class InventoryAdjustmentService {
             type: 'ADJUSTMENT',
             adjustment: {
               catalogObjectId: catalogMapping.squareVariationId,
-              locationId: location.squareId,
+              // Same location on both sides: it changes state, not place.
+              fromLocationId: location.squareId,
+              toLocationId: location.squareId,
               quantity: Math.abs(quantityChange).toString(),
-              fromState: fromState as any,
-              toState: toState as any,
+              fromState,
+              toState,
               occurredAt: new Date().toISOString(),
               referenceId: `adjustment-${adjustmentType}-${adjustmentId}`,
             },
