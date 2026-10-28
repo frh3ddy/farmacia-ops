@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { AdjustmentType } from '@prisma/client';
-import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, Public, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 import { USER_ADJUSTMENT_TYPES } from './adjustment-types';
 
 // ============================================================================
@@ -295,24 +295,6 @@ export class InventoryAdjustmentController {
     };
   }
 
-  @Get('location/:locationId/summary')
-  @Roles('OWNER', 'MANAGER')
-  async getAdjustmentSummary(
-    @Param('locationId') locationId: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string
-  ) {
-    const summary = await this.adjustmentService.getAdjustmentSummary(
-      locationId,
-      parseDateParam(startDate, 'startDate'),
-      parseDateParam(endDate, 'endDate')
-    );
-    return {
-      success: true,
-      data: summary,
-    };
-  }
-
   // --------------------------------------------------------------------------
   // Retry Square sync - OWNER only
   // --------------------------------------------------------------------------
@@ -326,26 +308,6 @@ export class InventoryAdjustmentController {
         ? 'Successfully synced to Square'
         : `Square sync failed: ${result.error}`,
       data: result,
-    };
-  }
-
-  // --------------------------------------------------------------------------
-  // Utility endpoints - Public
-  // --------------------------------------------------------------------------
-  @Get('types/list')
-  @Public()
-  getAdjustmentTypes() {
-    const types = USER_ADJUSTMENT_TYPES.map(type => ({
-      value: type,
-      label: type.replace(/_/g, ' ').toLowerCase().replace(/^\w/, c => c.toUpperCase()),
-      isPositive: ['FOUND', 'RETURN'].includes(type),
-      isNegative: ['DAMAGE', 'THEFT', 'EXPIRED', 'WRITE_OFF'].includes(type),
-      isVariable: ['COUNT_CORRECTION', 'OTHER'].includes(type),
-    }));
-
-    return {
-      success: true,
-      data: types,
     };
   }
 }

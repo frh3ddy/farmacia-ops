@@ -60,31 +60,9 @@ describe('InventoryAdjustmentController.createAdjustment', () => {
   });
 });
 
-describe('InventoryAdjustmentController.getAdjustmentTypes', () => {
-  test('the types a user can pick', () => {
-    const { data } = new InventoryAdjustmentController({} as any).getAdjustmentTypes();
-
-    assert({
-      given: 'the list of adjustment types',
-      should: 'offer only the types the create endpoint accepts',
-      actual: data.map((t) => t.value),
-      expected: ['DAMAGE', 'THEFT', 'EXPIRED', 'COUNT_CORRECTION', 'FOUND', 'RETURN', 'WRITE_OFF', 'OTHER'],
-    });
-    assert({
-      given: 'each listed type',
-      should: 'mark exactly one direction',
-      actual: data.filter((t) => [t.isPositive, t.isNegative, t.isVariable].filter(Boolean).length !== 1).map((t) => t.value),
-      expected: [],
-    });
-  });
-});
-
 describe('InventoryAdjustmentController.getAdjustmentsByLocation', () => {
   const controllerWithList = () => {
-    const service = {
-      getAdjustmentsByLocation: vi.fn().mockResolvedValue([]),
-      getAdjustmentSummary: vi.fn().mockResolvedValue({}),
-    };
+    const service = { getAdjustmentsByLocation: vi.fn().mockResolvedValue([]) };
     return { service, controller: new InventoryAdjustmentController(service as any) };
   };
 
@@ -97,9 +75,9 @@ describe('InventoryAdjustmentController.getAdjustmentsByLocation', () => {
       expected: 'Invalid startDate format',
     });
     assert({
-      given: 'an unreadable end date on the summary',
+      given: 'an end date that is not a date',
       should: 'refuse the request as a bad request',
-      actual: await outcome(controller.getAdjustmentSummary('centro', undefined, 'not-a-date')),
+      actual: await outcome(controller.getAdjustmentsByLocation('centro', undefined, 'not-a-date')),
       expected: 'Invalid endDate format',
     });
   });
