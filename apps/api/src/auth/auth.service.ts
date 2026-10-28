@@ -138,14 +138,14 @@ export class AuthService {
     if (!employee) {
       this.recordFailedLogin(loginKey);
       throw new HttpException(
-        { success: false, message: 'Invalid email or password' },
+        { success: false, message: 'Correo o contraseña incorrectos' },
         HttpStatus.UNAUTHORIZED
       );
     }
 
     if (!employee.isActive) {
       throw new HttpException(
-        { success: false, message: 'Employee account is deactivated' },
+        { success: false, message: 'La cuenta del empleado está desactivada' },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -162,7 +162,7 @@ export class AuthService {
     if (!valid) {
       this.recordFailedLogin(loginKey);
       throw new HttpException(
-        { success: false, message: 'Invalid email or password' },
+        { success: false, message: 'Correo o contraseña incorrectos' },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -178,7 +178,7 @@ export class AuthService {
 
     if (validAssignments.length === 0) {
       throw new HttpException(
-        { success: false, message: 'Only owners or managers can activate devices' },
+        { success: false, message: 'Solo propietarios o gerentes pueden activar dispositivos' },
         HttpStatus.FORBIDDEN
       );
     }
@@ -190,7 +190,7 @@ export class AuthService {
       locationAssignment = validAssignments.find(a => a.locationId === requestedLocationId);
       if (!locationAssignment) {
         throw new HttpException(
-          { success: false, message: 'You do not have owner/manager access to this location' },
+          { success: false, message: 'No tienes acceso de propietario o gerente a esta sucursal' },
           HttpStatus.FORBIDDEN
         );
       }
@@ -264,7 +264,7 @@ export class AuthService {
 
     if (!assignment) {
       throw new HttpException(
-        { success: false, message: 'Only owners can manage devices for this location' },
+        { success: false, message: 'Solo los propietarios pueden administrar los dispositivos de esta sucursal' },
         HttpStatus.FORBIDDEN
       );
     }
@@ -386,7 +386,7 @@ export class AuthService {
     if (!matchedEmployee) {
       this.recordFailedLogin(lockoutKey);
       throw new HttpException(
-        { success: false, message: 'Invalid PIN' },
+        { success: false, message: 'PIN incorrecto' },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -399,7 +399,7 @@ export class AuthService {
       throw new HttpException(
         {
           success: false,
-          message: 'Account locked',
+          message: 'Cuenta bloqueada',
           lockedUntil: matchedEmployee.pinLockedUntil,
           secondsRemaining: remainingSeconds,
         },
@@ -521,7 +521,7 @@ export class AuthService {
 
     if (!session.employee.isActive) {
       throw new HttpException(
-        { success: false, message: 'Employee account deactivated' },
+        { success: false, message: 'La cuenta del empleado está desactivada' },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -585,7 +585,7 @@ export class AuthService {
 
     if (!newAssignment) {
       throw new HttpException(
-        { success: false, message: 'You do not have access to this location' },
+        { success: false, message: 'No tienes acceso a esta sucursal' },
         HttpStatus.FORBIDDEN
       );
     }

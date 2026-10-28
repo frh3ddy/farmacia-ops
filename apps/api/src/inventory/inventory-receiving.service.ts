@@ -181,10 +181,10 @@ export class InventoryReceivingService {
 
     // Validate input
     if (input.quantity <= 0) {
-      throw new BadRequestException('Quantity must be positive');
+      throw new BadRequestException('La cantidad debe ser mayor que cero');
     }
     if (input.unitCost < 0) {
-      throw new BadRequestException('Unit cost cannot be negative');
+      throw new BadRequestException('El costo unitario no puede ser negativo');
     }
 
     // Check product exists

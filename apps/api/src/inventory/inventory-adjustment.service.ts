@@ -214,16 +214,16 @@ export class InventoryAdjustmentService {
     // Validate input — the controller's DTO is a plain interface, so nothing
     // has checked the runtime types of what the client sent.
     if (!Number.isInteger(input.quantity) || input.quantity === 0) {
-      throw new BadRequestException('Quantity must be a non-zero whole number');
+      throw new BadRequestException('La cantidad debe ser un número entero distinto de cero');
     }
     if (input.unitCost != null && !(typeof input.unitCost === 'number' && input.unitCost >= 0)) {
-      throw new BadRequestException('Unit cost must be zero or more');
+      throw new BadRequestException('El costo unitario debe ser cero o mayor');
     }
     if (input.type === 'OTHER' && !input.notes?.trim()) {
-      throw new BadRequestException('Notes are required for an OTHER adjustment');
+      throw new BadRequestException('Escribe una nota para un ajuste de tipo Otro');
     }
     if ((input.reason?.length ?? 0) > 500 || (input.notes?.length ?? 0) > 500) {
-      throw new BadRequestException('Reason and notes must be 500 characters or fewer');
+      throw new BadRequestException('El motivo y las notas deben tener 500 caracteres o menos');
     }
 
     // Check if product exists
@@ -249,7 +249,7 @@ export class InventoryAdjustmentService {
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
     if (input.effectiveDate && input.effectiveDate > endOfToday) {
-      throw new BadRequestException('Adjustment effectiveDate cannot be in the future');
+      throw new BadRequestException('La fecha del ajuste no puede ser futura');
     }
 
     // Finishing a location's cutover writes its lock. Before that, the cutover
@@ -261,12 +261,12 @@ export class InventoryAdjustmentService {
     });
     if (!lock) {
       throw new BadRequestException(
-        'This location has not been cut over yet. Adjustments start once its cutover is complete.'
+        'Esta sucursal aún no ha hecho su corte. Los ajustes se podrán registrar cuando termine.'
       );
     }
     if ((input.effectiveDate || new Date()) <= lock.cutoverDate) {
       throw new BadRequestException(
-        'Cannot make adjustments before the cutover date. The inventory for this location is locked.'
+        'No se pueden registrar ajustes con fecha anterior al corte: el inventario de esta sucursal está cerrado hasta esa fecha.'
       );
     }
 
@@ -323,7 +323,7 @@ export class InventoryAdjustmentService {
       previousTotal = batches.reduce((sum, b) => sum + b.quantity, 0);
       if (quantityToRemove > previousTotal) {
         throw new BadRequestException(
-          `Insufficient inventory: requested ${quantityToRemove}, available ${previousTotal}`
+          `No hay suficientes existencias: se pidieron ${quantityToRemove} y hay ${previousTotal}`
         );
       }
 
@@ -376,7 +376,7 @@ export class InventoryAdjustmentService {
           },
         });
         if (count === 0) {
-          throw new ConflictException('Stock changed while recording this adjustment — please retry');
+          throw new ConflictException('Las existencias cambiaron mientras se registraba el ajuste. Inténtalo de nuevo.');
         }
       }
 
@@ -438,7 +438,7 @@ export class InventoryAdjustmentService {
     const unitCostValue = input.unitCost ?? ((await this.getLastKnownCost(input.productId, input.locationId)) || null);
     if (unitCostValue == null) {
       throw new BadRequestException(
-        'Unit cost is required for positive adjustments. No previous cost history found.'
+        'Indica el costo unitario: este producto no tiene un costo anterior registrado.'
       );
     }
     const unitCost = new Prisma.Decimal(unitCostValue);

@@ -41,7 +41,7 @@ export class BreakBulkService {
 
   async breakBulk(input: BreakBulkInput) {
     if (input.boxQuantity <= 0) {
-      throw new BadRequestException('boxQuantity must be positive');
+      throw new BadRequestException('La cantidad de cajas debe ser mayor que cero');
     }
 
     const boxProduct = await this.prisma.product.findUnique({ where: { id: input.boxProductId } });
@@ -50,11 +50,11 @@ export class BreakBulkService {
     }
     if (!boxProduct.looseProductId) {
       throw new BadRequestException(
-        `Product ${input.boxProductId} has no linked loose product — set looseProductId first`,
+        `El producto ${input.boxProductId} no tiene un producto suelto vinculado. Vincúlalo primero.`,
       );
     }
     if (!boxProduct.quantity || boxProduct.quantity <= 0) {
-      throw new BadRequestException(`Product ${input.boxProductId} has no quantity (base units per box) set`);
+      throw new BadRequestException(`El producto ${input.boxProductId} no tiene definidas las piezas por caja`);
     }
 
     const looseUnits = looseUnitsFromBoxes(input.boxQuantity, boxProduct.quantity);

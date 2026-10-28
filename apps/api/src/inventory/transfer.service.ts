@@ -137,10 +137,10 @@ export class TransferService {
 
   async ship(input: ShipTransferInput) {
     if (input.quantity <= 0) {
-      throw new BadRequestException('quantity must be positive');
+      throw new BadRequestException('La cantidad debe ser mayor que cero');
     }
     if (input.fromLocationId === input.toLocationId) {
-      throw new BadRequestException('fromLocationId and toLocationId must differ');
+      throw new BadRequestException('La sucursal de origen y la de destino deben ser distintas');
     }
 
     const [product, fromLocation, toLocation] = await Promise.all([
@@ -224,7 +224,7 @@ export class TransferService {
     }
     input.assertAccess?.(transfer.toLocationId);
     if (transfer.status !== 'IN_TRANSIT') {
-      throw new BadRequestException(`Transfer ${input.transferId} is ${transfer.status}, not IN_TRANSIT`);
+      throw new BadRequestException(`La transferencia ${input.transferId} está ${transfer.status}; solo se puede recibir una en tránsito`);
     }
 
     const overrideByLineId = new Map((input.lineReceipts ?? []).map((r) => [r.transferLineId, r.quantityReceived]));
@@ -236,7 +236,7 @@ export class TransferService {
         const quantityReceived = resolveQuantityReceived(line.quantity, overrideByLineId.get(line.id));
         if (quantityReceived > line.quantity) {
           throw new BadRequestException(
-            `quantityReceived (${quantityReceived}) exceeds quantity shipped (${line.quantity}) for line ${line.id}`,
+            `La cantidad recibida (${quantityReceived}) es mayor que la enviada (${line.quantity}) en la línea ${line.id}`,
           );
         }
         if (quantityReceived <= 0) {

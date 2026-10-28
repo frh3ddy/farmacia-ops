@@ -76,7 +76,7 @@ export class LaborController {
       throw new HttpException(
         {
           success: false,
-          message: 'Provide both startDate and endDate for a custom range',
+          message: 'Elige la fecha de inicio y la de fin para un rango personalizado',
         },
         HttpStatus.BAD_REQUEST,
       );

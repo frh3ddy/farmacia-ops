@@ -43,7 +43,7 @@ export class InventoryReconciliationController {
 
     if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
       throw new HttpException(
-        { success: false, message: 'Invalid date format' },
+        { success: false, message: 'La fecha no es válida' },
         HttpStatus.BAD_REQUEST,
       );
     }

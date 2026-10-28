@@ -112,7 +112,7 @@ export class AuthGuard implements CanActivate {
         throw new HttpException(
           {
             success: false,
-            message: `Access denied. Requires one of: ${requiredRoles.join(', ')}`,
+            message: `No tienes permiso para esto. Se requiere uno de estos roles: ${requiredRoles.join(', ')}`,
           },
           HttpStatus.FORBIDDEN
         );
@@ -156,7 +156,7 @@ export function assertLocationAccess(request: LocationAccess, locationId: string
   );
   if (!hasAccess) {
     throw new HttpException(
-      { success: false, message: 'Access denied to this location' },
+      { success: false, message: 'No tienes acceso a esta sucursal' },
       HttpStatus.FORBIDDEN
     );
   }
@@ -173,7 +173,7 @@ export function scopedLocationId(request: LocationAccess, locationId?: string): 
   const ownLocationId = request.currentLocation?.locationId;
   if (!ownLocationId) {
     throw new HttpException(
-      { success: false, message: 'Access denied to this location' },
+      { success: false, message: 'No tienes acceso a esta sucursal' },
       HttpStatus.FORBIDDEN
     );
   }

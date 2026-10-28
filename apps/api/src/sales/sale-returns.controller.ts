@@ -46,13 +46,13 @@ export class SaleReturnsController {
     assertLocationAccess(req, sale.locationId);
     if (!body?.clientRequestId) throw new BadRequestException('clientRequestId is required');
     const items = body.items ?? [];
-    if (items.length === 0) throw new BadRequestException('Choose at least one item to return');
+    if (items.length === 0) throw new BadRequestException('Elige al menos un artículo para devolver');
 
     for (const { saleItemId, quantity } of items) {
       const item = sale.items.find((i) => i.id === saleItemId);
       const left = item ? item.quantity - item.returns.reduce((n, r) => n + r.quantity, 0) : 0;
       if (!Number.isInteger(quantity) || quantity <= 0 || quantity > left) {
-        throw new BadRequestException(`Only ${left} left to return for item ${saleItemId}`);
+        throw new BadRequestException(`Solo puedes devolver ${left} del artículo ${saleItemId}`);
       }
     }
 

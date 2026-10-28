@@ -82,7 +82,7 @@ const imageFileFilter = (_req: any, file: any, cb: any) => {
   if (file.mimetype.startsWith('image/')) {
     cb(null, true);
   } else {
-    cb(new HttpException('Only image files are allowed', HttpStatus.BAD_REQUEST), false);
+    cb(new HttpException('Solo se permiten imágenes', HttpStatus.BAD_REQUEST), false);
   }
 };
 
@@ -108,14 +108,14 @@ export class ProductsController {
     // Validate required fields
     if (!body.name || body.name.trim().length === 0) {
       throw new HttpException(
-        { success: false, message: 'Product name is required' },
+        { success: false, message: 'El nombre del producto es obligatorio' },
         HttpStatus.BAD_REQUEST,
       );
     }
 
     if (body.sellingPrice === undefined || body.sellingPrice === null) {
       throw new HttpException(
-        { success: false, message: 'Selling price is required' },
+        { success: false, message: 'El precio de venta es obligatorio' },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -366,7 +366,7 @@ export class ProductsController {
   ) {
     if (!file || !file.buffer) {
       throw new HttpException(
-        { success: false, message: 'No image file provided' },
+        { success: false, message: 'No se recibió ninguna imagen' },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -603,7 +603,7 @@ export class ProductsController {
   ) {
     if (body.sellingPrice === undefined || body.sellingPrice === null) {
       throw new HttpException(
-        { success: false, message: 'Selling price is required' },
+        { success: false, message: 'El precio de venta es obligatorio' },
         HttpStatus.BAD_REQUEST,
       );
     }

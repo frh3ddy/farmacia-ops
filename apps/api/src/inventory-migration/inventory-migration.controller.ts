@@ -783,7 +783,7 @@ export class InventoryMigrationController {
   async updateBatchSize(@Body() body: { extractionSessionId: string; newBatchSize: number }) {
     try {
       if (!body.newBatchSize || body.newBatchSize < 10 || body.newBatchSize > 500) {
-        throw new BadRequestException('Batch size must be between 10 and 500');
+        throw new BadRequestException('El tamaño del bloque debe estar entre 10 y 500');
       }
       const result = await this.migrationService.updateBatchSize(body.extractionSessionId, body.newBatchSize);
       return result;
@@ -937,7 +937,7 @@ export class InventoryMigrationController {
     const currentEmployee = req.employee;
     const cutoverDate = this.parseDate(body.cutoverDate);
     if (!cutoverDate) {
-      throw new BadRequestException('Invalid cutover date format');
+      throw new BadRequestException('La fecha de corte no es válida');
     }
 
     let approvedCosts: { productId: string; cost: Prisma.Decimal }[] = [];
@@ -1037,7 +1037,7 @@ export class InventoryMigrationController {
   @Post('preview')
   async previewCutover(@Body() body: PreviewCutoverRequest) {
     const cutoverDate = this.parseDate(body.cutoverDate);
-    if (!cutoverDate) throw new BadRequestException('Invalid cutover date');
+    if (!cutoverDate) throw new BadRequestException('La fecha de corte no es válida');
 
     const approvedCosts = body.approvedCosts?.map((ac) => ({
       productId: ac.productId,

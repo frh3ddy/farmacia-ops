@@ -236,7 +236,7 @@ export class AuthController {
     // Validate PIN format
     if (!body.pin || !/^\d{4,6}$/.test(body.pin)) {
       throw new HttpException(
-        { success: false, message: 'Invalid PIN format. Must be 4-6 digits.' },
+        { success: false, message: 'El PIN debe tener de 4 a 6 dígitos' },
         HttpStatus.BAD_REQUEST
       );
     }

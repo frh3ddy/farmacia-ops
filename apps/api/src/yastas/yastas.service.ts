@@ -32,7 +32,7 @@ export class YastasService {
   async setOpeningBalance(locationId: string, amount: number) {
     if (!amount || amount < 0) {
       throw new HttpException(
-        { success: false, message: 'amount must be non-negative' },
+        { success: false, message: 'El monto no puede ser negativo' },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -52,7 +52,7 @@ export class YastasService {
       });
       if (existingOpening) {
         throw new HttpException(
-          { success: false, message: `${location.name} already has an opening balance (${existingOpening.id}) — refusing to seed a second one` },
+          { success: false, message: `${location.name} ya tiene un saldo inicial (${existingOpening.id}); no se puede registrar otro` },
           HttpStatus.CONFLICT,
         );
       }
@@ -83,7 +83,7 @@ export class YastasService {
   }) {
     if (!input.faceAmount || input.faceAmount <= 0) {
       throw new HttpException(
-        { success: false, message: 'faceAmount must be positive' },
+        { success: false, message: 'El monto debe ser mayor que cero' },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -128,13 +128,13 @@ export class YastasService {
   }) {
     if (input.fromLocationId === input.toLocationId) {
       throw new HttpException(
-        { success: false, message: 'fromLocationId and toLocationId must differ' },
+        { success: false, message: 'La sucursal de origen y la de destino deben ser distintas' },
         HttpStatus.BAD_REQUEST,
       );
     }
     if (!input.amount || input.amount <= 0) {
       throw new HttpException(
-        { success: false, message: 'amount must be positive' },
+        { success: false, message: 'El monto debe ser mayor que cero' },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -147,7 +147,7 @@ export class YastasService {
 
     if (fromWallet.balance.lt(amount)) {
       throw new HttpException(
-        { success: false, message: 'Insufficient balance at source location' },
+        { success: false, message: 'No hay saldo suficiente en la sucursal de origen' },
         HttpStatus.BAD_REQUEST,
       );
     }

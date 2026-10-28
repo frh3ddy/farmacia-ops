@@ -44,7 +44,7 @@ export class SupplierService {
    */
   async findOrCreateSupplier(name: string): Promise<SupplierDTO> {
     if (!name || name.trim().length === 0) {
-      throw new BadRequestException('Supplier name cannot be empty');
+      throw new BadRequestException('El nombre del proveedor no puede estar vacío');
     }
     const trimmed = name.trim();
     const normalized = this.normalizeSupplierName(trimmed);
@@ -318,7 +318,7 @@ export class SupplierService {
 
     const trimmedInitial = initial.trim();
     if (trimmedInitial.length === 0) {
-      throw new BadRequestException('initial cannot be empty');
+      throw new BadRequestException('La inicial no puede estar vacía');
     }
 
     // Find or create supplier

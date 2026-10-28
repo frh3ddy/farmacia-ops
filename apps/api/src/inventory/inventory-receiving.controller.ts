@@ -98,7 +98,7 @@ export class InventoryReceivingController {
     // Validate quantity
     if (body.quantity <= 0) {
       throw new HttpException(
-        { success: false, message: 'Quantity must be a positive number' },
+        { success: false, message: 'La cantidad debe ser mayor que cero' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -106,7 +106,7 @@ export class InventoryReceivingController {
     // Validate unit cost
     if (body.unitCost < 0) {
       throw new HttpException(
-        { success: false, message: 'Unit cost cannot be negative' },
+        { success: false, message: 'El costo unitario no puede ser negativo' },
         HttpStatus.BAD_REQUEST
       );
     }
@@ -119,7 +119,7 @@ export class InventoryReceivingController {
       expiryDate = parseDateString(body.expiryDate);
       if (isNaN(expiryDate.getTime())) {
         throw new HttpException(
-          { success: false, message: 'Invalid expiryDate format' },
+          { success: false, message: 'La fecha de caducidad no es válida' },
           HttpStatus.BAD_REQUEST
         );
       }
@@ -129,7 +129,7 @@ export class InventoryReceivingController {
       manufacturingDate = parseDateString(body.manufacturingDate);
       if (isNaN(manufacturingDate.getTime())) {
         throw new HttpException(
-          { success: false, message: 'Invalid manufacturingDate format' },
+          { success: false, message: 'La fecha de fabricación no es válida' },
           HttpStatus.BAD_REQUEST
         );
       }
