@@ -319,7 +319,7 @@ describe('InventoryAdjustmentService.createAdjustment cutover (Postgres)', () =>
       given: 'a location whose cutover has not finished',
       should: 'refuse the adjustment, since the cutover would count that stock again',
       actual: [error, await prisma.inventory.count({ where: { productId } })],
-      expected: ['Esta sucursal aún no ha hecho su corte. Los ajustes se podrán registrar cuando termine.', 0],
+      expected: ['Esta sucursal aún no ha hecho su corte. Los movimientos de inventario se podrán registrar cuando termine.', 0],
     });
   });
 
