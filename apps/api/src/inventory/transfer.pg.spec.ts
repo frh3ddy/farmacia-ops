@@ -98,4 +98,24 @@ describe('TransferService (Postgres, Square recorded)', () => {
       ],
     });
   });
+
+  test('receiving the same transfer twice at once', async () => {
+    const { transfers, productId } = await transferSetup();
+    const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 });
+
+    const outcomes = await Promise.allSettled([
+      transfers.receive({ transferId: transfer.id }),
+      transfers.receive({ transferId: transfer.id }),
+    ]);
+
+    assert({
+      given: 'two receives of one transfer racing (double tap, offline replay)',
+      should: 'receive it once and refuse the other, leaving 6 units at Norte',
+      actual: [
+        outcomes.map((o) => o.status).sort(),
+        (await prisma.inventory.aggregate({ where: { productId, locationId: norte }, _sum: { quantity: true } }))._sum.quantity,
+      ],
+      expected: [['fulfilled', 'rejected'], 6],
+    });
+  });
 });

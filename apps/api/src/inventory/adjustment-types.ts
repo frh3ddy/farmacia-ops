@@ -16,3 +16,9 @@ export const USER_ADJUSTMENT_TYPES: AdjustmentType[] = [
   'WRITE_OFF',
   'OTHER',
 ];
+
+/**
+ * Stock that moved, not stock that was lost or found: each leg has a matching
+ * leg elsewhere at the same cost, so loss and gain reports leave them out.
+ */
+export const STOCK_MOVE_TYPES: AdjustmentType[] = ['TRANSFER_OUT', 'TRANSFER_IN', 'BREAK_BULK_OUT', 'BREAK_BULK_IN'];

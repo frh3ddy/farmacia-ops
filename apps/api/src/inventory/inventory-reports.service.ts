@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { saleItemNet } from './sale-item-net';
+import { STOCK_MOVE_TYPES } from './adjustment-types';
 
 // ============================================================================
 // Types
@@ -613,6 +614,7 @@ export class InventoryReportsService {
 
     const adjustments = await this.prisma.inventoryAdjustment.findMany({
       where: {
+        type: { notIn: STOCK_MOVE_TYPES },
         ...(locationId && { locationId }),
         ...((startDate || endDate) && {
           adjustedAt: {
@@ -911,6 +913,7 @@ export class InventoryReportsService {
         },
       }),
       quantity: { lt: 0 }, // Only losses
+      type: { notIn: STOCK_MOVE_TYPES },
     };
 
     const adjustmentLosses = await this.prisma.inventoryAdjustment.aggregate({
