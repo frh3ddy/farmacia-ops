@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, AdjustmentType } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
@@ -14,7 +14,7 @@ interface CreateAdjustmentInput {
   quantity: number; // Positive = add, Negative = remove
   reason?: string;
   notes?: string;
-  unitCost?: number; // Optional: will use FIFO cost for removals if not provided
+  unitCost?: number; // Additions only (falls back to the last known cost); removals always use FIFO
   effectiveDate?: Date;
   adjustedBy?: string;
   syncToSquare?: boolean; // Whether to sync this adjustment to Square
@@ -215,9 +215,13 @@ export class InventoryAdjustmentService {
       }
     }
 
-    // Validate input
-    if (input.quantity === 0) {
-      throw new BadRequestException('Adjustment quantity cannot be zero');
+    // Validate input — the controller's DTO is a plain interface, so nothing
+    // has checked the runtime types of what the client sent.
+    if (!Number.isInteger(input.quantity) || input.quantity === 0) {
+      throw new BadRequestException('Quantity must be a non-zero whole number');
+    }
+    if (input.unitCost != null && !(typeof input.unitCost === 'number' && input.unitCost >= 0)) {
+      throw new BadRequestException('Unit cost must be zero or more');
     }
 
     // Check if product exists
@@ -236,6 +240,16 @@ export class InventoryAdjustmentService {
       throw new NotFoundException(`Location ${input.locationId} not found`);
     }
 
+    // A positive adjustment's batch is received at effectiveDate, so a future
+    // date would park it at the back of the FIFO line. Past dates are fine.
+    // End of today (server-local, like parseDateString) so a date-only "today",
+    // parsed as noon, still passes in the morning.
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    if (input.effectiveDate && input.effectiveDate > endOfToday) {
+      throw new BadRequestException('Adjustment effectiveDate cannot be in the future');
+    }
+
     // Check cutover lock
     const isLocked = await this.checkCutoverLock(input.locationId, input.effectiveDate || new Date());
     if (isLocked) {
@@ -244,79 +258,85 @@ export class InventoryAdjustmentService {
       );
     }
 
-    // Get current inventory total
-    const currentInventory = await this.prisma.inventory.aggregate({
-      where: {
-        productId: input.productId,
-        locationId: input.locationId,
-        quantity: { gt: 0 },
-      },
-      _sum: { quantity: true },
-    });
-    const previousTotal = currentInventory._sum.quantity || 0;
+    try {
+      if (input.quantity < 0) {
+        return await this.processNegativeAdjustment(input);
+      }
 
-    // Route to appropriate handler
-    if (input.quantity < 0) {
-      return this.processNegativeAdjustment(input, previousTotal, product.name);
-    } else {
-      return this.processPositiveAdjustment(input, previousTotal, product.name);
+      const currentInventory = await this.prisma.inventory.aggregate({
+        where: {
+          productId: input.productId,
+          locationId: input.locationId,
+          quantity: { gt: 0 },
+        },
+        _sum: { quantity: true },
+      });
+      return await this.processPositiveAdjustment(input, currentInventory._sum.quantity || 0);
+    } catch (error) {
+      // Two copies of the same replay raced past the lookup above; the loser's
+      // insert hits the unique dedup key and its transaction rolled back.
+      // (meta.target's shape varies with the driver adapter, so look the key up instead.)
+      if (input.clientRequestId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.findByClientRequestId(input.clientRequestId);
+        if (existing) return existing;
+      }
+      throw error;
     }
   }
 
   // --------------------------------------------------------------------------
   // Negative adjustment (consume inventory via FIFO)
   // --------------------------------------------------------------------------
-  private async processNegativeAdjustment(
-    input: CreateAdjustmentInput,
-    previousTotal: number,
-    productName: string
-  ): Promise<AdjustmentResult> {
+  private async processNegativeAdjustment(input: CreateAdjustmentInput): Promise<AdjustmentResult> {
     const quantityToRemove = Math.abs(input.quantity);
-
-    // Check if we have enough inventory
-    if (quantityToRemove > previousTotal) {
-      throw new BadRequestException(
-        `Insufficient inventory: requested ${quantityToRemove}, available ${previousTotal}`
-      );
-    }
-
-    // Get inventory batches (FIFO order - oldest first)
-    const batches = await this.prisma.inventory.findMany({
-      where: {
-        productId: input.productId,
-        locationId: input.locationId,
-        quantity: { gt: 0 },
-      },
-      orderBy: { receivedAt: 'asc' },
-    });
-
-    // Calculate FIFO consumption
     const consumedBatches: ConsumedBatch[] = [];
-    let remainingToConsume = quantityToRemove;
     let totalCost = new Prisma.Decimal(0);
+    let previousTotal = 0;
 
-    for (const batch of batches) {
-      if (remainingToConsume <= 0) break;
-
-      const quantityFromBatch = Math.min(batch.quantity, remainingToConsume);
-      const costContribution = batch.unitCost.mul(quantityFromBatch);
-
-      consumedBatches.push({
-        batchId: batch.id,
-        quantityConsumed: quantityFromBatch,
-        unitCost: batch.unitCost,
-        costContribution,
+    // Batches are read and decremented in the same transaction, and each
+    // decrement only applies if the batch still holds that much — a sale or
+    // another adjustment taking the same stock in between rolls this back
+    // instead of driving the batch negative.
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Get inventory batches (FIFO order - oldest first)
+      const batches = await tx.inventory.findMany({
+        where: {
+          productId: input.productId,
+          locationId: input.locationId,
+          quantity: { gt: 0 },
+        },
+        orderBy: { receivedAt: 'asc' },
       });
 
-      totalCost = totalCost.add(costContribution);
-      remainingToConsume -= quantityFromBatch;
-    }
+      previousTotal = batches.reduce((sum, b) => sum + b.quantity, 0);
+      if (quantityToRemove > previousTotal) {
+        throw new BadRequestException(
+          `Insufficient inventory: requested ${quantityToRemove}, available ${previousTotal}`
+        );
+      }
 
-    // Calculate weighted average unit cost
-    const weightedUnitCost = totalCost.div(quantityToRemove);
+      // Calculate FIFO consumption
+      let remainingToConsume = quantityToRemove;
+      for (const batch of batches) {
+        if (remainingToConsume <= 0) break;
 
-    // Execute in transaction
-    const result = await this.prisma.$transaction(async (tx) => {
+        const quantityFromBatch = Math.min(batch.quantity, remainingToConsume);
+        const costContribution = batch.unitCost.mul(quantityFromBatch);
+
+        consumedBatches.push({
+          batchId: batch.id,
+          quantityConsumed: quantityFromBatch,
+          unitCost: batch.unitCost,
+          costContribution,
+        });
+
+        totalCost = totalCost.add(costContribution);
+        remainingToConsume -= quantityFromBatch;
+      }
+
+      // Calculate weighted average unit cost
+      const weightedUnitCost = totalCost.div(quantityToRemove);
+
       // 1. Create the adjustment record
       const adjustment = await tx.inventoryAdjustment.create({
         data: {
@@ -326,7 +346,8 @@ export class InventoryAdjustmentService {
           quantity: input.quantity, // Negative value
           reason: input.reason,
           notes: input.notes,
-          unitCost: input.unitCost ? new Prisma.Decimal(input.unitCost) : weightedUnitCost,
+          // Always FIFO: a client-supplied cost would disagree with totalCost.
+          unitCost: weightedUnitCost,
           totalCost: totalCost,
           effectiveDate: input.effectiveDate || new Date(),
           adjustedBy: input.adjustedBy,
@@ -336,12 +357,15 @@ export class InventoryAdjustmentService {
 
       // 2. Deduct from inventory batches
       for (const consumed of consumedBatches) {
-        await tx.inventory.update({
-          where: { id: consumed.batchId },
+        const { count } = await tx.inventory.updateMany({
+          where: { id: consumed.batchId, quantity: { gte: consumed.quantityConsumed } },
           data: {
             quantity: { decrement: consumed.quantityConsumed },
           },
         });
+        if (count === 0) {
+          throw new ConflictException('Stock changed while recording this adjustment — please retry');
+        }
       }
 
       // 3. Create consumption records for audit trail
@@ -414,8 +438,7 @@ export class InventoryAdjustmentService {
   // --------------------------------------------------------------------------
   private async processPositiveAdjustment(
     input: CreateAdjustmentInput,
-    previousTotal: number,
-    productName: string
+    previousTotal: number
   ): Promise<AdjustmentResult> {
     // Unit cost is required for positive adjustments
     if (!input.unitCost && input.unitCost !== 0) {
@@ -608,22 +631,23 @@ export class InventoryAdjustmentService {
   }
 
   private async getLastKnownCost(productId: string, locationId: string): Promise<number | null> {
-    // Try supplier product cost first
+    // What this location last actually paid comes first; zero-cost batches
+    // (test or uncosted stock) would make the added stock free.
+    const lastBatch = await this.prisma.inventory.findFirst({
+      where: { productId, locationId, unitCost: { gt: 0 } },
+      orderBy: { receivedAt: 'desc' },
+    });
+    if (lastBatch) {
+      return Number(lastBatch.unitCost);
+    }
+
+    // Then the preferred supplier's list cost
     const supplierProduct = await this.prisma.supplierProduct.findFirst({
       where: { productId, isPreferred: true },
       orderBy: { cost: 'desc' },
     });
     if (supplierProduct) {
       return Number(supplierProduct.cost);
-    }
-
-    // Try last inventory batch at this location
-    const lastBatch = await this.prisma.inventory.findFirst({
-      where: { productId, locationId },
-      orderBy: { receivedAt: 'desc' },
-    });
-    if (lastBatch) {
-      return Number(lastBatch.unitCost);
     }
 
     // Try cost approval
@@ -733,41 +757,31 @@ export class InventoryAdjustmentService {
       _sum: { quantity: true, totalCost: true },
     });
 
-    // Get totals
-    const totals = await this.prisma.inventoryAdjustment.aggregate({
-      where,
-      _count: { id: true },
-      _sum: { totalCost: true },
-    });
-
-    // Separate positive and negative
-    const positiveTypes: AdjustmentType[] = ['FOUND', 'RETURN', 'TRANSFER_IN', 'COUNT_CORRECTION'];
-    
-    const positive = byType
-      .filter(t => positiveTypes.includes(t.type) || (t._sum.quantity || 0) > 0)
-      .reduce((acc, t) => ({
-        count: acc.count + t._count.id,
-        totalQuantity: acc.totalQuantity + Math.abs(t._sum.quantity || 0),
-        totalCost: new Prisma.Decimal(acc.totalCost).add(t._sum.totalCost || 0).toString(),
-      }), { count: 0, totalQuantity: 0, totalCost: '0' });
-
-    const negative = byType
-      .filter(t => !positiveTypes.includes(t.type) && (t._sum.quantity || 0) <= 0)
-      .reduce((acc, t) => ({
-        count: acc.count + t._count.id,
-        totalQuantity: acc.totalQuantity + Math.abs(t._sum.quantity || 0),
-        totalCost: new Prisma.Decimal(acc.totalCost).add(t._sum.totalCost || 0).toString(),
-      }), { count: 0, totalQuantity: 0, totalCost: '0' });
+    // Split by the sign of each adjustment, not its type: COUNT_CORRECTION and
+    // OTHER go either way. totalCost is stored positive for removals too.
+    const side = async (quantity: Prisma.IntFilter) => {
+      const agg = await this.prisma.inventoryAdjustment.aggregate({
+        where: { ...where, quantity },
+        _count: { id: true },
+        _sum: { quantity: true, totalCost: true },
+      });
+      return {
+        count: agg._count.id,
+        totalQuantity: Math.abs(agg._sum.quantity || 0),
+        totalCost: agg._sum.totalCost || new Prisma.Decimal(0),
+      };
+    };
+    const [added, removed] = await Promise.all([side({ gt: 0 }), side({ lt: 0 })]);
 
     return {
       locationId,
       period: { startDate, endDate },
       totals: {
-        adjustmentCount: totals._count.id,
-        totalCostImpact: totals._sum.totalCost?.toString() || '0',
+        adjustmentCount: added.count + removed.count,
+        totalCostImpact: added.totalCost.sub(removed.totalCost).toString(),
       },
-      positive,
-      negative,
+      positive: { ...added, totalCost: added.totalCost.toString() },
+      negative: { ...removed, totalCost: removed.totalCost.toString() },
       byType: byType.map(t => ({
         type: t.type,
         count: t._count.id,

@@ -12,7 +12,8 @@ import {
 } from '@nestjs/common';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { AdjustmentType } from '@prisma/client';
-import { AuthGuard, LocationGuard, Roles, scopedLocationId, Public, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, Public, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { USER_ADJUSTMENT_TYPES } from './adjustment-types';
 
 // ============================================================================
 // DTOs
@@ -48,6 +49,27 @@ function parseDateString(dateStr: string): Date {
   return new Date(dateStr);
 }
 
+/**
+ * An optional date parameter, or a 400 naming it when it isn't a date. A
+ * date-only endDate covers that whole day.
+ */
+function parseDateParam(value: string | undefined, name: string): Date | undefined {
+  if (!value) return undefined;
+  const date = parseDateString(value);
+  if (isNaN(date.getTime())) {
+    throw new HttpException(
+      { success: false, message: `Invalid ${name} format` },
+      HttpStatus.BAD_REQUEST
+    );
+  }
+  if (name === 'endDate' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    date.setHours(23, 59, 59, 999);
+  }
+  return date;
+}
+
+const MAX_LIST_LIMIT = 500;
+
 // ============================================================================
 // Controller
 // ============================================================================
@@ -78,33 +100,14 @@ export class InventoryAdjustmentController {
     }
 
     // Validate adjustment type
-    const validTypes = Object.values(AdjustmentType);
-    if (!validTypes.includes(body.type)) {
+    if (!USER_ADJUSTMENT_TYPES.includes(body.type)) {
       throw new HttpException(
-        { success: false, message: `Invalid adjustment type. Must be one of: ${validTypes.join(', ')}` },
+        { success: false, message: `Invalid adjustment type. Must be one of: ${USER_ADJUSTMENT_TYPES.join(', ')}` },
         HttpStatus.BAD_REQUEST
       );
     }
 
-    // Validate quantity is non-zero
-    if (body.quantity === 0) {
-      throw new HttpException(
-        { success: false, message: 'Quantity cannot be zero' },
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    // Parse effective date if provided
-    let effectiveDate: Date | undefined;
-    if (body.effectiveDate) {
-      effectiveDate = parseDateString(body.effectiveDate);
-      if (isNaN(effectiveDate.getTime())) {
-        throw new HttpException(
-          { success: false, message: 'Invalid effectiveDate format' },
-          HttpStatus.BAD_REQUEST
-        );
-      }
-    }
+    const effectiveDate = parseDateParam(body.effectiveDate, 'effectiveDate');
 
     const result = await this.adjustmentService.createAdjustment({
       locationId,
@@ -213,8 +216,10 @@ export class InventoryAdjustmentController {
   // --------------------------------------------------------------------------
   @Get(':id')
   @Roles('OWNER', 'MANAGER')
-  async getAdjustment(@Param('id') id: string) {
+  async getAdjustment(@Param('id') id: string, @Req() req: GuardedRequest) {
     const adjustment = await this.adjustmentService.getAdjustment(id);
+    // No locationId in the request for LocationGuard to check — check the record's.
+    assertLocationAccess(req, adjustment.locationId);
     return {
       success: true,
       data: {
@@ -268,11 +273,12 @@ export class InventoryAdjustmentController {
     @Query('type') type?: AdjustmentType,
     @Query('limit') limit?: string
   ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : NaN;
     const adjustments = await this.adjustmentService.getAdjustmentsByLocation(locationId, {
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : undefined,
+      startDate: parseDateParam(startDate, 'startDate'),
+      endDate: parseDateParam(endDate, 'endDate'),
       type,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      limit: parsedLimit > 0 ? Math.min(parsedLimit, MAX_LIST_LIMIT) : undefined,
     });
     return {
       success: true,
@@ -298,8 +304,8 @@ export class InventoryAdjustmentController {
   ) {
     const summary = await this.adjustmentService.getAdjustmentSummary(
       locationId,
-      startDate ? new Date(startDate) : undefined,
-      endDate ? new Date(endDate) : undefined
+      parseDateParam(startDate, 'startDate'),
+      parseDateParam(endDate, 'endDate')
     );
     return {
       success: true,
@@ -329,11 +335,11 @@ export class InventoryAdjustmentController {
   @Get('types/list')
   @Public()
   getAdjustmentTypes() {
-    const types = Object.values(AdjustmentType).map(type => ({
+    const types = USER_ADJUSTMENT_TYPES.map(type => ({
       value: type,
       label: type.replace(/_/g, ' ').toLowerCase().replace(/^\w/, c => c.toUpperCase()),
-      isPositive: ['FOUND', 'RETURN', 'TRANSFER_IN'].includes(type),
-      isNegative: ['DAMAGE', 'THEFT', 'EXPIRED', 'TRANSFER_OUT', 'WRITE_OFF'].includes(type),
+      isPositive: ['FOUND', 'RETURN'].includes(type),
+      isNegative: ['DAMAGE', 'THEFT', 'EXPIRED', 'WRITE_OFF'].includes(type),
       isVariable: ['COUNT_CORRECTION', 'OTHER'].includes(type),
     }));
 
