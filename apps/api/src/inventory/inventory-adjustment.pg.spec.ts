@@ -1,54 +1,27 @@
 /**
- * InventoryAdjustmentService against a real Postgres engine (PGlite with every
- * migration), so FIFO consumption, the conditional decrement and the
- * non-negative quantity constraint run for real. PrismaService reaches PGlite
- * through pglite-socket.
- *
- * PGlite is a single connection, so two transactions can't interleave here:
- * the race itself is covered by inventory-adjustment.spec.ts; this proves the
- * guards the fix relies on.
+ * InventoryAdjustmentService against a real Postgres engine (see
+ * testing/pglite.ts), so FIFO consumption, the conditional decrement and the
+ * non-negative quantity constraint run for real.
  */
-import { readdirSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { PGlite, type Extension } from '@electric-sql/pglite';
-import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import { assert } from 'riteway/vitest';
+import { startPostgres } from '../testing/pglite';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 
-// The migrations need pg_trgm. tsconfig's module resolution can't see package
-// `exports` subpaths (see product-search.pg.spec.ts), so require it.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { pg_trgm } = require('@electric-sql/pglite/contrib/pg_trgm') as { pg_trgm: Extension };
-
-const MIGRATIONS = join(__dirname, '../../../../prisma/migrations');
-let db: PGlite;
-let server: PGLiteSocketServer;
 let prisma: PrismaService;
+let stop: () => Promise<void>;
 let service: InventoryAdjustmentService;
 let locationId: string;
 
 beforeAll(async () => {
-  db = await PGlite.create({ extensions: { pg_trgm } });
-  for (const dir of readdirSync(MIGRATIONS).filter((d) => !d.endsWith('.toml')).sort()) {
-    await db.exec(readFileSync(join(MIGRATIONS, dir, 'migration.sql'), 'utf8'));
-  }
-  const port = 55_000 + Math.floor(Math.random() * 1_000);
-  server = new PGLiteSocketServer({ db, port });
-  await server.start();
-  // PGlite is a single connection.
-  process.env.DATABASE_URL = `postgresql://postgres@127.0.0.1:${port}/postgres`;
-  process.env.DATABASE_POOL_MAX = '1';
-  prisma = new PrismaService();
+  ({ prisma, stop } = await startPostgres());
   service = new InventoryAdjustmentService(prisma);
   ({ id: locationId } = await prisma.location.create({ data: { squareId: 'SQ-CENTRO', name: 'Centro' } }));
+  // Finishing a location's cutover writes its lock.
+  await prisma.cutoverLock.create({ data: { locationId, cutoverDate: new Date('2026-09-01') } });
 }, 120_000);
 
-afterAll(async () => {
-  await prisma?.onModuleDestroy();
-  await server?.stop();
-  await db?.close();
-});
+afterAll(() => stop?.());
 
 /** A fresh product with the given batches, created in the order listed. */
 async function productWithBatches(batches: Array<{ quantity: number; unitCost: number; receivedAt: string }>) {
@@ -154,6 +127,60 @@ describe('InventoryAdjustmentService.createAdjustment (Postgres)', () => {
     });
   });
 
+  test('a request id already used for a different adjustment', async () => {
+    const { productId } = await productWithBatches([{ quantity: 10, unitCost: 2, receivedAt: '2026-10-01' }]);
+    const { id: elsewhere } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Norte' } });
+    const clientRequestId = `req-reused-${productId}`;
+    await service.createAdjustment({ locationId, productId, type: 'DAMAGE', quantity: -3, clientRequestId });
+
+    const attempts = [
+      { locationId: elsewhere, productId, type: 'DAMAGE' as const, quantity: -3 },
+      { locationId, productId, type: 'DAMAGE' as const, quantity: -4 },
+      { locationId, productId, type: 'THEFT' as const, quantity: -3 },
+    ];
+    const outcomes = [];
+    for (const attempt of attempts) {
+      outcomes.push(await service.createAdjustment({ ...attempt, clientRequestId }).then(
+        (r) => `returned ${r.adjustment.id}`,
+        (e: Error) => e.message,
+      ));
+    }
+
+    assert({
+      given: 'a request id reused for another location, quantity or type',
+      should: "refuse it rather than return the other adjustment or skip this one",
+      actual: outcomes,
+      expected: Array(3).fill('This clientRequestId was already used for a different adjustment'),
+    });
+  });
+
+  test('a unit cost sent with a removal', async () => {
+    const { productId } = await productWithBatches([{ quantity: 10, unitCost: 3, receivedAt: '2026-10-01' }]);
+
+    const { adjustment } = await service.createAdjustment({ locationId, productId, type: 'DAMAGE', quantity: -2, unitCost: 50 });
+
+    assert({
+      given: 'a removal with a client-supplied unit cost',
+      should: 'record the FIFO cost, consistent with the total',
+      actual: [adjustment.unitCost, adjustment.totalCost],
+      expected: ['3', '6'],
+    });
+  });
+
+  test('a free item added at zero cost', async () => {
+    // A costed batch exists, so a lookup would have found $4.
+    const { productId } = await productWithBatches([{ quantity: 1, unitCost: 4, receivedAt: '2026-10-01' }]);
+
+    const { adjustment } = await service.createAdjustment({ locationId, productId, type: 'FOUND', quantity: 5, unitCost: 0 });
+
+    assert({
+      given: 'stock added at a unit cost of zero',
+      should: 'record it at zero rather than looking a cost up',
+      actual: adjustment.unitCost,
+      expected: '0',
+    });
+  });
+
   test('stock added', async () => {
     const { productId } = await productWithBatches([]);
 
@@ -168,6 +195,143 @@ describe('InventoryAdjustmentService.createAdjustment (Postgres)', () => {
       should: 'create one batch of that quantity and cost, linked back to the adjustment',
       actual: [batch.quantity, batch.unitCost.toString(), batch.createdByAdjustment?.id],
       expected: [4, '3', result.adjustment.id],
+    });
+  });
+});
+
+describe('InventoryAdjustmentService Square sync (Postgres)', () => {
+  /** The service with Square's inventory call recorded; `errors` makes Square reject it. */
+  async function syncedProduct(errors?: Array<{ code: string; detail: string }>) {
+    const batchCreateChanges = vi.fn().mockResolvedValue(errors ? { errors } : { counts: [] });
+    const synced = new InventoryAdjustmentService(prisma);
+    synced['squareClient'] = { inventory: { batchCreateChanges } } as any;
+    const { productId } = await productWithBatches([{ quantity: 10, unitCost: 2, receivedAt: '2026-10-01' }]);
+    await prisma.catalogMapping.create({ data: { productId, squareVariationId: `v-${productId}` } });
+    const sentChange = (call = 0) => {
+      const request = batchCreateChanges.mock.calls[call][0];
+      const { fromState, toState, quantity, locationId: squareLocation } = request.changes[0].adjustment;
+      return { idempotencyKey: request.idempotencyKey, fromState, toState, quantity, squareLocation };
+    };
+    return { synced, productId, batchCreateChanges, sentChange };
+  }
+
+  test('a removal', async () => {
+    const { synced, productId, sentChange } = await syncedProduct();
+    const { adjustment, squareSync } = await synced.createAdjustment({ locationId, productId, type: 'DAMAGE', quantity: -2, syncToSquare: true });
+
+    assert({
+      given: 'a damage synced to Square',
+      should: 'send it as waste at the location, keyed on the adjustment, and record it as synced',
+      actual: [sentChange(), squareSync, (await prisma.inventoryAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } })).squareSynced],
+      expected: [
+        { idempotencyKey: adjustment.id, fromState: 'IN_STOCK', toState: 'WASTE', quantity: '2', squareLocation: 'SQ-CENTRO' },
+        { synced: true },
+        true,
+      ],
+    });
+  });
+
+  test('a customer return', async () => {
+    const { synced, productId, sentChange } = await syncedProduct();
+    await synced.createAdjustment({ locationId, productId, type: 'RETURN', quantity: 1, unitCost: 2, syncToSquare: true });
+
+    assert({
+      given: 'a return synced to Square',
+      should: 'send it as an unlinked return back into stock',
+      actual: [sentChange().fromState, sentChange().toState],
+      expected: ['UNLINKED_RETURN', 'IN_STOCK'],
+    });
+  });
+
+  test('Square rejecting the change, then a retry', async () => {
+    const { synced, productId, batchCreateChanges, sentChange } = await syncedProduct([{ code: 'BAD_REQUEST', detail: 'Nope' }]);
+    const { adjustment, squareSync } = await synced.createAdjustment({ locationId, productId, type: 'FOUND', quantity: 3, unitCost: 2, syncToSquare: true });
+    const stored = await prisma.inventoryAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } });
+
+    batchCreateChanges.mockResolvedValue({ counts: [] });
+    const retried = await synced.retrySquareSync(adjustment.id);
+
+    assert({
+      given: 'Square rejecting the change',
+      should: 'keep the adjustment and record why Square refused it',
+      actual: [squareSync, stored.squareSynced, stored.squareSyncError],
+      expected: [{ synced: false, error: 'Nope' }, false, 'Nope'],
+    });
+    assert({
+      given: 'a retry that Square accepts',
+      should: 'replay the same idempotency key and record it as synced',
+      actual: [retried, sentChange(1).idempotencyKey, (await prisma.inventoryAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } })).squareSynced],
+      expected: [{ synced: true }, adjustment.id, true],
+    });
+  });
+
+  test('retrying an adjustment Square already has', async () => {
+    const { synced, productId, batchCreateChanges } = await syncedProduct();
+    const { adjustment } = await synced.createAdjustment({ locationId, productId, type: 'FOUND', quantity: 3, unitCost: 2, syncToSquare: true });
+
+    assert({
+      given: 'a retry of an adjustment already synced',
+      should: 'report it synced, with no error and no second call to Square',
+      actual: [await synced.retrySquareSync(adjustment.id), batchCreateChanges.mock.calls.length],
+      expected: [{ synced: true }, 1],
+    });
+  });
+});
+
+describe('InventoryAdjustmentService.createAdjustment cutover (Postgres)', () => {
+  test('a location not cut over yet', async () => {
+    const { id: notCutOver } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Oriente' } });
+    const { productId } = await productWithBatches([]);
+
+    let error: string | undefined;
+    try {
+      await service.createAdjustment({ locationId: notCutOver, productId, type: 'FOUND', quantity: 5, unitCost: 1 });
+    } catch (e) {
+      error = (e as Error).message;
+    }
+
+    assert({
+      given: 'a location whose cutover has not finished',
+      should: 'refuse the adjustment, since the cutover would count that stock again',
+      actual: [error, await prisma.inventory.count({ where: { productId } })],
+      expected: ['This location has not been cut over yet. Adjustments start once its cutover is complete.', 0],
+    });
+  });
+
+  test('a cut-over location, dated today', async () => {
+    const { productId } = await productWithBatches([]);
+    const noonToday = new Date();
+    noonToday.setHours(12, 0, 0, 0);
+
+    const result = await service.createAdjustment({
+      locationId, productId, type: 'FOUND', quantity: 5, unitCost: 1, effectiveDate: noonToday,
+    });
+
+    assert({
+      given: 'a date-only "today" (parsed as noon) at a cut-over location',
+      should: 'record the adjustment',
+      actual: result.inventoryImpact.newTotal,
+      expected: 5,
+    });
+  });
+
+  test('a date on or before the cutover', async () => {
+    const { productId } = await productWithBatches([]);
+
+    let error: string | undefined;
+    try {
+      await service.createAdjustment({
+        locationId, productId, type: 'FOUND', quantity: 5, unitCost: 1, effectiveDate: new Date('2026-08-15'),
+      });
+    } catch (e) {
+      error = (e as Error).message;
+    }
+
+    assert({
+      given: 'an adjustment dated before the location\'s cutover',
+      should: 'refuse it',
+      actual: error,
+      expected: 'Cannot make adjustments before the cutover date. The inventory for this location is locked.',
     });
   });
 });

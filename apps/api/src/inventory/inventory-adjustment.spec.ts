@@ -1,3 +1,5 @@
+// What can't run on PGlite (concurrent transactions) or is decided before the
+// database is touched. Database behaviour lives in inventory-adjustment.pg.spec.ts.
 import { assert } from 'riteway/vitest';
 import { Prisma } from '@prisma/client';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
@@ -11,104 +13,25 @@ const errorOf = async (fn: () => Promise<unknown>) => {
   }
 };
 
-describe('createAdjustment effectiveDate', () => {
-  const service = new InventoryAdjustmentService({
-    product: { findUnique: async () => ({ id: 'p1', name: 'P' }) },
-    location: { findUnique: async () => ({ id: 'l1' }) },
-    cutoverLock: { findFirst: async () => ({ id: 'lock' }) },
-  } as any);
-  const input = { locationId: 'l1', productId: 'p1', type: 'FOUND' as const, quantity: 1, unitCost: 1 };
+// Input checks run before any query, so a service with no database will do:
+// reaching one would fail with a different error.
+const noDatabase = () => new InventoryAdjustmentService({} as any);
+const base = { locationId: 'l1', productId: 'p1' };
 
+describe('createAdjustment effectiveDate', () => {
   test('a future date', async () => {
+    const service = new InventoryAdjustmentService({
+      product: { findUnique: async () => ({ id: 'p1' }) },
+      location: { findUnique: async () => ({ id: 'l1' }) },
+    } as any);
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
+
     assert({
       given: 'an effectiveDate tomorrow',
       should: 'reject it',
-      actual: await errorOf(() => service.createAdjustment({ ...input, effectiveDate: tomorrow })),
+      actual: await errorOf(() => service.createAdjustment({ ...base, type: 'FOUND', quantity: 1, unitCost: 1, effectiveDate: tomorrow })),
       expected: 'Adjustment effectiveDate cannot be in the future',
-    });
-  });
-
-  test('today at noon or a past date', async () => {
-    const noonToday = new Date();
-    noonToday.setHours(12, 0, 0, 0);
-    // The cutover lock stub always locks, so reaching it means the date check passed.
-    assert({
-      given: 'a date-only "today" (parsed as noon)',
-      should: 'pass the date check',
-      actual: (await errorOf(() => service.createAdjustment({ ...input, effectiveDate: noonToday })))?.startsWith('Cannot make adjustments'),
-      expected: true,
-    });
-  });
-});
-
-describe('createAdjustment removal race', () => {
-  test('stock taken between the read and the decrement', async () => {
-    const consumptions = vi.fn();
-    const tx = {
-      inventory: {
-        findMany: async () => [{ id: 'b1', quantity: 5, unitCost: new Prisma.Decimal(2) }],
-        // Someone else took the stock first: the conditional decrement matches nothing.
-        updateMany: async () => ({ count: 0 }),
-      },
-      inventoryAdjustment: { create: async () => ({ id: 'a1' }) },
-      inventoryConsumption: { createMany: consumptions },
-    };
-    const service = new InventoryAdjustmentService({
-      product: { findUnique: async () => ({ id: 'p1', name: 'P' }) },
-      location: { findUnique: async () => ({ id: 'l1' }) },
-      cutoverLock: { findFirst: async () => null },
-      $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
-    } as any);
-
-    assert({
-      given: 'a batch emptied by a concurrent write',
-      should: 'fail with a retryable conflict and write no consumptions',
-      actual: [
-        await errorOf(() => service.createAdjustment({ locationId: 'l1', productId: 'p1', type: 'DAMAGE', quantity: -5 })),
-        consumptions.mock.calls.length,
-      ],
-      expected: ['Stock changed while recording this adjustment — please retry', 0],
-    });
-  });
-});
-
-// One 10-unit batch at $3, everything else a pass-through; records what's written.
-function serviceWithStock() {
-  const created = vi.fn(async ({ data }: any) => ({ id: 'a1', adjustedAt: new Date(), ...data }));
-  const tx = {
-    inventory: {
-      findMany: async () => [{ id: 'b1', quantity: 10, unitCost: new Prisma.Decimal(3) }],
-      updateMany: async () => ({ count: 1 }),
-      create: async () => ({ id: 'b2' }),
-    },
-    inventoryAdjustment: { create: created },
-    inventoryConsumption: { createMany: async () => ({}) },
-  };
-  const service = new InventoryAdjustmentService({
-    product: { findUnique: async () => ({ id: 'p1', name: 'P' }) },
-    location: { findUnique: async () => ({ id: 'l1' }) },
-    cutoverLock: { findFirst: async () => null },
-    inventory: { aggregate: async () => ({ _sum: { quantity: 10 } }) },
-    $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
-  } as any);
-  return { service, created };
-}
-
-const base = { locationId: 'l1', productId: 'p1' };
-
-describe('createAdjustment removal cost', () => {
-  test('a unit cost sent with a removal', async () => {
-    const { service, created } = serviceWithStock();
-    await service.createAdjustment({ ...base, type: 'DAMAGE', quantity: -2, unitCost: 50 });
-    const { unitCost, totalCost } = created.mock.calls[0][0].data;
-
-    assert({
-      given: 'a removal with a client-supplied unit cost',
-      should: 'record the FIFO cost, consistent with the total',
-      actual: [unitCost.toString(), totalCost.toString()],
-      expected: ['3', '6'],
     });
   });
 });
@@ -117,48 +40,54 @@ describe('createAdjustment input', () => {
   const rejected = 'Quantity must be a non-zero whole number';
 
   test('a quantity that is not a whole number', async () => {
-    const { service } = serviceWithStock();
     assert({
       given: 'a fractional quantity',
       should: 'refuse it',
-      actual: await errorOf(() => service.createAdjustment({ ...base, type: 'FOUND', quantity: 1.5, unitCost: 1 })),
+      actual: await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'FOUND', quantity: 1.5, unitCost: 1 })),
       expected: rejected,
     });
     assert({
       given: 'a quantity sent as text',
       should: 'refuse it',
-      actual: await errorOf(() => service.createAdjustment({ ...base, type: 'FOUND', quantity: '5' as any, unitCost: 1 })),
+      actual: await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'FOUND', quantity: '5' as any, unitCost: 1 })),
       expected: rejected,
     });
     assert({
       given: 'a missing quantity on a quick route (NaN after sign forcing)',
       should: 'refuse it',
-      actual: await errorOf(() => service.createAdjustment({ ...base, type: 'DAMAGE', quantity: NaN })),
+      actual: await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'DAMAGE', quantity: NaN })),
       expected: rejected,
     });
   });
 
-  test('a negative unit cost', async () => {
-    const { service, created } = serviceWithStock();
+  test('an OTHER adjustment without notes', async () => {
     assert({
-      given: 'stock added at a negative unit cost',
-      should: 'refuse it without writing anything',
-      actual: [
-        await errorOf(() => service.createAdjustment({ ...base, type: 'FOUND', quantity: 5, unitCost: -3 })),
-        created.mock.calls.length,
-      ],
-      expected: ['Unit cost must be zero or more', 0],
+      given: 'an adjustment of type OTHER with no notes saying what happened',
+      should: 'refuse it',
+      actual: await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'OTHER', quantity: -1, notes: '  ' })),
+      expected: 'Notes are required for an OTHER adjustment',
     });
   });
 
-  test('a free item added at zero cost', async () => {
-    const { service, created } = serviceWithStock();
-    await service.createAdjustment({ ...base, type: 'FOUND', quantity: 5, unitCost: 0 });
+  test('a very long reason or note', async () => {
+    const long = 'x'.repeat(501);
     assert({
-      given: 'stock added at a unit cost of zero',
-      should: 'record it at zero rather than looking a cost up',
-      actual: created.mock.calls[0][0].data.unitCost.toString(),
-      expected: '0',
+      given: 'a reason or note longer than a short paragraph',
+      should: 'refuse it',
+      actual: [
+        await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'DAMAGE', quantity: -1, reason: long })),
+        await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'DAMAGE', quantity: -1, notes: long })),
+      ],
+      expected: Array(2).fill('Reason and notes must be 500 characters or fewer'),
+    });
+  });
+
+  test('a negative unit cost', async () => {
+    assert({
+      given: 'stock added at a negative unit cost',
+      should: 'refuse it before writing anything',
+      actual: await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'FOUND', quantity: 5, unitCost: -3 })),
+      expected: 'Unit cost must be zero or more',
     });
   });
 });
@@ -178,9 +107,9 @@ describe('createAdjustment replay', () => {
       code: 'P2002', clientVersion: 'test', meta: { target: ['clientRequestId'] },
     });
     const service = new InventoryAdjustmentService({
-      product: { findUnique: async () => ({ id: 'p1', name: 'P' }) },
+      product: { findUnique: async () => ({ id: 'p1' }) },
       location: { findUnique: async () => ({ id: 'l1' }) },
-      cutoverLock: { findFirst: async () => null },
+      cutoverLock: { findFirst: async () => ({ cutoverDate: new Date('2026-01-01') }) },
       inventory: { aggregate: async () => ({ _sum: { quantity: 5 } }) },
       inventoryAdjustment: { findUnique },
       $transaction: async () => { throw duplicate; },
@@ -223,6 +152,15 @@ describe('getLastKnownCost', () => {
       should: "fall back to the supplier's cost",
       actual: await costOf(null, { cost: new Prisma.Decimal(9) }),
       expected: 9,
+    });
+  });
+
+  test('no batch or supplier cost', async () => {
+    assert({
+      given: 'only an approved cutover cost',
+      should: 'fall back to it',
+      actual: await costOf(null, null, { approvedCost: new Prisma.Decimal(7) }),
+      expected: 7,
     });
   });
 });

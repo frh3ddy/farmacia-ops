@@ -5,7 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.spec.ts'],
-    // The *.pg.spec.ts suites run against the local Postgres.
+    // The *.pg.spec.ts suites run against PGlite (src/testing/pglite.ts).
     testTimeout: 60_000,
   },
 });
