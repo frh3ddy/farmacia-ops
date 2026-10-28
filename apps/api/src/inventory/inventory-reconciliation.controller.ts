@@ -5,10 +5,11 @@ import {
   Param,
   HttpException,
   HttpStatus,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { InventoryReconciliationService } from './inventory-reconciliation.service';
-import { AuthGuard, LocationGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, assertLocationAccess, GuardedRequest } from '../auth/guards/auth.guard';
 
 @Controller('inventory/reconciliation')
 @UseGuards(AuthGuard, LocationGuard)
@@ -82,33 +83,23 @@ export class InventoryReconciliationController {
    * Shows which inventory batches were consumed (FIFO audit trail)
    */
   @Get('sale-item/:saleItemId')
-  async getSaleItemConsumption(@Param('saleItemId') saleItemId: string) {
-    try {
-      const consumptions = await this.reconciliationService.getSaleItemConsumption(
-        saleItemId,
-      );
+  async getSaleItemConsumption(@Param('saleItemId') saleItemId: string, @Req() req: GuardedRequest) {
+    const consumptions = await this.reconciliationService.getSaleItemConsumption(saleItemId);
+    // No locationId in the request for LocationGuard to check — check the batches'.
+    new Set(consumptions.map((c) => c.batchLocationId)).forEach((locationId) => assertLocationAccess(req, locationId));
 
-      return {
-        success: true,
-        saleItemId,
-        consumptions: consumptions.map(c => ({
-          ...c,
-          unitCost: c.unitCost.toString(),
-          totalCost: c.totalCost.toString(),
-          batchReceivedAt: c.batchReceivedAt.toISOString(),
-          consumedAt: c.consumedAt.toISOString(),
-        })),
-        totalBatches: consumptions.length,
-        totalQuantity: consumptions.reduce((sum, c) => sum + c.quantityConsumed, 0),
-      };
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: `Failed to get sale item consumption: ${error instanceof Error ? error.message : String(error)}`,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return {
+      success: true,
+      saleItemId,
+      consumptions: consumptions.map(c => ({
+        ...c,
+        unitCost: c.unitCost.toString(),
+        totalCost: c.totalCost.toString(),
+        batchReceivedAt: c.batchReceivedAt.toISOString(),
+        consumedAt: c.consumedAt.toISOString(),
+      })),
+      totalBatches: consumptions.length,
+      totalQuantity: consumptions.reduce((sum, c) => sum + c.quantityConsumed, 0),
+    };
   }
 }

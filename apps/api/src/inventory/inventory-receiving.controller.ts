@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { InventoryReceivingService } from './inventory-receiving.service';
 import { ProductsService } from '../products/products.service';
-import { AuthGuard, LocationGuard, Roles, scopedLocationId, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 // ============================================================================
 // DTOs
@@ -215,8 +215,10 @@ export class InventoryReceivingController {
   // --------------------------------------------------------------------------
   @Get(':id')
   @Roles('OWNER', 'MANAGER')
-  async getReceiving(@Param('id') id: string) {
+  async getReceiving(@Param('id') id: string, @Req() req: GuardedRequest) {
     const receiving = await this.receivingService.getReceiving(id);
+    // No locationId in the request for LocationGuard to check — check the record's.
+    assertLocationAccess(req, receiving.locationId);
     return {
       success: true,
       data: {

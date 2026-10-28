@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
@@ -173,13 +173,27 @@ export class InventoryReceivingService {
     // client-supplied dedup key and return the existing result instead of
     // creating a duplicate batch.
     if (input.clientRequestId) {
-      const existing = await this.findByClientRequestId(input.clientRequestId);
+      const existing = await this.findByClientRequestId(input);
       if (existing) {
         this.logger.log(`[RECEIVING] Duplicate clientRequestId ${input.clientRequestId} — returning existing receiving ${existing.receiving.id}`);
         return existing;
       }
     }
 
+    try {
+      return await this.recordReceiving(input);
+    } catch (error) {
+      // Two copies of the same replay raced past the lookup above; the loser's
+      // insert hits the unique dedup key and its transaction rolled back.
+      if (input.clientRequestId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.findByClientRequestId(input);
+        if (existing) return existing;
+      }
+      throw error;
+    }
+  }
+
+  private async recordReceiving(input: ReceiveInventoryInput): Promise<ReceivingResult> {
     // Validate input
     if (input.quantity <= 0) {
       throw new BadRequestException('La cantidad debe ser mayor que cero');
@@ -381,12 +395,20 @@ export class InventoryReceivingService {
     };
   }
 
-  private async findByClientRequestId(clientRequestId: string): Promise<ReceivingResult | null> {
+  private async findByClientRequestId(input: ReceiveInventoryInput): Promise<ReceivingResult | null> {
     const existing = await this.prisma.inventoryReceiving.findUnique({
-      where: { clientRequestId },
+      where: { clientRequestId: input.clientRequestId },
       include: { inventoryBatch: true },
     });
     if (!existing) return null;
+    // A replay repeats its request exactly. Anything else reusing the key is a
+    // client bug — or a probe for another location's receiving.
+    const sameRequest = existing.locationId === input.locationId
+      && existing.productId === input.productId
+      && existing.quantity === input.quantity;
+    if (!sameRequest) {
+      throw new ConflictException('This clientRequestId was already used for a different receiving');
+    }
 
     const inventoryTotal = await this.prisma.inventory.aggregate({
       where: { productId: existing.productId, locationId: existing.locationId, quantity: { gt: 0 } },

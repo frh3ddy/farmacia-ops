@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { EmployeeRole } from '@prisma/client';
 import { InventoryReportsService } from './inventory-reports.service';
-import { AuthGuard, LocationGuard, Roles, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 // Helper to set date to end of day (23:59:59.999) to include all records from that day
 function endOfDay(date: Date): Date {
@@ -287,12 +287,14 @@ export class InventoryReportsController {
   // --------------------------------------------------------------------------
   @Get('batch/:batchId')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async getBatchDetail(@Param('batchId') batchId: string) {
+  async getBatchDetail(@Param('batchId') batchId: string, @Req() req: GuardedRequest) {
     const detail = await this.reportsService.getBatchDetail(batchId);
 
     if (!detail) {
       throw new NotFoundException(`Batch ${batchId} not found`);
     }
+    // No locationId in the request for LocationGuard to check — check the batch's.
+    assertLocationAccess(req, detail.locationId);
 
     return {
       success: true,
