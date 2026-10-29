@@ -9,8 +9,8 @@ import {
 } from '@nestjs/common';
 import { EmployeeRole } from '@prisma/client';
 import { InventoryReportsService } from './inventory-reports.service';
-import { parseDateParam } from './business-date';
-import { AuthGuard, LocationGuard, Roles, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { parseDateParam, startOfBusinessMonth } from './business-date';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 const PROFIT_LOSS_ROLES: EmployeeRole[] = ['OWNER', 'ACCOUNTANT'];
 
@@ -31,8 +31,7 @@ export class InventoryReportsController {
     @Query('endDate') endDate?: string,
     @Query('groupByCategory') groupByCategory?: string
   ) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const report = await this.reportsService.getCOGSReport({
       locationId: targetLocationId,
@@ -57,8 +56,7 @@ export class InventoryReportsController {
     @Query('locationId') locationId?: string,
     @Query('productId') productId?: string
   ) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const report = await this.reportsService.getInventoryValuationReport({
       locationId: targetLocationId,
@@ -82,8 +80,7 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const report = await this.reportsService.getProfitMarginReport({
       locationId: targetLocationId,
@@ -108,8 +105,7 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const report = await this.reportsService.getAdjustmentImpactReport({
       locationId: targetLocationId,
@@ -134,8 +130,7 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const report = await this.reportsService.getReceivingSummaryReport({
       locationId: targetLocationId,
@@ -161,8 +156,7 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const report = await this.reportsService.getProfitAndLossReport({
       locationId: targetLocationId,
@@ -188,15 +182,15 @@ export class InventoryReportsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string
   ) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
-    const parsedStartDate = parseDateParam(startDate, 'startDate', 'start');
+    // Without dates, this month so far — not every sale ever recorded.
+    const parsedStartDate = parseDateParam(startDate, 'startDate', 'start') ?? startOfBusinessMonth();
     const parsedEndDate = parseDateParam(endDate, 'endDate', 'end');
 
     // Net profit and expenses (payroll, rent) only for the roles that may open
     // the P&L report itself.
-    const canSeeProfitLoss = PROFIT_LOSS_ROLES.includes(currentLocation.role);
+    const canSeeProfitLoss = PROFIT_LOSS_ROLES.includes(req.currentLocation.role);
 
     // Fetch all reports in parallel
     const [cogs, valuation, adjustments, receivings, profitLoss] = await Promise.all([

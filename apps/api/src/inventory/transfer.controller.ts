@@ -1,6 +1,6 @@
 import { Controller, Post, Get, Body, Param, Query, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { TransferService } from './transfer.service';
-import { AuthGuard, LocationGuard, Roles, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 interface ShipTransferDto {
   productId: string;
@@ -84,8 +84,7 @@ export class TransferController {
   @Get()
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getTransfers(@Query('locationId') locationId: string, @Query('status') status: string, @Req() req: RoleGuardedRequest) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const transfers = await this.transferService.getTransfers({
       locationId: targetLocationId || undefined,

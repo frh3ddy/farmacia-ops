@@ -3,7 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { assertCutOver } from './cutover-gate';
 import { buildTransferLines, resolveQuantityReceived } from './transfer';
-import { SquareClient, SquareEnvironment } from 'square';
+import { SquareClient } from 'square';
+import { createSquareClient, sendInventoryChanges } from './square-sync';
 
 export interface ShipTransferInput {
   productId: string;
@@ -44,22 +45,7 @@ export class TransferService {
   ) {}
 
   private getSquareClient(): SquareClient | null {
-    if (!this.squareClient) {
-      const token = process.env.SQUARE_ACCESS_TOKEN?.trim();
-      if (!token) {
-        this.logger.warn('SQUARE_ACCESS_TOKEN not set - Square sync disabled');
-        return null;
-      }
-      const env = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-      const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-      const isSandbox = env === 'sandbox' || nodeEnv === 'development';
-      this.squareClient = new SquareClient({
-        token,
-        environment: isSandbox ? SquareEnvironment.Sandbox : SquareEnvironment.Production,
-        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
-      });
-    }
-    return this.squareClient;
+    return (this.squareClient ??= createSquareClient(this.logger));
   }
 
   /**
@@ -114,21 +100,13 @@ export class TransferService {
       ];
       if (changes.length === 0) return { synced: true };
 
-      const response = await client.inventory.batchCreateChanges({
+      return await sendInventoryChanges(client, {
         // Keyed on the transfer itself (not randomUUID()) so a retry of this
         // receive call replays the same key — Square returns the original
         // result instead of double-applying the stock change.
         idempotencyKey: transfer.id,
         changes,
-      });
-
-      if (response.errors && response.errors.length > 0) {
-        const errorMessage = response.errors.map(e => e.detail || e.code).join('; ');
-        this.logger.error(`[TRANSFER] Square rejected receive: ${errorMessage}`);
-        return { synced: false, error: errorMessage };
-      }
-
-      return { synced: true };
+      }, this.logger, 'transfer receive');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(`[TRANSFER] Failed to sync receive to Square: ${errorMessage}`);
