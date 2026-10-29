@@ -1,6 +1,8 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { SquareClient } from 'square';
+import { Square, SquareClient } from 'square';
+import { findSquareVariationId, isSquareMapping, preferredMapping } from '../inventory/square-sync';
+import { assertCutOver } from '../inventory/cutover-gate';
 import { createSquareClient } from '../square/square-client';
 import { Prisma, PackagingType } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -12,6 +14,16 @@ import { productsWithoutCostSql, type ProductWithoutCost } from './products-with
 // Currency constant - must match Square merchant account currency
 // Square merchant is configured with USD
 const CURRENCY = 'USD';
+
+/** A product as a cashier sees it: stock and selling price, nothing the pharmacy paid. */
+export function withoutCosts<T extends { averageCost?: unknown; inventories?: object[]; receivings?: object[] }>(product: T) {
+  const { averageCost, inventories, receivings, ...rest } = product;
+  return {
+    ...rest,
+    ...(inventories && { inventories: inventories.map(({ unitCost, costSource, ...batch }: any) => batch) }),
+    ...(receivings && { receivings: receivings.map(({ unitCost, totalCost, ...receiving }: any) => receiving) }),
+  };
+}
 
 export interface CreateProductInput {
   name: string;
@@ -43,6 +55,8 @@ export interface CreateProductInput {
   // Brand-name search tags (e.g. a generic's known brand names: "Tylenol",
   // "Panadol") — matched in catalog-search.service.ts, not a Product relation.
   searchAliases?: string[];
+  // Dedup key for a retried create: becomes the product's id.
+  clientRequestId?: string;
 }
 
 export interface UpdatePriceInput {
@@ -87,6 +101,15 @@ function assertSellingPrice(sellingPrice: unknown): void {
   }
 }
 
+const isWholeNumber = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+
+function assertWordList(value: unknown, label: string): asserts value is string[] {
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    throw new BadRequestException(`${label} deben ser una lista de palabras`);
+  }
+}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
@@ -124,6 +147,23 @@ export class ProductsService {
    * Create a new product and optionally sync to Square
    */
   async createProduct(input: CreateProductInput): Promise<ProductResult> {
+    if (input.clientRequestId) {
+      const replayed = await this.prisma.product.findUnique({
+        where: { id: input.clientRequestId },
+        include: { catalogMappings: { include: { location: true } }, inventories: true },
+      });
+      if (replayed) {
+        const mapping = preferredMapping(replayed.catalogMappings, input.locationId);
+        return {
+          product: replayed,
+          squareSynced: mapping ? isSquareMapping(mapping) : false,
+          squareVariationId: mapping && isSquareMapping(mapping) ? mapping.squareVariationId : undefined,
+          inventoryCreated: replayed.inventories.length > 0,
+          message: `Product "${replayed.name}" already created`,
+        };
+      }
+    }
+
     const {
       name,
       sku,
@@ -149,46 +189,14 @@ export class ProductsService {
       manualPresentation,
       looseProductId,
       searchAliases,
+      clientRequestId,
     } = input;
 
     this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} ${CURRENCY}`);
 
-    // Validate inputs
-    if (!name || name.trim().length === 0) {
-      throw new BadRequestException('El nombre del producto es obligatorio');
-    }
-    assertSellingPrice(sellingPrice);
-    if (costPrice !== undefined && costPrice < 0) {
-      throw new BadRequestException('El costo no puede ser negativo');
-    }
-    if (initialStock !== undefined && initialStock < 0) {
-      throw new BadRequestException('Las existencias iniciales no pueden ser negativas');
-    }
-
-    // Check SKU uniqueness if provided
-    if (sku) {
-      const existingProduct = await this.prisma.product.findUnique({
-        where: { sku },
-      });
-      if (existingProduct) {
-        throw new BadRequestException(`Ya existe un producto con el SKU "${sku}"`);
-      }
-    }
-
-    // Verify location exists
-    const location = await this.prisma.location.findUnique({
-      where: { id: locationId },
-    });
-    if (!location) {
-      throw new NotFoundException(`Location ${locationId} not found`);
-    }
-
-    if (supplierId) {
-      const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId } });
-      if (!supplier) {
-        throw new NotFoundException(`Supplier ${supplierId} not found`);
-      }
-    }
+    const { location } = await this.assertCreatable(input);
+    const trimmedSku = sku?.trim() || undefined;
+    const productId = clientRequestId ?? randomUUID();
 
     // Derived naming/presentación: only for medicamento products
     // (medicationDefinitionId set). 'otro' products keep the directly
@@ -230,7 +238,7 @@ export class ProductsService {
       try {
         const squareResult = await this.createProductInSquare({
           name: resolvedName,
-          sku,
+          sku: trimmedSku,
           description,
           sellingPrice,
           locationId: location.squareId || undefined,
@@ -245,114 +253,109 @@ export class ProductsService {
       }
     }
 
-    // Step 2: Create product in our database
-    const product = await this.prisma.product.create({
-      data: {
-        name: resolvedName,
-        sku: sku?.trim() || null,
-        squareProductName: resolvedName,
-        squareDescription: description || null,
-        squareVariationName: 'Regular', // Simple product
-        squareDataSyncedAt: squareSynced ? new Date() : null,
-        categoryId: categoryId || null,
-        labId: labId || null,
-        medicationType: medicationType || null,
-        medicationDefinitionId: medicationDefinitionId || null,
-        presentation: resolvedPresentation,
-        requiresPrescription: requiresPrescription ?? false,
-        isControlled: isControlled ?? false,
-        primaryPackaging: primaryPackaging || null,
-        secondaryPackaging: secondaryPackaging || null,
-        quantity: quantity ?? null,
-        primaryContent: primaryContent ?? null,
-        manualName: manualName?.trim() || null,
-        manualPresentation: manualPresentation?.trim() || null,
-        looseProductId: looseProductId || null,
-        searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
-      },
-    });
+    // Step 2: The product, its price, initial stock and supplier cost, all or nothing
+    const priceCents = new Prisma.Decimal(this.toCents(sellingPrice).toString());
+    const inventoryCreated = !!initialStock;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.product.create({
+          data: {
+            id: productId,
+            name: resolvedName,
+            sku: trimmedSku ?? null,
+            squareProductName: resolvedName,
+            squareDescription: description || null,
+            squareVariationName: 'Regular', // Simple product
+            squareDataSyncedAt: squareSynced ? new Date() : null,
+            categoryId: categoryId || null,
+            labId: labId || null,
+            medicationType: medicationType || null,
+            medicationDefinitionId: medicationDefinitionId || null,
+            presentation: resolvedPresentation,
+            requiresPrescription: requiresPrescription ?? false,
+            isControlled: isControlled ?? false,
+            primaryPackaging: primaryPackaging || null,
+            secondaryPackaging: secondaryPackaging || null,
+            quantity: quantity ?? null,
+            primaryContent: primaryContent ?? null,
+            manualName: manualName?.trim() || null,
+            manualPresentation: manualPresentation?.trim() || null,
+            looseProductId: looseProductId || null,
+            searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
+          },
+        });
 
-    // Step 3: Create catalog mapping with price
-    if (squareVariationId) {
-      await this.prisma.catalogMapping.create({
-        data: {
-          squareVariationId,
-          productId: product.id,
-          locationId,
-          priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
-          currency: CURRENCY,
-          priceSyncedAt: new Date(),
-        },
+        await tx.catalogMapping.create({
+          data: {
+            squareVariationId: squareVariationId ?? `local_${productId}`,
+            productId,
+            locationId,
+            priceCents,
+            currency: CURRENCY,
+            priceSyncedAt: new Date(),
+          },
+        });
+
+        if (initialStock && costPrice != null) {
+          await tx.inventory.create({
+            data: {
+              locationId,
+              productId,
+              quantity: initialStock,
+              unitCost: new Prisma.Decimal(costPrice),
+              receivedAt: new Date(),
+              source: 'OPENING_BALANCE',
+              costSource: 'MANUAL_INPUT',
+            },
+          });
+
+          if (supplierId) {
+            await tx.supplierProduct.create({
+              data: {
+                supplierId,
+                productId,
+                cost: new Prisma.Decimal(costPrice),
+                isPreferred: true,
+                notes: `Auto-created from initial stock on product creation`,
+              },
+            });
+            await tx.supplierCostHistory.create({
+              data: {
+                productId,
+                supplierId,
+                unitCost: new Prisma.Decimal(costPrice),
+                effectiveAt: new Date(),
+                source: 'MANUAL',
+                isCurrent: true,
+              },
+            });
+          }
+        }
       });
-    } else {
-      // Create local-only mapping (no Square ID)
-      await this.prisma.catalogMapping.create({
-        data: {
-          squareVariationId: `local_${product.id}`, // Local identifier
-          productId: product.id,
-          locationId,
-          priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
-          currency: CURRENCY,
-          priceSyncedAt: new Date(),
-        },
-      });
+    } catch (error) {
+      if (squareItemId) {
+        await this.getSquareClient().catalog.batchDelete({ objectIds: [squareItemId] }).catch((deleteError) =>
+          this.logger.error(`[PRODUCT] Failed to delete Square item ${squareItemId} after a failed create: ${deleteError}`),
+        );
+      }
+      throw error;
     }
 
-    // Step 4: Create initial inventory if provided
-    let inventoryCreated = false;
-    if (initialStock && initialStock > 0 && costPrice !== undefined) {
-      await this.prisma.inventory.create({
-        data: {
-          locationId,
-          productId: product.id,
-          quantity: initialStock,
-          unitCost: new Prisma.Decimal(costPrice),
-          receivedAt: new Date(),
-          source: 'OPENING_BALANCE',
-          costSource: 'MANUAL_INPUT',
-        },
-      });
-      inventoryCreated = true;
+    if (inventoryCreated) {
       this.logger.log(`[PRODUCT] Created initial inventory: ${initialStock} units @ $${costPrice} ${CURRENCY}`);
-
       if (squareVariationId && location.squareId) {
         try {
-          await this.setInitialInventoryInSquare(squareVariationId, location.squareId, initialStock, product.id);
+          await this.setInitialInventoryInSquare(squareVariationId, location.squareId, initialStock!, productId);
           this.logger.log(`[PRODUCT] Pushed initial stock to Square: ${initialStock} units`);
         } catch (error) {
           this.logger.error(`[PRODUCT] Failed to push initial stock to Square: ${error}`);
         }
       }
-
-      if (supplierId) {
-        await this.prisma.supplierProduct.upsert({
-          where: { supplierId_productId: { supplierId, productId: product.id } },
-          create: {
-            supplierId,
-            productId: product.id,
-            cost: new Prisma.Decimal(costPrice),
-            isPreferred: true,
-            notes: `Auto-created from initial stock on product creation`,
-          },
-          update: { cost: new Prisma.Decimal(costPrice), isPreferred: true },
-        });
-
-        await this.prisma.supplierCostHistory.create({
-          data: {
-            productId: product.id,
-            supplierId,
-            unitCost: new Prisma.Decimal(costPrice),
-            effectiveAt: new Date(),
-            source: 'MANUAL',
-            isCurrent: true,
-          },
-        });
-      }
     }
 
     // Fetch complete product with relations
     const completeProduct = await this.prisma.product.findUnique({
-      where: { id: product.id },
+      where: { id: productId },
       include: {
         catalogMappings: {
           include: { location: true },
@@ -368,9 +371,62 @@ export class ProductsService {
       squareVariationId,
       inventoryCreated,
       message: squareSynced
-        ? `Product "${name}" created and synced to Square`
-        : `Product "${name}" created locally (Square sync ${syncToSquare ? 'failed' : 'disabled'})`,
+        ? `Product "${resolvedName}" created and synced to Square`
+        : `Product "${resolvedName}" created locally (Square sync ${syncToSquare ? 'failed' : 'disabled'})`,
     };
+  }
+
+  /**
+   * Refuses a create that would fail part-way, before anything is written in
+   * Square or the database. Also run by the controller before it creates
+   * laboratories and medication definitions for the product.
+   */
+  async assertCreatable(input: CreateProductInput) {
+    const { name, sku, sellingPrice, costPrice, initialStock, quantity, supplierId, locationId, clientRequestId } = input;
+    if (!name || name.trim().length === 0) {
+      throw new BadRequestException('El nombre del producto es obligatorio');
+    }
+    assertSellingPrice(sellingPrice);
+    if (costPrice != null && (typeof costPrice !== 'number' || !Number.isFinite(costPrice) || costPrice < 0)) {
+      throw new BadRequestException('El costo debe ser un número de 0 o más');
+    }
+    if (initialStock != null && !isWholeNumber(initialStock)) {
+      throw new BadRequestException('Las existencias iniciales deben ser un número entero de 0 o más');
+    }
+    if (quantity != null && !isWholeNumber(quantity)) {
+      throw new BadRequestException('La cantidad por caja debe ser un número entero de 0 o más');
+    }
+    if (initialStock && costPrice == null) {
+      throw new BadRequestException('Las existencias iniciales necesitan un costo');
+    }
+    if (clientRequestId !== undefined && (typeof clientRequestId !== 'string' || !UUID.test(clientRequestId))) {
+      throw new BadRequestException('clientRequestId must be a UUID');
+    }
+
+    const location = await this.prisma.location.findUnique({ where: { id: locationId } });
+    if (!location) {
+      throw new NotFoundException(`Location ${locationId} not found`);
+    }
+    if (initialStock) {
+      await assertCutOver(this.prisma, locationId);
+    }
+
+    const trimmedSku = sku?.trim();
+    if (trimmedSku) {
+      const existingProduct = await this.prisma.product.findUnique({ where: { sku: trimmedSku } });
+      if (existingProduct && existingProduct.id !== clientRequestId) {
+        throw new BadRequestException(`Ya existe un producto con el SKU "${trimmedSku}"`);
+      }
+    }
+
+    if (supplierId) {
+      const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId } });
+      if (!supplier) {
+        throw new NotFoundException(`Supplier ${supplierId} not found`);
+      }
+    }
+
+    return { location };
   }
 
   /**
@@ -416,6 +472,15 @@ export class ProductsService {
       const price = this.fromCents(Number(mapping.priceCents)) || 0;
 
       try {
+        const existingVariationId = await findSquareVariationId(this.prisma, product.id, locationId);
+        if (existingVariationId) {
+          await this.adoptPlaceholder(mapping, existingVariationId);
+          synced++;
+          results.push({ productId: product.id, name: product.name, success: true });
+          this.logger.log(`[SYNC] ✅ ${product.name} already in Square → variation ${existingVariationId}`);
+          continue;
+        }
+
         const squareResult = await this.createProductInSquare({
           name: product.name,
           sku: product.sku || undefined,
@@ -561,7 +626,8 @@ export class ProductsService {
   }
 
   /**
-   * Update product selling price and sync to Square
+   * Update product selling price and sync to Square: the base price for every
+   * location, or one location's own price. Never changes where the item is sold.
    */
   async updatePrice(input: UpdatePriceInput): Promise<PriceUpdateResult> {
     const { productId, sellingPrice, locationId, syncToSquare = true, applyToAllLocations = false } = input;
@@ -570,55 +636,37 @@ export class ProductsService {
 
     assertSellingPrice(sellingPrice);
 
-    // Find product with catalog mapping
-    // Look for location-specific mapping first, then fall back to global mapping (locationId = null)
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
-      include: {
-        catalogMappings: {
-          where: {
-            OR: [
-              { locationId },           // Location-specific mapping
-              { locationId: null },     // Global mapping (from Square sync)
-            ],
-          },
-          orderBy: {
-            locationId: 'desc',  // Prefer location-specific (non-null) over global
-          },
-        },
-      },
+      include: { catalogMappings: { orderBy: { createdAt: 'desc' } } },
     });
 
     if (!product) {
       throw new NotFoundException(`Product ${productId} not found`);
     }
 
-    // Prefer location-specific mapping, fall back to global
-    const mapping = product.catalogMappings.find(m => m.locationId === locationId) 
-                 || product.catalogMappings.find(m => m.locationId === null);
-    const previousPrice = mapping ? this.fromCents(Number(mapping.priceCents)) : null;
+    const shown = preferredMapping(product.catalogMappings, locationId);
+    const previousPrice = shown ? this.fromCents(Number(shown.priceCents)) : null;
+    const placeholder = preferredMapping(product.catalogMappings.filter((m) => !isSquareMapping(m)), locationId);
+    let squareVariationId = preferredMapping(product.catalogMappings.filter(isSquareMapping), locationId)?.squareVariationId;
     let squareSynced = false;
 
-    this.logger.log(`[PRODUCT] Found ${product.catalogMappings.length} catalog mapping(s) for location ${locationId} (including global)`);
-    if (mapping) {
-      const mappingType = mapping.locationId === null ? 'GLOBAL' : 'LOCATION-SPECIFIC';
-      this.logger.log(`[PRODUCT] Using ${mappingType} mapping: squareVariationId=${mapping.squareVariationId}, priceCents=${mapping.priceCents}, mappingLocationId=${mapping.locationId}`);
-    } else {
-      this.logger.log(`[PRODUCT] No existing catalog mapping found for this location or global`);
-    }
-
-    // Get location for Square sync
     const location = await this.prisma.location.findUnique({
       where: { id: locationId },
     });
 
     // Step 1: Update in Square if applicable
-    if (syncToSquare && mapping) {
-      // Check if this is a local-only product that needs to be synced to Square first
-      if (mapping.squareVariationId.startsWith('local_')) {
-        this.logger.log(`[PRODUCT] Product is local-only, attempting to sync to Square first...`);
-        try {
-          // Create the product in Square
+    if (syncToSquare) {
+      try {
+        if (squareVariationId) {
+          const squareLocationId = applyToAllLocations ? undefined : location?.squareId ?? undefined;
+          if (applyToAllLocations || squareLocationId) {
+            await this.updatePriceInSquare(squareVariationId, sellingPrice, squareLocationId);
+            squareSynced = true;
+            this.logger.log(`[PRODUCT] Price updated in Square for variation ${squareVariationId}${applyToAllLocations ? ' (all locations)' : ''}`);
+          }
+        } else if (placeholder) {
+          this.logger.log(`[PRODUCT] Product is local-only, attempting to sync to Square first...`);
           const squareResult = await this.createProductInSquare({
             name: product.name,
             sku: product.sku || undefined,
@@ -627,68 +675,33 @@ export class ProductsService {
             locationId: location?.squareId || undefined,
             productId,
           });
-          
-          // Update the catalog mapping with the real Square variation ID
-          await this.prisma.catalogMapping.update({
-            where: { id: mapping.id },
-            data: {
-              squareVariationId: squareResult.variationId,
-              priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
-              priceSyncedAt: new Date(),
-            },
-          });
-          
+          squareVariationId = squareResult.variationId;
           squareSynced = true;
           this.logger.log(`[PRODUCT] Product synced to Square: Item=${squareResult.itemId}, Variation=${squareResult.variationId}`);
-        } catch (error) {
-          this.logger.error(`[PRODUCT] Failed to sync local product to Square: ${error}`);
-          // Continue with local update only
         }
-      } else {
-        // Product already exists in Square, just update the price
-        try {
-          // If applyToAllLocations is true, don't pass a specific location (will use presentAtAllLocations)
-          const targetSquareLocationId = applyToAllLocations ? undefined : (location?.squareId || undefined);
-          await this.updatePriceInSquare(mapping.squareVariationId, sellingPrice, targetSquareLocationId, applyToAllLocations);
-          squareSynced = true;
-          this.logger.log(`[PRODUCT] Price updated in Square for variation ${mapping.squareVariationId}${applyToAllLocations ? ' (all locations)' : ''}`);
-        } catch (error) {
-          this.logger.error(`[PRODUCT] Failed to update price in Square: ${error}`);
-          // Continue with local update
-        }
+      } catch (error) {
+        this.logger.error(`[PRODUCT] Failed to update price in Square: ${error}`);
+        // Continue with local update
       }
     }
 
-    // Step 2: Update local catalog mapping (only if not already updated during Square sync)
-    if (mapping && !squareSynced) {
-      // Only update locally if Square sync didn't already update the mapping
-      await this.prisma.catalogMapping.update({
-        where: { id: mapping.id },
-        data: {
-          priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
-          priceSyncedAt: new Date(),
-        },
-      });
-    } else if (mapping && squareSynced && !mapping.squareVariationId.startsWith('local_')) {
-      // For existing Square products, update the local price after Square sync
-      await this.prisma.catalogMapping.update({
-        where: { id: mapping.id },
-        data: {
-          priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
-          priceSyncedAt: new Date(),
-        },
-      });
-    } else if (!mapping) {
-      // Create new mapping if none exists
-      await this.prisma.catalogMapping.create({
-        data: {
-          squareVariationId: `local_${productId}`,
-          productId,
-          locationId,
-          priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
-          currency: CURRENCY,
-          priceSyncedAt: new Date(),
-        },
+    // Step 2: Update the cached prices
+    if (placeholder && squareVariationId) {
+      await this.adoptPlaceholder(placeholder, squareVariationId);
+    }
+    const priced = {
+      priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
+      priceSyncedAt: new Date(),
+    };
+    const { count } = applyToAllLocations
+      ? await this.prisma.catalogMapping.updateMany({ where: { productId, employeeId: null }, data: priced })
+      : { count: 0 };
+    if (count === 0) {
+      const ownVariationId = squareVariationId ?? `local_${productId}`;
+      await this.prisma.catalogMapping.upsert({
+        where: { squareVariationId_locationId: { squareVariationId: ownVariationId, locationId } },
+        update: priced,
+        create: { ...priced, squareVariationId: ownVariationId, productId, locationId, currency: CURRENCY },
       });
     }
 
@@ -698,15 +711,7 @@ export class ProductsService {
       include: {
         category: true,
         catalogMappings: {
-          where: {
-            OR: [
-              { locationId },        // Location-specific mapping
-              { locationId: null },  // Global mapping (from Square sync)
-            ],
-          },
-          orderBy: {
-            locationId: 'desc',  // Prefer location-specific (non-null) over global
-          },
+          orderBy: { createdAt: 'desc' },
           include: { location: true },
         },
         inventories: {
@@ -725,9 +730,7 @@ export class ProductsService {
     ) || 0;
     const averageCost = totalInventory > 0 ? totalCost / totalInventory : null;
 
-    // Get the preferred mapping for the response
-    const responseMapping = updatedProduct?.catalogMappings.find(m => m.locationId === locationId) 
-                         || updatedProduct?.catalogMappings.find(m => m.locationId === null);
+    const responseMapping = updatedProduct && preferredMapping(updatedProduct.catalogMappings, locationId);
 
     return {
       product: updatedProduct ? {
@@ -736,7 +739,7 @@ export class ProductsService {
         currency: CURRENCY,
         totalInventory,
         averageCost,
-        hasSquareSync: responseMapping ? !responseMapping.squareVariationId.startsWith('local_') : false,
+        hasSquareSync: responseMapping ? isSquareMapping(responseMapping) : false,
       } : null,
       previousPrice,
       newPrice: sellingPrice,
@@ -748,123 +751,58 @@ export class ProductsService {
   }
 
   /**
-   * Update price in Square
-   * @param variationId - Square variation ID
-   * @param newPrice - New price in dollars
-   * @param squareLocationId - Specific Square location ID (optional)
-   * @param applyToAllLocations - If true, apply price to all locations
+   * Points a `local_` placeholder at the product's real Square item, or drops
+   * it when the location already has a mapping to that item.
    */
-  private async updatePriceInSquare(
-    variationId: string, 
-    newPrice: number, 
-    squareLocationId?: string,
-    applyToAllLocations: boolean = false
-  ): Promise<void> {
-    const client = this.getSquareClient();
-
-    // First, fetch the current object to get its version and existing data
-    const retrieveResponse = await client.catalog.object.get({
-      objectId: variationId,
+  private async adoptPlaceholder(placeholder: { id: string; locationId: string | null }, squareVariationId: string) {
+    const taken = await this.prisma.catalogMapping.findFirst({
+      where: { squareVariationId, locationId: placeholder.locationId },
     });
+    if (taken) {
+      await this.prisma.catalogMapping.delete({ where: { id: placeholder.id } });
+    } else {
+      await this.prisma.catalogMapping.update({ where: { id: placeholder.id }, data: { squareVariationId } });
+    }
+  }
 
-    const currentObject = retrieveResponse.object;
-    if (!currentObject) {
+  /**
+   * Sets a variation's price in Square: one location's own price when
+   * `squareLocationId` is given, else the base price for every location
+   * (dropping the locations' own prices). Everything else on the variation,
+   * including where it is sold, is sent back as Square returned it.
+   */
+  private async updatePriceInSquare(variationId: string, newPrice: number, squareLocationId?: string): Promise<void> {
+    const client = this.getSquareClient();
+    const { object } = await client.catalog.object.get({ objectId: variationId });
+    if (object?.type !== 'ITEM_VARIATION' || !object.itemVariationData) {
       throw new Error(`Variation ${variationId} not found in Square`);
     }
+    const variationData = object.itemVariationData;
 
-    const variationData = (currentObject as any).itemVariationData;
-    if (!variationData) {
-      throw new Error(`Invalid variation data for ${variationId}`);
-    }
-
-    // Build the upsert object - PRESERVE all existing fields, only update price
-    // This is critical to avoid resetting trackInventory and other settings
-    const updatedVariationData: any = {
-      ...variationData,  // Preserve ALL existing fields (trackInventory, locationOverrides, etc.)
-      pricingType: 'FIXED_PRICING',
-      priceMoney: {
-        amount: this.toCents(newPrice),
-        currency: CURRENCY,
-      },
-    };
-
-    const upsertObject: any = {
-      type: 'ITEM_VARIATION',
-      id: variationId,
-      version: currentObject.version,
-      itemVariationData: updatedVariationData,
-    };
-
-    // Preserve existing location settings from the current object
-    if (currentObject.presentAtAllLocations !== undefined) {
-      upsertObject.presentAtAllLocations = currentObject.presentAtAllLocations;
-    }
-    if (currentObject.presentAtLocationIds) {
-      upsertObject.presentAtLocationIds = currentObject.presentAtLocationIds;
-    }
-    if (currentObject.absentAtLocationIds) {
-      upsertObject.absentAtLocationIds = currentObject.absentAtLocationIds;
-    }
-
-    // Override location scope only if explicitly specified
-    if (applyToAllLocations) {
-      // Apply to all current and future locations
-      upsertObject.presentAtAllLocations = true;
-      delete upsertObject.presentAtLocationIds;
-      delete upsertObject.absentAtLocationIds;
-      this.logger.log(`[PRODUCT] Updating price for variation ${variationId} at ALL locations`);
-    } else if (squareLocationId) {
-      // Apply to specific location only
-      upsertObject.presentAtLocationIds = [squareLocationId];
-      upsertObject.presentAtAllLocations = false;
-      delete upsertObject.absentAtLocationIds;
-      this.logger.log(`[PRODUCT] Updating price for variation ${variationId} at location ${squareLocationId}`);
-    } else {
-      this.logger.log(`[PRODUCT] Updating price for variation ${variationId} (preserving existing location settings)`);
-    }
-
-    this.logger.log(`[PRODUCT] Preserving trackInventory=${variationData.trackInventory}, locationOverrides=${JSON.stringify(variationData.locationOverrides || [])}`);
-
-    try {
-      // Update the variation with new price
-      await client.catalog.object.upsert({
-        idempotencyKey: randomUUID(),
-        object: upsertObject,
-      });
-    } catch (error: any) {
-      // Parse Square error response
-      const errorBody = error?.body || error?.message || '';
-      const errorString = typeof errorBody === 'string' ? errorBody : JSON.stringify(errorBody);
-      const parentItemId = variationData.itemId;
-      
-      // Check for location enablement mismatch error
-      if (errorString.includes('is not enabled') || errorString.includes('is enabled at all future locations')) {
-        this.logger.error(`[PRODUCT] Square price update failed - Location enablement mismatch. Parent Item: ${parentItemId}, Variation: ${variationId}, Location: ${squareLocationId || 'global'}`);
-        
-        // Parse the specific error details if available
-        let errorDetail = '';
-        try {
-          const parsed = typeof errorBody === 'string' ? JSON.parse(errorBody) : errorBody;
-          if (parsed.errors && parsed.errors[0]?.detail) {
-            errorDetail = parsed.errors[0].detail;
-          }
-        } catch {
-          // Ignore parsing errors
+    const price = { amount: this.toCents(newPrice), currency: CURRENCY } as const;
+    const overrides = variationData.locationOverrides ?? [];
+    const itemVariationData: Square.CatalogItemVariation = squareLocationId
+      ? {
+          ...variationData,
+          locationOverrides: [
+            ...overrides.filter((o) => o.locationId !== squareLocationId),
+            { ...overrides.find((o) => o.locationId === squareLocationId), locationId: squareLocationId, priceMoney: price, pricingType: 'FIXED_PRICING' },
+          ],
         }
-        
-        throw new Error(
-          `Cannot update price in Square: Location enablement mismatch between the item and its variation. ` +
-          `The variation (${variationId}) and its parent item (${parentItemId}) have different location settings. ` +
-          `${errorDetail ? `Square says: "${errorDetail}" ` : ''}` +
-          `To fix: Go to Square Dashboard → Items & Orders → Item Library → Find this item → Locations tab → ` +
-          `Enable the PARENT ITEM at the same locations as the variation, or update the price directly in Square.`
-        );
-      }
-      
-      // Re-throw other errors with context
-      this.logger.error(`[PRODUCT] Square price update failed: ${errorString}`);
-      throw error;
-    }
+      : {
+          ...variationData,
+          pricingType: 'FIXED_PRICING',
+          priceMoney: price,
+          locationOverrides: overrides
+            .map(({ priceMoney, pricingType, ...rest }) => rest)
+            .filter((o) => Object.keys(o).some((key) => key !== 'locationId')),
+        };
+
+    this.logger.log(`[PRODUCT] Updating price for variation ${variationId} ${squareLocationId ? `at location ${squareLocationId}` : 'at all locations'}`);
+    await client.catalog.object.upsert({
+      idempotencyKey: randomUUID(),
+      object: { ...object, itemVariationData },
+    });
   }
 
   /**
@@ -1129,15 +1067,7 @@ export class ProductsService {
     const includeBlock = {
       category: true,
       catalogMappings: {
-        where: locationId ? {
-          OR: [
-            { locationId },        // Location-specific mapping
-            { locationId: null },  // Global mapping (from Square sync)
-          ],
-        } : undefined,
-        orderBy: {
-          locationId: 'desc' as const,  // Prefer location-specific (non-null) over global
-        },
+        orderBy: { createdAt: 'desc' as const },
         include: {
           location: true,
         },
@@ -1150,7 +1080,7 @@ export class ProductsService {
     };
 
     // Build a `where` clause for optional search
-    let where: any = {};
+    let where: Prisma.ProductWhereInput = {};
     let exactMatch = false;
     // Ids of a text search, already in relevance order (null = not a text
     // search). Ranking has to happen in SQL — see product-search.ts — so the
@@ -1160,7 +1090,7 @@ export class ProductsService {
 
     if (search && exact) {
       // EXACT mode: first try exact SKU match (case-insensitive)
-      const exactWhere: any = {
+      const exactWhere: Prisma.ProductWhereInput = {
         sku: { equals: search, mode: 'insensitive' },
       };
 
@@ -1199,11 +1129,7 @@ export class ProductsService {
 
     // Transform products to include computed fields
     const transformedProducts = (rankedIds ? sortByIdOrder(products, rankedIds) : products).map((product) => {
-      // Prefer location-specific mapping, fall back to global
-      const mapping = locationId 
-        ? (product.catalogMappings.find(m => m.locationId === locationId) 
-           || product.catalogMappings.find(m => m.locationId === null))
-        : product.catalogMappings[0];
+      const mapping = preferredMapping(product.catalogMappings, locationId);
       const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
       // Average cost across the location's FIFO batches (same formula as getProduct)
       const totalCost = product.inventories.reduce(
@@ -1212,18 +1138,13 @@ export class ProductsService {
       );
       const averageCost = totalInventory > 0 ? totalCost / totalInventory : null;
       
-      // Debug logging
-      if (product.inventories.length > 0 || totalInventory > 0) {
-        this.logger.debug(`[PRODUCT] ${product.name}: inventories=${product.inventories.length} batches, totalInventory=${totalInventory}`);
-      }
-      
       return {
         ...product,
         sellingPrice: mapping ? this.fromCents(Number(mapping.priceCents)) : null,
         currency: mapping?.currency || CURRENCY,
         totalInventory,
         averageCost,
-        hasSquareSync: mapping ? !mapping.squareVariationId.startsWith('local_') : false,
+        hasSquareSync: mapping ? isSquareMapping(mapping) : false,
       };
     });
 
@@ -1274,13 +1195,18 @@ export class ProductsService {
         WHERE "locationId" = ${locationId}
         GROUP BY "productId"
       ),
-      -- Same mapping preference as getProducts: location-specific over global,
-      -- deterministic tie-breaker for duplicate mappings of the same class
+      -- Same mapping preference as preferredMapping (square-sync.ts): real Square
+      -- items before placeholders, then the location's, the global one, any other;
+      -- another location's placeholder never counts
       mapping AS (
         SELECT DISTINCT ON ("productId") "productId", "priceCents", "squareVariationId", "locationId"
         FROM "CatalogMapping"
-        WHERE "locationId" = ${locationId} OR "locationId" IS NULL
-        ORDER BY "productId", "locationId" DESC NULLS LAST, "createdAt" DESC
+        WHERE "squareVariationId" NOT LIKE 'local_%' OR "locationId" = ${locationId} OR "locationId" IS NULL
+        ORDER BY "productId",
+                 "squareVariationId" LIKE 'local_%',
+                 "locationId" IS DISTINCT FROM ${locationId},
+                 "locationId" IS NOT NULL,
+                 "createdAt" DESC
       )
       SELECT
         COUNT(*)::bigint AS total,
@@ -1316,6 +1242,130 @@ export class ProductsService {
     };
   }
 
+  /** The products a supplier provides, with its last cost and the location's stock. */
+  async getSupplierCatalog(supplierId: string, targetLocationId?: string) {
+    // Get all products this supplier provides
+    const supplierProducts = await this.prisma.supplierProduct.findMany({
+      where: { supplierId },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            squareProductName: true,
+            squareVariationName: true,
+            squareImageUrl: true,
+            inventories: targetLocationId
+              ? { where: { locationId: targetLocationId } }
+              : true,
+          },
+        },
+      },
+      orderBy: {
+        product: { name: 'asc' },
+      },
+    });
+
+    return supplierProducts.map((sp) => {
+      const totalStock = sp.product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
+      return {
+        productId: sp.product.id,
+        productName: sp.product.squareProductName || sp.product.name,
+        sku: sp.product.sku,
+        imageUrl: sp.product.squareImageUrl,
+        lastCost: sp.cost.toString(),
+        isPreferred: sp.isPreferred,
+        notes: sp.notes,
+        currentStock: totalStock,
+      };
+    });
+  }
+
+  /** Each supplier's current cost for a product, with its contact details. */
+  async getProductSuppliers(productId: string) {
+    const supplierProducts = await this.prisma.supplierProduct.findMany({
+      where: { productId },
+      include: {
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            contactInfo: true,
+            isActive: true,
+          },
+        },
+      },
+      orderBy: {
+        supplier: { name: 'asc' },
+      },
+    });
+
+    return supplierProducts.map((sp) => ({
+      id: sp.supplier.id,
+      name: sp.supplier.name,
+      contactInfo: sp.supplier.contactInfo,
+      isActive: sp.supplier.isActive,
+      cost: sp.cost.toString(),
+      isPreferred: sp.isPreferred,
+      notes: sp.notes,
+    }));
+  }
+
+  /** A product's cost timeline, grouped by supplier. */
+  async getProductCostHistory(productId: string) {
+    const costHistories = await this.prisma.supplierCostHistory.findMany({
+      where: { productId },
+      include: {
+        supplier: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: [
+        { supplier: { name: 'asc' } },
+        { effectiveAt: 'desc' },
+      ],
+    });
+
+    // Group by supplier
+    const groupedBySupplier = new Map<
+      string,
+      Array<{
+        id: string;
+        cost: string;
+        effectiveAt: string;
+        createdAt: string;
+        source: string;
+        isCurrent: boolean;
+      }>
+    >();
+
+    for (const entry of costHistories) {
+      const supplierId = entry.supplierId;
+      if (!groupedBySupplier.has(supplierId)) {
+        groupedBySupplier.set(supplierId, []);
+      }
+      groupedBySupplier.get(supplierId)!.push({
+        id: entry.id,
+        cost: entry.unitCost.toString(),
+        effectiveAt: entry.effectiveAt.toISOString(),
+        createdAt: entry.createdAt.toISOString(),
+        source: entry.source,
+        isCurrent: entry.isCurrent,
+      });
+    }
+
+    // Convert to array format with supplier info
+    return Array.from(groupedBySupplier.entries()).map(([supplierId, history]) => {
+      const firstEntry = costHistories.find((e) => e.supplierId === supplierId);
+      return {
+        supplierId,
+        supplierName: firstEntry?.supplier.name || 'Unknown',
+        costHistory: history,
+      };
+    });
+  }
+
   /**
    * Get single product by ID
    */
@@ -1325,15 +1375,7 @@ export class ProductsService {
       include: {
         category: true,
         catalogMappings: {
-          where: locationId ? {
-            OR: [
-              { locationId },        // Location-specific mapping
-              { locationId: null },  // Global mapping (from Square sync)
-            ],
-          } : undefined,
-          orderBy: {
-            locationId: 'desc',  // Prefer location-specific (non-null) over global
-          },
+          orderBy: { createdAt: 'desc' },
           include: {
             location: true,
           },
@@ -1354,11 +1396,7 @@ export class ProductsService {
       throw new NotFoundException(`Product ${productId} not found`);
     }
 
-    // Prefer location-specific mapping, fall back to global
-    const mapping = locationId 
-      ? (product.catalogMappings.find(m => m.locationId === locationId) 
-         || product.catalogMappings.find(m => m.locationId === null))
-      : product.catalogMappings[0];
+    const mapping = preferredMapping(product.catalogMappings, locationId);
     const totalInventory = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
     
     // Calculate average cost from inventory
@@ -1376,7 +1414,7 @@ export class ProductsService {
         currency: mapping?.currency || CURRENCY,
         totalInventory,
         averageCost,
-        hasSquareSync: mapping ? !mapping.squareVariationId.startsWith('local_') : false,
+        hasSquareSync: mapping ? isSquareMapping(mapping) : false,
       },
     };
   }
@@ -1400,9 +1438,16 @@ export class ProductsService {
       if (!looseProduct) {
         throw new NotFoundException(`Product ${looseProductId} not found`);
       }
+      // Walk the loose product's own chain: reaching this product would loop break-bulk.
+      for (let next = looseProduct.looseProductId; next; ) {
+        if (next === productId) {
+          throw new BadRequestException('El producto suelto ya lleva de vuelta a este producto');
+        }
+        next = (await this.prisma.product.findUnique({ where: { id: next }, select: { looseProductId: true } }))?.looseProductId ?? null;
+      }
     }
-    if (quantity !== undefined && quantity <= 0) {
-      throw new BadRequestException('La cantidad debe ser mayor que cero');
+    if (quantity !== undefined && !(isWholeNumber(quantity) && quantity > 0)) {
+      throw new BadRequestException('La cantidad debe ser un número entero mayor que cero');
     }
 
     return this.prisma.product.update({
@@ -1417,6 +1462,7 @@ export class ProductsService {
    * search surfaces it even when no branded Product row exists at all.
    */
   async setSearchAliases(productId: string, searchAliases: string[]) {
+    assertWordList(searchAliases, 'Los alias de búsqueda');
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       throw new NotFoundException(`Product ${productId} not found`);
@@ -1446,6 +1492,10 @@ export class ProductsService {
       if (!employee) {
         throw new NotFoundException(`Employee ${employeeId} not found`);
       }
+      const { _sum } = await this.prisma.inventory.aggregate({ where: { productId }, _sum: { quantity: true } });
+      if ((_sum.quantity ?? 0) > 0) {
+        throw new BadRequestException('Este producto tiene existencias: dales salida antes de marcarlo como servicio Yastás');
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -1460,6 +1510,7 @@ export class ProductsService {
 
   /** Set (replace) a category's symptom search keywords. */
   async setCategorySymptomKeywords(categoryId: string, symptomKeywords: string[]) {
+    assertWordList(symptomKeywords, 'Los síntomas');
     const category = await this.prisma.category.findUnique({ where: { id: categoryId } });
     if (!category) {
       throw new NotFoundException(`Category ${categoryId} not found`);

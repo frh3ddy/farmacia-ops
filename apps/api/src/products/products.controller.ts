@@ -17,7 +17,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { ProductsService, CreateProductInput, UpdatePriceInput } from './products.service';
+import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts } from './products.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
 import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from './medication-definition';
@@ -56,6 +56,8 @@ interface CreateProductDto {
   looseProductId?: string;
   // Brand-name search tags, e.g. a generic's known brand names.
   searchAliases?: string[];
+  // Dedup key for a retried create (a UUID): the retry answers with the same product.
+  clientRequestId?: string;
   // Either an existing definition id, or enough inline info to find-or-create one.
   medicationDefinitionId?: string;
   medication?: {
@@ -129,6 +131,41 @@ export class ProductsController {
       );
     }
 
+    if (body.medication && !Array.isArray(body.medication.activeIngredients)) {
+      throw new HttpException(
+        { success: false, message: 'El medicamento necesita su lista de principios activos' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const input: CreateProductInput = {
+      name: body.name,
+      sku: body.sku,
+      description: body.description,
+      sellingPrice: body.sellingPrice,
+      costPrice: body.costPrice,
+      initialStock: body.initialStock,
+      supplierId: body.supplierId,
+      locationId,
+      syncToSquare: body.syncToSquare !== false, // Default true
+      categoryId: body.categoryId,
+      medicationType: body.medicationType,
+      presentation: body.presentation,
+      requiresPrescription: body.requiresPrescription,
+      isControlled: body.isControlled,
+      primaryPackaging: body.primaryPackaging,
+      secondaryPackaging: body.secondaryPackaging,
+      quantity: body.quantity,
+      primaryContent: body.primaryContent,
+      manualName: body.manualName,
+      manualPresentation: body.manualPresentation,
+      looseProductId: body.looseProductId,
+      searchAliases: body.searchAliases,
+      clientRequestId: body.clientRequestId,
+    };
+    // Before creating any laboratory or medication definition for it
+    await this.productsService.assertCreatable(input);
+
     // Resolve the laboratory: either an existing id, or a name to find-or-create.
     const labId = body.labId || (body.labName ? await findOrCreateLaboratory(this.prisma, body.labName) : undefined);
 
@@ -153,34 +190,7 @@ export class ProductsController {
       });
     }
 
-    const input: CreateProductInput = {
-      name: body.name,
-      sku: body.sku,
-      description: body.description,
-      sellingPrice: body.sellingPrice,
-      costPrice: body.costPrice,
-      initialStock: body.initialStock,
-      supplierId: body.supplierId,
-      locationId,
-      syncToSquare: body.syncToSquare !== false, // Default true
-      categoryId: body.categoryId,
-      labId,
-      medicationType: body.medicationType,
-      medicationDefinitionId,
-      presentation: body.presentation,
-      requiresPrescription: body.requiresPrescription,
-      isControlled: body.isControlled,
-      primaryPackaging: body.primaryPackaging,
-      secondaryPackaging: body.secondaryPackaging,
-      quantity: body.quantity,
-      primaryContent: body.primaryContent,
-      manualName: body.manualName,
-      manualPresentation: body.manualPresentation,
-      looseProductId: body.looseProductId,
-      searchAliases: body.searchAliases,
-    };
-
-    const result = await this.productsService.createProduct(input);
+    const result = await this.productsService.createProduct({ ...input, labId, medicationDefinitionId });
 
     return {
       success: true,
@@ -202,7 +212,7 @@ export class ProductsController {
    */
   @Post('sync-to-square')
   @Roles('OWNER', 'MANAGER')
-  async syncToSquare(@Body() body: any, @Req() req: GuardedRequest) {
+  async syncToSquare(@Body() body: { locationId?: string }, @Req() req: GuardedRequest) {
     const locationId = body.locationId || req.currentLocation?.locationId;
     if (!locationId) {
       throw new BadRequestException('Location ID is required');
@@ -342,7 +352,7 @@ export class ProductsController {
       search: search?.trim() || undefined,
       exact: exact === 'true',
     });
-    return result;
+    return req.currentLocation?.role === 'CASHIER' ? { ...result, data: result.data.map(withoutCosts) } : result;
   }
 
   /**
@@ -400,45 +410,7 @@ export class ProductsController {
     @Req() req: GuardedRequest,
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
-
-    // Get all products this supplier provides
-    const supplierProducts = await this.prisma.supplierProduct.findMany({
-      where: { supplierId },
-      include: {
-        product: {
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            squareProductName: true,
-            squareVariationName: true,
-            squareImageUrl: true,
-            inventories: targetLocationId
-              ? { where: { locationId: targetLocationId } }
-              : true,
-          },
-        },
-      },
-      orderBy: {
-        product: { name: 'asc' },
-      },
-    });
-
-    const products = supplierProducts.map((sp) => {
-      const totalStock = sp.product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
-      return {
-        productId: sp.product.id,
-        productName: sp.product.squareProductName || sp.product.name,
-        sku: sp.product.sku,
-        imageUrl: sp.product.squareImageUrl,
-        lastCost: sp.cost.toString(),
-        isPreferred: sp.isPreferred,
-        notes: sp.notes,
-        currentStock: totalStock,
-      };
-    });
-
-    return { success: true, products };
+    return { success: true, products: await this.productsService.getSupplierCatalog(supplierId, targetLocationId) };
   }
 
   /**
@@ -447,36 +419,9 @@ export class ProductsController {
    * Returns current cost per supplier, preferred status, and notes
    */
   @Get(':id/suppliers')
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getProductSuppliers(@Param('id') productId: string) {
-    const supplierProducts = await this.prisma.supplierProduct.findMany({
-      where: { productId },
-      include: {
-        supplier: {
-          select: {
-            id: true,
-            name: true,
-            contactInfo: true,
-            isActive: true,
-          },
-        },
-      },
-      orderBy: {
-        supplier: { name: 'asc' },
-      },
-    });
-
-    const suppliers = supplierProducts.map((sp) => ({
-      id: sp.supplier.id,
-      name: sp.supplier.name,
-      contactInfo: sp.supplier.contactInfo,
-      isActive: sp.supplier.isActive,
-      cost: sp.cost.toString(),
-      isPreferred: sp.isPreferred,
-      notes: sp.notes,
-    }));
-
-    return { success: true, suppliers };
+    return { success: true, suppliers: await this.productsService.getProductSuppliers(productId) };
   }
 
   /**
@@ -485,60 +430,9 @@ export class ProductsController {
    * Returns cost timeline grouped by supplier
    */
   @Get(':id/cost-history')
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getProductCostHistory(@Param('id') productId: string) {
-    const costHistories = await this.prisma.supplierCostHistory.findMany({
-      where: { productId },
-      include: {
-        supplier: {
-          select: { id: true, name: true },
-        },
-      },
-      orderBy: [
-        { supplier: { name: 'asc' } },
-        { effectiveAt: 'desc' },
-      ],
-    });
-
-    // Group by supplier
-    const groupedBySupplier = new Map<
-      string,
-      Array<{
-        id: string;
-        cost: string;
-        effectiveAt: string;
-        createdAt: string;
-        source: string;
-        isCurrent: boolean;
-      }>
-    >();
-
-    for (const entry of costHistories) {
-      const supplierId = entry.supplierId;
-      if (!groupedBySupplier.has(supplierId)) {
-        groupedBySupplier.set(supplierId, []);
-      }
-      groupedBySupplier.get(supplierId)!.push({
-        id: entry.id,
-        cost: entry.unitCost.toString(),
-        effectiveAt: entry.effectiveAt.toISOString(),
-        createdAt: entry.createdAt.toISOString(),
-        source: entry.source,
-        isCurrent: entry.isCurrent,
-      });
-    }
-
-    // Convert to array format with supplier info
-    const suppliers = Array.from(groupedBySupplier.entries()).map(([supplierId, history]) => {
-      const firstEntry = costHistories.find((e) => e.supplierId === supplierId);
-      return {
-        supplierId,
-        supplierName: firstEntry?.supplier.name || 'Unknown',
-        costHistory: history,
-      };
-    });
-
-    return { success: true, suppliers };
+    return { success: true, suppliers: await this.productsService.getProductCostHistory(productId) };
   }
 
   /**
@@ -586,13 +480,13 @@ export class ProductsController {
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProduct(id, targetLocationId);
-    return result;
+    return req.currentLocation?.role === 'CASHIER' ? { ...result, data: withoutCosts(result.data) } : result;
   }
 
   /**
    * Update product price
    * PATCH /products/:id/price
-   * Roles: OWNER, MANAGER
+   * Roles: OWNER, MANAGER (a manager prices only their own location)
    */
   @Patch(':id/price')
   @Roles('OWNER', 'MANAGER')
@@ -613,6 +507,12 @@ export class ProductsController {
       throw new HttpException(
         { success: false, message: 'Location ID is required' },
         HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (req.currentLocation?.role !== 'OWNER' && (body.applyToAllLocations === true || locationId !== req.currentLocation?.locationId)) {
+      throw new HttpException(
+        { success: false, message: 'Solo el dueño puede cambiar el precio de otras sucursales' },
+        HttpStatus.FORBIDDEN,
       );
     }
 
