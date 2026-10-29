@@ -4,7 +4,7 @@ import { listLimit } from './list-limit';
 import { Prisma } from '@prisma/client';
 import { SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
-import { sendInventoryChanges } from './square-sync';
+import { findSquareVariationId, sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
 
 // ============================================================================
@@ -94,19 +94,12 @@ export class InventoryReceivingService {
         return { synced: false, error: 'Location not linked to Square' };
       }
 
-      // Get Square catalog variation ID
-      const catalogMapping = await this.prisma.catalogMapping.findFirst({
-        where: { productId },
-        select: { squareVariationId: true },
-      });
-
-      if (!catalogMapping?.squareVariationId) {
+      const catalogObjectId = await findSquareVariationId(this.prisma, productId, locationId);
+      if (!catalogObjectId) {
         return { synced: false, error: 'Product not mapped to Square catalog' };
       }
 
-      // Call Square Inventory API - RECEIVE_STOCK increases inventory
-      // batchCreateChanges is the current method name in Square SDK
-      this.logger.log(`[SQUARE_SYNC] Syncing receiving: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${quantity}`);
+      this.logger.log(`[SQUARE_SYNC] Syncing receiving: catalogObjectId=${catalogObjectId}, locationId=${location.squareId}, quantity=${quantity}`);
       
       return await sendInventoryChanges(client, {
         // Keyed on the receiving record itself (not randomUUID()) so a retry
@@ -117,7 +110,7 @@ export class InventoryReceivingService {
           {
             type: 'ADJUSTMENT',
             adjustment: {
-              catalogObjectId: catalogMapping.squareVariationId,
+              catalogObjectId,
               fromLocationId: location.squareId,
               toLocationId: location.squareId,
               quantity: quantity.toString(),
@@ -328,26 +321,7 @@ export class InventoryReceivingService {
       `[RECEIVING] Created receiving ${result.receiving.id} with batch ${result.inventoryBatch.id}`
     );
 
-    // Optionally sync to Square
-    let squareSync: { synced: boolean; error?: string } | undefined;
-    if (input.syncToSquare) {
-      squareSync = await this.syncToSquare(
-        result.receiving.id,
-        input.locationId,
-        input.productId,
-        input.quantity
-      );
-
-      // Update receiving record with sync status
-      await this.prisma.inventoryReceiving.update({
-        where: { id: result.receiving.id },
-        data: {
-          squareSynced: squareSync.synced,
-          squareSyncedAt: squareSync.synced ? new Date() : null,
-          squareSyncError: squareSync.error || null,
-        },
-      });
-    }
+    const squareSync = input.syncToSquare ? await this.recordSquareSync(result.receiving) : undefined;
 
     return {
       receiving: {
@@ -474,6 +448,7 @@ export class InventoryReceivingService {
         supplier: { select: { id: true, name: true } },
       },
       orderBy: { receivedAt: 'desc' },
+      take: listLimit(undefined),
     });
   }
 
@@ -547,23 +522,22 @@ export class InventoryReceivingService {
     if (receiving.squareSynced) {
       return { synced: true };
     }
+    return this.recordSquareSync(receiving);
+  }
 
-    const result = await this.syncToSquare(
-      receivingId,
-      receiving.locationId,
-      receiving.productId,
-      receiving.quantity
-    );
-
+  /** Pushes a committed receiving to Square and records the outcome on it. */
+  private async recordSquareSync(receiving: {
+    id: string; locationId: string; productId: string; quantity: number;
+  }): Promise<{ synced: boolean; error?: string }> {
+    const result = await this.syncToSquare(receiving.id, receiving.locationId, receiving.productId, receiving.quantity);
     await this.prisma.inventoryReceiving.update({
-      where: { id: receivingId },
+      where: { id: receiving.id },
       data: {
         squareSynced: result.synced,
         squareSyncedAt: result.synced ? new Date() : null,
         squareSyncError: result.error || null,
       },
     });
-
     return result;
   }
 }

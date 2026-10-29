@@ -14,7 +14,6 @@ import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { AdjustmentType } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 import { USER_ADJUSTMENT_TYPES } from './adjustment-types';
-import { MAX_LIST_LIMIT } from './list-limit';
 import { parseDateParam } from './business-date';
 
 // ============================================================================
@@ -237,12 +236,11 @@ export class InventoryAdjustmentController {
     @Query('type') type?: AdjustmentType,
     @Query('limit') limit?: string
   ) {
-    const parsedLimit = limit ? parseInt(limit, 10) : NaN;
     const adjustments = await this.adjustmentService.getAdjustmentsByLocation(locationId, {
       startDate: parseDateParam(startDate, 'startDate', 'start'),
       endDate: parseDateParam(endDate, 'endDate', 'end'),
       type,
-      limit: parsedLimit > 0 ? Math.min(parsedLimit, MAX_LIST_LIMIT) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
     });
     return {
       success: true,

@@ -1,11 +1,13 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { TransferStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { listLimit } from './list-limit';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { assertCutOver } from './cutover-gate';
 import { buildTransferLines, resolveQuantityReceived } from './transfer';
 import { SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
-import { sendInventoryChanges } from './square-sync';
+import { findSquareVariationId, sendInventoryChanges } from './square-sync';
 
 export interface ShipTransferInput {
   productId: string;
@@ -72,11 +74,8 @@ export class TransferService {
       const to = squareIdOf.get(transfer.toLocationId);
       if (!from || !to) return { synced: false, error: 'Location not linked to Square' };
 
-      const catalogMapping = await this.prisma.catalogMapping.findFirst({
-        where: { productId: transfer.productId },
-        select: { squareVariationId: true },
-      });
-      if (!catalogMapping?.squareVariationId) return { synced: false, error: 'Product not mapped to Square catalog' };
+      const catalogObjectId = await findSquareVariationId(this.prisma, transfer.productId, transfer.fromLocationId);
+      if (!catalogObjectId) return { synced: false, error: 'Product not mapped to Square catalog' };
 
       const occurredAt = new Date().toISOString();
       const change = (
@@ -84,7 +83,7 @@ export class TransferService {
       ) => ({
         type: 'ADJUSTMENT' as const,
         adjustment: {
-          catalogObjectId: catalogMapping.squareVariationId,
+          catalogObjectId,
           fromLocationId,
           toLocationId,
           fromState: 'IN_STOCK' as const,
@@ -322,16 +321,12 @@ export class TransferService {
     return result;
   }
 
-  async getTransfers(options: { locationId?: string; status?: string }) {
-    const where: any = {};
-    if (options.locationId) {
-      where.OR = [{ fromLocationId: options.locationId }, { toLocationId: options.locationId }];
-    }
-    if (options.status) {
-      where.status = options.status;
-    }
+  async getTransfers(options: { locationId?: string; status?: TransferStatus }) {
     return this.prisma.transfer.findMany({
-      where,
+      where: {
+        ...(options.locationId && { OR: [{ fromLocationId: options.locationId }, { toLocationId: options.locationId }] }),
+        ...(options.status && { status: options.status }),
+      },
       include: {
         lines: true,
         product: { select: { id: true, name: true, sku: true } },
@@ -339,6 +334,7 @@ export class TransferService {
         toLocation: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: 'desc' },
+      take: listLimit(undefined),
     });
   }
 }

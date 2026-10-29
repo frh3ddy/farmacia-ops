@@ -102,3 +102,25 @@ export async function mapVariationToProduct(
   };
 }
 
+
+/**
+ * The Square item a product's stock change at a location is sent under: the
+ * location's mapping, else the global one, else any — Square items are the
+ * same at every location. Never a `local_` placeholder (a product or price
+ * saved without a Square item); null when only those exist.
+ * Same rule as the api's findSquareVariationId (inventory/square-sync.ts).
+ */
+export async function findSquareVariationId(
+  prismaClient: Pick<Prisma.TransactionClient, 'catalogMapping'>,
+  productId: string,
+  locationId: string,
+): Promise<string | null> {
+  const mappings = await prismaClient.catalogMapping.findMany({
+    where: { productId, NOT: { squareVariationId: { startsWith: 'local_' } } },
+    select: { squareVariationId: true, locationId: true },
+  });
+  const preferred = mappings.find((m) => m.locationId === locationId)
+    ?? mappings.find((m) => m.locationId === null)
+    ?? mappings[0];
+  return preferred?.squareVariationId ?? null;
+}

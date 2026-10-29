@@ -35,7 +35,8 @@ export class InventoryReportsController {
 
     const report = await this.reportsService.getCOGSReport({
       locationId: targetLocationId,
-      startDate: parseDateParam(startDate, 'startDate', 'start'),
+      // Without dates, this month so far — not every sale ever recorded.
+      startDate: parseDateParam(startDate, 'startDate', 'start') ?? (endDate ? undefined : startOfBusinessMonth()),
       endDate: parseDateParam(endDate, 'endDate', 'end'),
       groupByCategory: groupByCategory === 'true',
     });

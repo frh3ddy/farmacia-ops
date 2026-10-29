@@ -4,8 +4,9 @@ import { endOfBusinessDay } from './business-date';
 import { Prisma, AdjustmentType } from '@prisma/client';
 import { SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
-import { sendInventoryChanges } from './square-sync';
+import { findSquareVariationId, sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
+import { listLimit } from './list-limit';
 
 // ============================================================================
 // Types
@@ -112,13 +113,8 @@ export class InventoryAdjustmentService {
         return { synced: false, error: 'Location not linked to Square' };
       }
 
-      // Get the Square catalog object ID (variation ID) for this product
-      const catalogMapping = await this.prisma.catalogMapping.findFirst({
-        where: { productId },
-        select: { squareVariationId: true },
-      });
-
-      if (!catalogMapping?.squareVariationId) {
+      const catalogObjectId = await findSquareVariationId(this.prisma, productId, locationId);
+      if (!catalogObjectId) {
         return { synced: false, error: 'Product not mapped to Square catalog' };
       }
 
@@ -139,7 +135,7 @@ export class InventoryAdjustmentService {
       }
 
       // Call Square Inventory API
-      this.logger.log(`[SQUARE_SYNC] Syncing adjustment: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${Math.abs(quantityChange)}, ${fromState} → ${toState}, type=${adjustmentType}`);
+      this.logger.log(`[SQUARE_SYNC] Syncing adjustment: catalogObjectId=${catalogObjectId}, locationId=${location.squareId}, quantity=${Math.abs(quantityChange)}, ${fromState} → ${toState}, type=${adjustmentType}`);
       
       return await sendInventoryChanges(client, {
         // Keyed on the adjustment record itself (not randomUUID()) so a
@@ -150,7 +146,7 @@ export class InventoryAdjustmentService {
           {
             type: 'ADJUSTMENT',
             adjustment: {
-              catalogObjectId: catalogMapping.squareVariationId,
+              catalogObjectId,
               // Same location on both sides: it changes state, not place.
               fromLocationId: location.squareId,
               toLocationId: location.squareId,
@@ -651,6 +647,7 @@ export class InventoryAdjustmentService {
         },
       },
       orderBy: { adjustedAt: 'desc' },
+      take: listLimit(undefined),
     });
   }
 
@@ -678,7 +675,7 @@ export class InventoryAdjustmentService {
         },
       },
       orderBy: { adjustedAt: 'desc' },
-      take: options?.limit || 100,
+      take: listLimit(options?.limit),
     });
   }
 }
