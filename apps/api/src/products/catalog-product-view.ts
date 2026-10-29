@@ -1,9 +1,8 @@
 /**
  * Shared shape + mapper for a Product as shown in catalog search / equivalence
- * results. Mirrors the availability/price computation already used by
- * ProductsService.getProducts (mapping preference: preferredMapping, sum of
- * inventories.quantity) so search results stay consistent
- * with the rest of the app.
+ * results. Price comes from the mapping preferredMapping picks and stock is
+ * the sum of the location's batches, as in ProductsService.getProducts, so
+ * search results agree with the product list.
  */
 import { Prisma } from '@prisma/client';
 import { preferredMapping } from '../inventory/square-sync';

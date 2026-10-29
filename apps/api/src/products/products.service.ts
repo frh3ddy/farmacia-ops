@@ -4,7 +4,9 @@ import { Square, SquareClient } from 'square';
 import { findSquareVariationId, isSquareMapping, preferredMapping } from '../inventory/square-sync';
 import { assertCutOver } from '../inventory/cutover-gate';
 import { createSquareClient } from '../square/square-client';
-import { Prisma, PackagingType } from '@prisma/client';
+import { Prisma, PackagingType, PharmaceuticalForm, AdministrationRoute } from '@prisma/client';
+import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from './medication-definition';
+import { findOrCreateLaboratory } from './laboratory';
 import { randomUUID } from 'crypto';
 import { deriveName, derivePresentation, type Substance } from './derived-naming';
 import { normalizeSearchAliases } from './catalog-search';
@@ -16,13 +18,31 @@ import { productsWithoutCostSql, type ProductWithoutCost } from './products-with
 const CURRENCY = 'USD';
 
 /** A product as a cashier sees it: stock and selling price, nothing the pharmacy paid. */
-export function withoutCosts<T extends { averageCost?: unknown; inventories?: object[]; receivings?: object[] }>(product: T) {
+export function withoutCosts<
+  T extends {
+    averageCost?: unknown;
+    inventories?: { unitCost?: unknown; costSource?: unknown }[];
+    receivings?: { unitCost?: unknown; totalCost?: unknown }[];
+  },
+>(product: T) {
   const { averageCost, inventories, receivings, ...rest } = product;
   return {
     ...rest,
-    ...(inventories && { inventories: inventories.map(({ unitCost, costSource, ...batch }: any) => batch) }),
-    ...(receivings && { receivings: receivings.map(({ unitCost, totalCost, ...receiving }: any) => receiving) }),
+    ...(inventories && { inventories: inventories.map(({ unitCost, costSource, ...batch }) => batch) }),
+    ...(receivings && { receivings: receivings.map(({ unitCost, totalCost, ...receiving }) => receiving) }),
   };
+}
+
+/**
+ * The only Square location a new item for this product is sold at, or
+ * undefined when it is sold everywhere.
+ */
+function onlySquareLocation(soldAtAllLocations: boolean, squareLocationId?: string | null): string | undefined {
+  if (soldAtAllLocations) return undefined;
+  if (!squareLocationId) {
+    throw new BadRequestException('El producto se vende solo en esta sucursal, y la sucursal no está en Square');
+  }
+  return squareLocationId;
 }
 
 export interface CreateProductInput {
@@ -57,6 +77,18 @@ export interface CreateProductInput {
   searchAliases?: string[];
   // Dedup key for a retried create: becomes the product's id.
   clientRequestId?: string;
+  // false: sold only at the creating store (e.g. a single toy). Default true.
+  soldAtAllLocations?: boolean;
+  // Find-or-create by name when labId isn't already known.
+  labName?: string;
+  // Inline info to find-or-create a medication definition when medicationDefinitionId isn't known.
+  medication?: {
+    name: string;
+    form: PharmaceuticalForm;
+    route: AdministrationRoute;
+    strength: string;
+    activeIngredients: { name: string; concentrationValue?: number; concentrationUnit?: string }[];
+  };
 }
 
 export interface UpdatePriceInput {
@@ -175,9 +207,7 @@ export class ProductsService {
       locationId,
       syncToSquare = true,
       categoryId,
-      labId,
       medicationType,
-      medicationDefinitionId,
       presentation,
       requiresPrescription,
       isControlled,
@@ -190,6 +220,9 @@ export class ProductsService {
       looseProductId,
       searchAliases,
       clientRequestId,
+      soldAtAllLocations = true,
+      labName,
+      medication,
     } = input;
 
     this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} ${CURRENCY}`);
@@ -197,6 +230,25 @@ export class ProductsService {
     const { location } = await this.assertCreatable(input);
     const trimmedSku = sku?.trim() || undefined;
     const productId = clientRequestId ?? randomUUID();
+
+    const labId = input.labId || (labName ? await findOrCreateLaboratory(this.prisma, labName) : undefined);
+    let medicationDefinitionId = input.medicationDefinitionId;
+    if (!medicationDefinitionId && medication) {
+      const ingredients = await Promise.all(
+        medication.activeIngredients.map(async (i) => ({
+          activeIngredientId: await findOrCreateActiveIngredient(this.prisma, i.name),
+          concentrationValue: i.concentrationValue,
+          concentrationUnit: i.concentrationUnit,
+        })),
+      );
+      medicationDefinitionId = await findOrCreateMedicationDefinition(this.prisma, {
+        name: medication.name,
+        form: medication.form,
+        route: medication.route,
+        strength: medication.strength,
+        ingredients,
+      });
+    }
 
     // Derived naming/presentación: only for medicamento products
     // (medicationDefinitionId set). 'otro' products keep the directly
@@ -232,6 +284,7 @@ export class ProductsService {
     let squareItemId: string | undefined;
     let squareVariationId: string | undefined;
     let squareSynced = false;
+    let squareError: string | undefined;
 
     // Step 1: Create in Square (if enabled)
     if (syncToSquare) {
@@ -241,14 +294,15 @@ export class ProductsService {
           sku: trimmedSku,
           description,
           sellingPrice,
-          locationId: location.squareId || undefined,
+          onlyAtSquareLocationId: onlySquareLocation(soldAtAllLocations, location.squareId),
         });
         squareItemId = squareResult.itemId;
         squareVariationId = squareResult.variationId;
         squareSynced = true;
         this.logger.log(`[PRODUCT] Created in Square: Item=${squareItemId}, Variation=${squareVariationId}`);
       } catch (error) {
-        this.logger.error(`[PRODUCT] Failed to create in Square: ${error}`);
+        squareError = error instanceof Error ? error.message : String(error);
+        this.logger.error(`[PRODUCT] Failed to create in Square: ${squareError}`);
         // Continue without Square sync - product will be local only
       }
     }
@@ -282,6 +336,7 @@ export class ProductsService {
             manualPresentation: manualPresentation?.trim() || null,
             looseProductId: looseProductId || null,
             searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
+            soldAtAllLocations,
           },
         });
 
@@ -372,16 +427,15 @@ export class ProductsService {
       inventoryCreated,
       message: squareSynced
         ? `Product "${resolvedName}" created and synced to Square`
-        : `Product "${resolvedName}" created locally (Square sync ${syncToSquare ? 'failed' : 'disabled'})`,
+        : `Product "${resolvedName}" created locally (Square sync ${syncToSquare ? `failed: ${squareError}` : 'disabled'})`,
     };
   }
 
   /**
    * Refuses a create that would fail part-way, before anything is written in
-   * Square or the database. Also run by the controller before it creates
-   * laboratories and medication definitions for the product.
+   * Square or the database (laboratories and medication definitions included).
    */
-  async assertCreatable(input: CreateProductInput) {
+  private async assertCreatable(input: CreateProductInput) {
     const { name, sku, sellingPrice, costPrice, initialStock, quantity, supplierId, locationId, clientRequestId } = input;
     if (!name || name.trim().length === 0) {
       throw new BadRequestException('El nombre del producto es obligatorio');
@@ -398,6 +452,9 @@ export class ProductsService {
     }
     if (initialStock && costPrice == null) {
       throw new BadRequestException('Las existencias iniciales necesitan un costo');
+    }
+    if (input.medication && !Array.isArray(input.medication.activeIngredients)) {
+      throw new BadRequestException('El medicamento necesita su lista de principios activos');
     }
     if (clientRequestId !== undefined && (typeof clientRequestId !== 'string' || !UUID.test(clientRequestId))) {
       throw new BadRequestException('clientRequestId must be a UUID');
@@ -486,7 +543,7 @@ export class ProductsService {
           sku: product.sku || undefined,
           description: product.squareDescription || undefined,
           sellingPrice: price,
-          locationId: location?.squareId || undefined,
+          onlyAtSquareLocationId: onlySquareLocation(product.soldAtAllLocations, location?.squareId),
           productId: product.id,
         });
 
@@ -534,7 +591,8 @@ export class ProductsService {
     sku?: string;
     description?: string;
     sellingPrice: number;
-    locationId?: string;
+    // Sold only at this Square location; omitted, sold everywhere.
+    onlyAtSquareLocationId?: string;
     // Keys the Square call to this local product's own id so a retry (e.g.
     // the bulk unsynced-products sweep or a re-run of updatePrice's backfill
     // path) replays the same idempotency key instead of creating a second
@@ -548,12 +606,17 @@ export class ProductsService {
     // Generate temporary IDs for the request
     const tempItemId = `#item_${idempotencyKey}`;
     const tempVariationId = `#variation_${idempotencyKey}`;
+    // The variation is sold exactly where its item is: Square rejects a variation present beyond its item.
+    const presence = input.onlyAtSquareLocationId
+      ? { presentAtAllLocations: false, presentAtLocationIds: [input.onlyAtSquareLocationId] }
+      : {};
 
     const response = await client.catalog.object.upsert({
       idempotencyKey,
       object: {
         type: 'ITEM',
         id: tempItemId,
+        ...presence,
         itemData: {
           name: input.name,
           description: input.description || undefined,
@@ -561,6 +624,7 @@ export class ProductsService {
             {
               type: 'ITEM_VARIATION',
               id: tempVariationId,
+              ...presence,
               itemVariationData: {
                 itemId: tempItemId,
                 name: 'Regular', // Simple product - single variation
@@ -644,6 +708,9 @@ export class ProductsService {
     if (!product) {
       throw new NotFoundException(`Product ${productId} not found`);
     }
+    if (product.catalogMappings.some((m) => m.employeeId)) {
+      throw new BadRequestException('Los productos Yastás no tienen precio fijo: su ingreso se registra en la pantalla de Yastás');
+    }
 
     const shown = preferredMapping(product.catalogMappings, locationId);
     const previousPrice = shown ? this.fromCents(Number(shown.priceCents)) : null;
@@ -672,7 +739,7 @@ export class ProductsService {
             sku: product.sku || undefined,
             description: product.squareDescription || undefined,
             sellingPrice,
-            locationId: location?.squareId || undefined,
+            onlyAtSquareLocationId: onlySquareLocation(product.soldAtAllLocations, location?.squareId),
             productId,
           });
           squareVariationId = squareResult.variationId;
@@ -694,7 +761,7 @@ export class ProductsService {
       priceSyncedAt: new Date(),
     };
     const { count } = applyToAllLocations
-      ? await this.prisma.catalogMapping.updateMany({ where: { productId, employeeId: null }, data: priced })
+      ? await this.prisma.catalogMapping.updateMany({ where: { productId }, data: priced })
       : { count: 0 };
     if (count === 0) {
       const ownVariationId = squareVariationId ?? `local_${productId}`;
@@ -1438,11 +1505,14 @@ export class ProductsService {
       if (!looseProduct) {
         throw new NotFoundException(`Product ${looseProductId} not found`);
       }
-      // Walk the loose product's own chain: reaching this product would loop break-bulk.
-      for (let next = looseProduct.looseProductId; next; ) {
+      // Walk the loose product's own chain: reaching this product would loop
+      // break-bulk. Stop at a product seen twice, a loop saved before this check.
+      const seen = new Set<string>();
+      for (let next = looseProduct.looseProductId; next && !seen.has(next); ) {
         if (next === productId) {
           throw new BadRequestException('El producto suelto ya lleva de vuelta a este producto');
         }
+        seen.add(next);
         next = (await this.prisma.product.findUnique({ where: { id: next }, select: { looseProductId: true } }))?.looseProductId ?? null;
       }
     }
