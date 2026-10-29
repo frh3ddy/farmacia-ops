@@ -258,10 +258,16 @@ export class InventoryReportsController {
             byType: profitLoss.operatingExpenses.byType,
             shrinkage: profitLoss.operatingExpenses.shrinkage,
           },
-          // Net Profit (after all expenses)
+          // Net Profit (after all expenses), with the P&L lines behind it so a client
+          // can show rows that add up: net profit includes Yastás service revenue (which
+          // `sales` leaves out) and is computed from sale totals (`sales` sums sale
+          // items — they differ when a discount is on the whole sale).
           netProfit: {
             amount: profitLoss.netProfit.amount,
             marginPercent: profitLoss.netProfit.marginPercent,
+            yastasServiceRevenue: profitLoss.revenue.yastasServiceRevenue,
+            salesRevenue: profitLoss.revenue.sales,
+            costOfSales: profitLoss.costOfGoodsSold.total,
           },
         }),
       },
