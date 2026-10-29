@@ -72,3 +72,33 @@ describe('InventoryReportsController.getBatchDetail', () => {
     });
   });
 });
+
+describe('InventoryReportsController.getDashboardSummary period and location', () => {
+  afterEach(() => vi.useRealTimers());
+
+  test('no dates given', async () => {
+    vi.useFakeTimers({ now: new Date('2026-11-01T03:00:00Z') }); // 9 pm Oct 31 in Mexico City
+    const { reports, controller } = setup();
+    await controller.getDashboardSummary(requestAs('OWNER'));
+
+    assert({
+      given: 'a dashboard opened on the evening of Oct 31 without a date range',
+      should: 'cover October so far in Mexico City, not every sale ever recorded',
+      actual: reports.getCOGSReport.mock.calls[0][0].startDate.toISOString(),
+      expected: '2026-10-01T06:00:00.000Z',
+    });
+  });
+
+  test('a manager of two locations picking one', async () => {
+    const { reports, controller } = setup();
+    const manager = { ...requestAs('MANAGER'), accessibleLocations: [{ locationId: 'centro', isActive: true }, { locationId: 'norte', isActive: true }] };
+    await controller.getDashboardSummary(manager, 'norte');
+
+    assert({
+      given: 'a manager at Centro and Norte asking for Norte (the guard has checked access)',
+      should: "show Norte's numbers, not Centro's",
+      actual: reports.getCOGSReport.mock.calls[0][0].locationId,
+      expected: 'norte',
+    });
+  });
+});

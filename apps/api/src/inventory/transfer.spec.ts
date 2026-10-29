@@ -1,4 +1,4 @@
-import { buildTransferLines, resolveQuantityReceived, discrepancy } from './transfer';
+import { buildTransferLines, resolveQuantityReceived } from './transfer';
 
 describe('buildTransferLines', () => {
   it('creates one line per consumed batch, preserving cost and date exactly (no blending)', () => {
@@ -25,15 +25,5 @@ describe('resolveQuantityReceived', () => {
 
   it('uses the override for a partial receipt', () => {
     expect(resolveQuantityReceived(20, 19)).toBe(19);
-  });
-});
-
-describe('discrepancy', () => {
-  it('is zero for a full receipt', () => {
-    expect(discrepancy(20, 20)).toBe(0);
-  });
-
-  it('is positive for a short receipt (sent 20, received 19)', () => {
-    expect(discrepancy(20, 19)).toBe(1);
   });
 });

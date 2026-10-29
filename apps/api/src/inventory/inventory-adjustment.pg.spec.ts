@@ -258,13 +258,13 @@ describe('InventoryAdjustmentService Square sync (Postgres)', () => {
   test("a transfer's outgoing leg", async () => {
     const { synced, productId, batchCreateChanges } = await syncedProduct();
     const { adjustment, squareSync } = await synced.createAdjustment({ locationId, productId, type: 'TRANSFER_OUT', quantity: -1, syncToSquare: true });
-    const retried = await synced.retrySquareSync(adjustment.id);
+    const retried = await synced.retrySquareSync(adjustment.id).then(() => 'retried', (e: any) => [e.status, e.message]);
 
     assert({
       given: 'a transfer shipment, synced or retried on its own',
-      should: 'not reach Square — the transfer sends the move when it is received',
-      actual: [batchCreateChanges.mock.calls.length, squareSync?.synced, retried.synced],
-      expected: [0, false, false],
+      should: 'not reach Square — the transfer sends the move when it is received — and refuse the retry saying why',
+      actual: [batchCreateChanges.mock.calls.length, squareSync?.synced, retried],
+      expected: [0, false, [400, 'Transfer adjustments sync to Square when the transfer is received, not one by one']],
     });
   });
 
