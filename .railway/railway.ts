@@ -6,11 +6,14 @@ export default defineRailway(() => {
   // Images pinned to what production runs: the postgres()/redis() helpers
   // default to the SDK's current image (postgres:18 in 3.16.0), and a major
   // Postgres bump can't start on the existing data directory.
+  // No public TCP proxies: the api and worker reach both databases over the
+  // private network (*.railway.internal). `null` removes a proxy; leaving the
+  // port out or `{}` leaves an existing one in place.
   const Redis = database("Redis", "redis", { image: "redis:8.2.9", region: "us-west2" });
   Redis.deploy = { startCommand: "/bin/sh -c \"rm -rf $RAILWAY_VOLUME_MOUNT_PATH/lost+found/ && exec docker-entrypoint.sh redis-server --requirepass $REDIS_PASSWORD --save 60 1 --dir $RAILWAY_VOLUME_MOUNT_PATH\"" };
-  Redis.networking = { privateNetworkEndpoint: "redis", tcpProxies: { "6379": {} } };
+  Redis.networking = { privateNetworkEndpoint: "redis", tcpProxies: { "6379": null } };
   const Postgres = database("Postgres", "postgres", { image: "ghcr.io/railwayapp-templates/postgres-ssl:17", region: "us-west2" });
-  Postgres.networking = { privateNetworkEndpoint: "postgres", tcpProxies: { "5432": {} } };
+  Postgres.networking = { privateNetworkEndpoint: "postgres", tcpProxies: { "5432": null } };
   const redisVolume = volume("redis-volume", { alerts: { usage: { "100": {}, "80": {}, "95": {} } }, allowOnlineResize: true, region: "us-west2", sizeMB: 500 });
   const postgresVolume = volume("postgres-volume", { alerts: { usage: { "100": {}, "80": {}, "95": {} } }, allowOnlineResize: true, region: "us-west2", sizeMB: 500 });
   const api = service("api", {
