@@ -18,6 +18,13 @@
   "workspaces": [
     "apps/*"
   ],
+  "allowScripts": {
+    "@nestjs/core": false,
+    "@prisma/engines": true,
+    "esbuild": true,
+    "msgpackr-extract": true,
+    "prisma": true
+  },
   "scripts": {
     "test": "npm run test --workspace=apps/api && npm run test --workspace=apps/web && npm run test --workspace=apps/worker",
     "build": "npm run build --workspace=apps/worker && npm run build --workspace=apps/api && npm run build --workspace=apps/web",
