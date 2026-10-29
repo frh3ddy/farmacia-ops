@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { daysUntilExpiry as expiryDaysAway, expiryDayStart } from '../inventory/business-date';
 
 // Use Prisma's Decimal type
 const Decimal = Prisma.Decimal;
@@ -738,15 +739,14 @@ export class InventoryAgingService {
     includeExpired = true,
   ): Promise<ExpiringProductAnalysis[]> {
     const now = new Date();
-    const thresholdDate = new Date(now.getTime() + withinDays * 24 * 60 * 60 * 1000);
 
-    // Build the date filter: expiry is before threshold date
+    // Expiry is a calendar day: include lots expiring up to `withinDays` days from today
     const expiryFilter: any = {
-      lte: thresholdDate,
+      lt: expiryDayStart(withinDays + 1, now),
     };
-    // Optionally exclude already-expired batches
+    // Optionally exclude already-expired batches (expired from the start of the expiry day)
     if (!includeExpired) {
-      expiryFilter.gte = now;
+      expiryFilter.gte = expiryDayStart(1, now);
     }
 
     // Query receivings that have an expiry date within the threshold
@@ -783,10 +783,8 @@ export class InventoryAgingService {
 
     for (const rec of receivings) {
       const batch = rec.inventoryBatch;
-      const daysUntilExpiry = Math.floor(
-        (rec.expiryDate!.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      const isExpired = rec.expiryDate! < now;
+      const daysUntilExpiry = expiryDaysAway(rec.expiryDate!, now);
+      const isExpired = daysUntilExpiry <= 0;
       const cashValue = new Decimal(batch.quantity).mul(batch.unitCost);
 
       const batchInfo: ExpiringBatchInfo = {

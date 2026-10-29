@@ -43,3 +43,19 @@ export function endOfBusinessDay(date = new Date()): Date {
 export function startOfBusinessMonth(date = new Date()): Date {
   return parseBusinessDate(`${businessDay(date).slice(0, 7)}-01`, 'start');
 }
+
+// Expiry dates are calendar days. Date-only input is stored at Mexico City noon
+// (parseBusinessDate); older rows at UTC midnight. Both sit on the right day in
+// UTC — not in Mexico City — so expiry days are read in UTC, today in Mexico City.
+const DAY_MS = 24 * 60 * 60 * 1000;
+const utcMidnight = (day: string) => Date.parse(`${day}T00:00:00Z`);
+
+/** Calendar days from today (Mexico City) to the expiry day: 0 on the day (expired), negative after. */
+export function daysUntilExpiry(expiry: Date, now = new Date()): number {
+  return Math.round((utcMidnight(expiry.toISOString().slice(0, 10)) - utcMidnight(businessDay(now))) / DAY_MS);
+}
+
+/** UTC midnight of the day `days` after today (Mexico City) — a query bound on expiryDate. */
+export function expiryDayStart(days: number, now = new Date()): Date {
+  return new Date(utcMidnight(businessDay(now)) + days * DAY_MS);
+}
