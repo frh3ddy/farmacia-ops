@@ -54,6 +54,20 @@ describe('ProductsService.setLooseProductLink (Postgres)', () => {
       expected: [400, 400],
     });
   });
+
+  test('a loop already in the data', async () => {
+    const b = await newProduct();
+    const c = await newProduct({ looseProductId: b });
+    await prisma.product.update({ where: { id: b }, data: { looseProductId: c } });
+    const a = await newProduct();
+
+    assert({
+      given: 'linking a product to one already in a loop that does not include it (B→C→B)',
+      should: 'answer instead of following the loop forever',
+      actual: await statusOf(products.setLooseProductLink(a, b, 10)),
+      expected: 200,
+    });
+  });
 });
 
 describe('ProductsService search keywords (Postgres)', () => {

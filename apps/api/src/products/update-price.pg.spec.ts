@@ -133,6 +133,27 @@ describe('ProductsService.updatePrice (Postgres)', () => {
   });
 });
 
+describe('ProductsService.updatePrice for Yastás (Postgres)', () => {
+  test('a Yastás product', async () => {
+    const { products, catalog } = productsWithSquare();
+    const employee = await prisma.employee.create({ data: { name: `Cajera-${Math.random()}` } });
+    const productId = await productWithMappings([{ squareVariationId: `VAR-Y-${Math.random()}`, locationId: null, priceCents: 0 }]);
+    await prisma.catalogMapping.updateMany({ where: { productId }, data: { employeeId: employee.id } });
+
+    const statuses = [];
+    for (const applyToAllLocations of [true, false]) {
+      statuses.push(await products.updatePrice({ productId, sellingPrice: 40, locationId: centro, applyToAllLocations }).then(() => 200, (e: any) => e.status));
+    }
+
+    assert({
+      given: 'a price change, for every store and for one, on a Yastás product (no set price)',
+      should: 'refuse both with a 400 and change nothing in Square or the database',
+      actual: [statuses, catalog.object.upsert.mock.calls.length, (await cachedPrices(productId)).map(([, , cents]) => cents)],
+      expected: [[400, 400], 0, [0]],
+    });
+  });
+});
+
 describe('ProductsService.syncUnsyncedProducts (Postgres)', () => {
   test('a placeholder next to a real Square item', async () => {
     const { products, catalog } = productsWithSquare();
@@ -148,6 +169,42 @@ describe('ProductsService.syncUnsyncedProducts (Postgres)', () => {
       should: 'point the placeholder at the real Square item instead of creating a second one',
       actual: [itemsCreated(catalog), result.synced, await cachedPrices(productId)],
       expected: [0, 1, [['VAR-3', 'norte', 3000], ['VAR-3', 'centro', 3200]]],
+    });
+  });
+});
+
+describe('A product sold at one store reaching Square later (Postgres)', () => {
+  /** A web-created product (no Square item yet) sold only at Centro. */
+  async function oneStoreProduct() {
+    const product = await prisma.product.create({ data: { name: `Juguete-${Math.random()}`, soldAtAllLocations: false } });
+    await prisma.catalogMapping.create({ data: { squareVariationId: `local_${product.id}`, productId: product.id, locationId: centro, priceCents: 9900, currency: 'USD' } });
+    return product;
+  }
+  /** Where each Square item created under `name` is sold: item, then its variation. */
+  const presence = (catalog: ReturnType<typeof productsWithSquare>['catalog'], name: string) =>
+    catalog.object.upsert.mock.calls.filter(([r]: any) => r.object.itemData?.name === name).map(([r]: any) => [
+      r.object.presentAtAllLocations,
+      r.object.presentAtLocationIds,
+      r.object.itemData.variations[0].presentAtAllLocations,
+      r.object.itemData.variations[0].presentAtLocationIds,
+    ]);
+
+  test('from sync to Square and from its first price', async () => {
+    const synced = productsWithSquare();
+    const toy = await oneStoreProduct();
+    await synced.products.syncUnsyncedProducts(centro);
+    const priced = productsWithSquare();
+    const otherToy = await oneStoreProduct();
+    await priced.products.updatePrice({ productId: otherToy.id, sellingPrice: 99, locationId: centro });
+
+    assert({
+      given: 'a product sold only at Centro reaching Square through "sync to Square", then through its first price',
+      should: 'create the Square item and its variation present only at Centro both times',
+      actual: [...presence(synced.catalog, toy.name), ...presence(priced.catalog, otherToy.name)],
+      expected: [
+        [false, ['SQ-CENTRO'], false, ['SQ-CENTRO']],
+        [false, ['SQ-CENTRO'], false, ['SQ-CENTRO']],
+      ],
     });
   });
 });

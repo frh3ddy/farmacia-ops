@@ -20,54 +20,12 @@ import { memoryStorage } from 'multer';
 import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts } from './products.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
-import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from './medication-definition';
-import { findOrCreateLaboratory } from './laboratory';
 import { AuthGuard, LocationGuard, Roles, GuardedRequest } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { PharmaceuticalForm, AdministrationRoute, PackagingType } from '@prisma/client';
 
 // DTOs
-interface CreateProductDto {
-  name: string;
-  sku?: string;
-  description?: string;
-  sellingPrice: number;
-  costPrice?: number;
-  initialStock?: number;
-  supplierId?: string; // Supplier the initial stock came from
-  locationId?: string; // Optional - will use current location if not provided
-  syncToSquare?: boolean;
-  categoryId?: string;
-  labId?: string;
-  labName?: string; // find-or-create by name when labId isn't already known
-  medicationType?: 'GENERIC' | 'BRAND' | 'SIMILAR';
-  presentation?: string;
-  requiresPrescription?: boolean;
-  isControlled?: boolean;
-  // Derived naming/presentación inputs (see derived-naming.ts) — resolved
-  // name/presentation win over these when set.
-  primaryPackaging?: PackagingType;
-  secondaryPackaging?: PackagingType;
-  quantity?: number;
-  primaryContent?: number;
-  manualName?: string;
-  manualPresentation?: string;
-  // Sueltos: links this (box) product to its already-existing loose Product.
-  looseProductId?: string;
-  // Brand-name search tags, e.g. a generic's known brand names.
-  searchAliases?: string[];
-  // Dedup key for a retried create (a UUID): the retry answers with the same product.
-  clientRequestId?: string;
-  // Either an existing definition id, or enough inline info to find-or-create one.
-  medicationDefinitionId?: string;
-  medication?: {
-    name: string;
-    form: PharmaceuticalForm;
-    route: AdministrationRoute;
-    strength: string;
-    activeIngredients: { name: string; concentrationValue?: number; concentrationUnit?: string }[];
-  };
-}
+/** The create body: the service's input, with the location optional (defaults to the current one). */
+type CreateProductDto = Omit<CreateProductInput, 'locationId'> & { locationId?: string };
 
 interface UpdatePriceDto {
   sellingPrice: number;
@@ -107,21 +65,6 @@ export class ProductsController {
   @Roles('OWNER', 'MANAGER')
   @HttpCode(HttpStatus.CREATED)
   async createProduct(@Body() body: CreateProductDto, @Req() req: GuardedRequest) {
-    // Validate required fields
-    if (!body.name || body.name.trim().length === 0) {
-      throw new HttpException(
-        { success: false, message: 'El nombre del producto es obligatorio' },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    if (body.sellingPrice === undefined || body.sellingPrice === null) {
-      throw new HttpException(
-        { success: false, message: 'El precio de venta es obligatorio' },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
     // Use provided locationId or current location
     const locationId = body.locationId || req.currentLocation?.locationId;
     if (!locationId) {
@@ -131,66 +74,11 @@ export class ProductsController {
       );
     }
 
-    if (body.medication && !Array.isArray(body.medication.activeIngredients)) {
-      throw new HttpException(
-        { success: false, message: 'El medicamento necesita su lista de principios activos' },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    const input: CreateProductInput = {
-      name: body.name,
-      sku: body.sku,
-      description: body.description,
-      sellingPrice: body.sellingPrice,
-      costPrice: body.costPrice,
-      initialStock: body.initialStock,
-      supplierId: body.supplierId,
+    const result = await this.productsService.createProduct({
+      ...body,
       locationId,
       syncToSquare: body.syncToSquare !== false, // Default true
-      categoryId: body.categoryId,
-      medicationType: body.medicationType,
-      presentation: body.presentation,
-      requiresPrescription: body.requiresPrescription,
-      isControlled: body.isControlled,
-      primaryPackaging: body.primaryPackaging,
-      secondaryPackaging: body.secondaryPackaging,
-      quantity: body.quantity,
-      primaryContent: body.primaryContent,
-      manualName: body.manualName,
-      manualPresentation: body.manualPresentation,
-      looseProductId: body.looseProductId,
-      searchAliases: body.searchAliases,
-      clientRequestId: body.clientRequestId,
-    };
-    // Before creating any laboratory or medication definition for it
-    await this.productsService.assertCreatable(input);
-
-    // Resolve the laboratory: either an existing id, or a name to find-or-create.
-    const labId = body.labId || (body.labName ? await findOrCreateLaboratory(this.prisma, body.labName) : undefined);
-
-    // Resolve the medication definition: either an id already picked from
-    // the search/picker, or inline ingredient/strength/form/route info that
-    // gets resolved to an existing (or newly created) definition here.
-    let medicationDefinitionId = body.medicationDefinitionId;
-    if (!medicationDefinitionId && body.medication) {
-      const ingredients = await Promise.all(
-        body.medication.activeIngredients.map(async (i) => ({
-          activeIngredientId: await findOrCreateActiveIngredient(this.prisma, i.name),
-          concentrationValue: i.concentrationValue,
-          concentrationUnit: i.concentrationUnit,
-        })),
-      );
-      medicationDefinitionId = await findOrCreateMedicationDefinition(this.prisma, {
-        name: body.medication.name,
-        form: body.medication.form,
-        route: body.medication.route,
-        strength: body.medication.strength,
-        ingredients,
-      });
-    }
-
-    const result = await this.productsService.createProduct({ ...input, labId, medicationDefinitionId });
+    });
 
     return {
       success: true,

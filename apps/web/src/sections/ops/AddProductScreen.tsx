@@ -99,6 +99,7 @@ export function AddProductScreen() {
   const [route, setRoute] = useState<AdministrationRoute | "">("");
   const [requiresPrescription, setRequiresPrescription] = useState(false);
   const [isControlled, setIsControlled] = useState(false);
+  const [soldAtAllLocations, setSoldAtAllLocations] = useState(true);
   const [primaryPackaging, setPrimaryPackaging] = useState<PackagingType | "">("");
   const [secondaryPackaging, setSecondaryPackaging] = useState<PackagingType | "">("");
   const [quantity, setQuantity] = useState("");
@@ -210,6 +211,7 @@ export function AddProductScreen() {
     setRoute("");
     setRequiresPrescription(false);
     setIsControlled(false);
+    setSoldAtAllLocations(true);
     setPrimaryPackaging("");
     setSecondaryPackaging("");
     setQuantity("");
@@ -292,6 +294,7 @@ export function AddProductScreen() {
               }
             : undefined,
           syncToSquare: false,
+          soldAtAllLocations,
         }),
       });
       setSuccessMessage(`Created "${body.data.product.name}".`);
@@ -674,6 +677,19 @@ export function AddProductScreen() {
               </label>
             </div>
           </div>
+        )}
+
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={soldAtAllLocations}
+            onChange={e => setSoldAtAllLocations(e.target.checked)}
+            className="accent-(--color-accent)"
+          />
+          <span className="text-sm text-(--color-ink)">Vender en todas las sucursales</span>
+        </label>
+        {!soldAtAllLocations && (
+          <p className="text-xs text-(--color-ink-tertiary)">Solo se venderá en esta sucursal.</p>
         )}
 
         <button
