@@ -15,6 +15,8 @@ function setup() {
     getAdjustmentImpactReport: vi.fn().mockResolvedValue({ summary: {} }),
     getReceivingSummaryReport: vi.fn().mockResolvedValue({ summary: {} }),
     getProfitAndLossReport: vi.fn().mockResolvedValue({
+      revenue: { sales: '100000', yastasServiceRevenue: '3000', total: '103000' },
+      costOfGoodsSold: { productCosts: '60000', total: '60000' },
       operatingExpenses: { total: '500', byType: [{ type: 'PAYROLL', amount: '500' }], shrinkage: '0' },
       netProfit: { amount: '1000', marginPercent: '20.00' },
     }),
@@ -52,6 +54,22 @@ describe('InventoryReportsController.getDashboardSummary', () => {
       should: 'include net profit and operating expenses',
       actual: dashboards.map(({ data }) => profitLossKeys(data)),
       expected: [['operatingExpenses', 'netProfit'], ['operatingExpenses', 'netProfit']],
+    });
+  });
+
+  test('the P&L lines behind net profit', async () => {
+    // Net profit adds Yastás revenue (service income kept out of sales/gross profit),
+    // and comes from sale totals, while `sales` sums sale items — which differ when a
+    // discount is on the whole sale. The app builds the P&L card from these so its
+    // rows add up to net profit.
+    const { controller } = setup();
+    const { data } = await controller.getDashboardSummary(requestAs('OWNER'));
+
+    assert({
+      given: 'an owner and a P&L with sales 100000, cost 60000 and Yastás 3000',
+      should: 'carry them in netProfit next to the amount',
+      actual: (data as any).netProfit,
+      expected: { amount: '1000', marginPercent: '20.00', yastasServiceRevenue: '3000', salesRevenue: '100000', costOfSales: '60000' },
     });
   });
 });
