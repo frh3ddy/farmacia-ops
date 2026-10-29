@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { Square, SquareClient } from 'square';
 import { findSquareVariationId, isSquareMapping, preferredMapping } from '../inventory/square-sync';
+import { assertCutOver } from '../inventory/cutover-gate';
 import { createSquareClient } from '../square/square-client';
 import { Prisma, PackagingType } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -54,6 +55,8 @@ export interface CreateProductInput {
   // Brand-name search tags (e.g. a generic's known brand names: "Tylenol",
   // "Panadol") — matched in catalog-search.service.ts, not a Product relation.
   searchAliases?: string[];
+  // Dedup key for a retried create: becomes the product's id.
+  clientRequestId?: string;
 }
 
 export interface UpdatePriceInput {
@@ -98,6 +101,9 @@ function assertSellingPrice(sellingPrice: unknown): void {
   }
 }
 
+const isWholeNumber = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
@@ -135,6 +141,23 @@ export class ProductsService {
    * Create a new product and optionally sync to Square
    */
   async createProduct(input: CreateProductInput): Promise<ProductResult> {
+    if (input.clientRequestId) {
+      const replayed = await this.prisma.product.findUnique({
+        where: { id: input.clientRequestId },
+        include: { catalogMappings: { include: { location: true } }, inventories: true },
+      });
+      if (replayed) {
+        const mapping = preferredMapping(replayed.catalogMappings, input.locationId);
+        return {
+          product: replayed,
+          squareSynced: mapping ? isSquareMapping(mapping) : false,
+          squareVariationId: mapping && isSquareMapping(mapping) ? mapping.squareVariationId : undefined,
+          inventoryCreated: replayed.inventories.length > 0,
+          message: `Product "${replayed.name}" already created`,
+        };
+      }
+    }
+
     const {
       name,
       sku,
@@ -160,46 +183,14 @@ export class ProductsService {
       manualPresentation,
       looseProductId,
       searchAliases,
+      clientRequestId,
     } = input;
 
     this.logger.log(`[PRODUCT] Creating product: ${name}, SKU: ${sku || 'none'}, Price: $${sellingPrice} ${CURRENCY}`);
 
-    // Validate inputs
-    if (!name || name.trim().length === 0) {
-      throw new BadRequestException('El nombre del producto es obligatorio');
-    }
-    assertSellingPrice(sellingPrice);
-    if (costPrice !== undefined && costPrice < 0) {
-      throw new BadRequestException('El costo no puede ser negativo');
-    }
-    if (initialStock !== undefined && initialStock < 0) {
-      throw new BadRequestException('Las existencias iniciales no pueden ser negativas');
-    }
-
-    // Check SKU uniqueness if provided
-    if (sku) {
-      const existingProduct = await this.prisma.product.findUnique({
-        where: { sku },
-      });
-      if (existingProduct) {
-        throw new BadRequestException(`Ya existe un producto con el SKU "${sku}"`);
-      }
-    }
-
-    // Verify location exists
-    const location = await this.prisma.location.findUnique({
-      where: { id: locationId },
-    });
-    if (!location) {
-      throw new NotFoundException(`Location ${locationId} not found`);
-    }
-
-    if (supplierId) {
-      const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId } });
-      if (!supplier) {
-        throw new NotFoundException(`Supplier ${supplierId} not found`);
-      }
-    }
+    const { location } = await this.assertCreatable(input);
+    const trimmedSku = sku?.trim() || undefined;
+    const productId = clientRequestId ?? randomUUID();
 
     // Derived naming/presentación: only for medicamento products
     // (medicationDefinitionId set). 'otro' products keep the directly
@@ -241,7 +232,7 @@ export class ProductsService {
       try {
         const squareResult = await this.createProductInSquare({
           name: resolvedName,
-          sku,
+          sku: trimmedSku,
           description,
           sellingPrice,
           locationId: location.squareId || undefined,
@@ -256,114 +247,109 @@ export class ProductsService {
       }
     }
 
-    // Step 2: Create product in our database
-    const product = await this.prisma.product.create({
-      data: {
-        name: resolvedName,
-        sku: sku?.trim() || null,
-        squareProductName: resolvedName,
-        squareDescription: description || null,
-        squareVariationName: 'Regular', // Simple product
-        squareDataSyncedAt: squareSynced ? new Date() : null,
-        categoryId: categoryId || null,
-        labId: labId || null,
-        medicationType: medicationType || null,
-        medicationDefinitionId: medicationDefinitionId || null,
-        presentation: resolvedPresentation,
-        requiresPrescription: requiresPrescription ?? false,
-        isControlled: isControlled ?? false,
-        primaryPackaging: primaryPackaging || null,
-        secondaryPackaging: secondaryPackaging || null,
-        quantity: quantity ?? null,
-        primaryContent: primaryContent ?? null,
-        manualName: manualName?.trim() || null,
-        manualPresentation: manualPresentation?.trim() || null,
-        looseProductId: looseProductId || null,
-        searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
-      },
-    });
+    // Step 2: The product, its price, initial stock and supplier cost, all or nothing
+    const priceCents = new Prisma.Decimal(this.toCents(sellingPrice).toString());
+    const inventoryCreated = !!initialStock;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.product.create({
+          data: {
+            id: productId,
+            name: resolvedName,
+            sku: trimmedSku ?? null,
+            squareProductName: resolvedName,
+            squareDescription: description || null,
+            squareVariationName: 'Regular', // Simple product
+            squareDataSyncedAt: squareSynced ? new Date() : null,
+            categoryId: categoryId || null,
+            labId: labId || null,
+            medicationType: medicationType || null,
+            medicationDefinitionId: medicationDefinitionId || null,
+            presentation: resolvedPresentation,
+            requiresPrescription: requiresPrescription ?? false,
+            isControlled: isControlled ?? false,
+            primaryPackaging: primaryPackaging || null,
+            secondaryPackaging: secondaryPackaging || null,
+            quantity: quantity ?? null,
+            primaryContent: primaryContent ?? null,
+            manualName: manualName?.trim() || null,
+            manualPresentation: manualPresentation?.trim() || null,
+            looseProductId: looseProductId || null,
+            searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
+          },
+        });
 
-    // Step 3: Create catalog mapping with price
-    if (squareVariationId) {
-      await this.prisma.catalogMapping.create({
-        data: {
-          squareVariationId,
-          productId: product.id,
-          locationId,
-          priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
-          currency: CURRENCY,
-          priceSyncedAt: new Date(),
-        },
+        await tx.catalogMapping.create({
+          data: {
+            squareVariationId: squareVariationId ?? `local_${productId}`,
+            productId,
+            locationId,
+            priceCents,
+            currency: CURRENCY,
+            priceSyncedAt: new Date(),
+          },
+        });
+
+        if (initialStock && costPrice != null) {
+          await tx.inventory.create({
+            data: {
+              locationId,
+              productId,
+              quantity: initialStock,
+              unitCost: new Prisma.Decimal(costPrice),
+              receivedAt: new Date(),
+              source: 'OPENING_BALANCE',
+              costSource: 'MANUAL_INPUT',
+            },
+          });
+
+          if (supplierId) {
+            await tx.supplierProduct.create({
+              data: {
+                supplierId,
+                productId,
+                cost: new Prisma.Decimal(costPrice),
+                isPreferred: true,
+                notes: `Auto-created from initial stock on product creation`,
+              },
+            });
+            await tx.supplierCostHistory.create({
+              data: {
+                productId,
+                supplierId,
+                unitCost: new Prisma.Decimal(costPrice),
+                effectiveAt: new Date(),
+                source: 'MANUAL',
+                isCurrent: true,
+              },
+            });
+          }
+        }
       });
-    } else {
-      // Create local-only mapping (no Square ID)
-      await this.prisma.catalogMapping.create({
-        data: {
-          squareVariationId: `local_${product.id}`, // Local identifier
-          productId: product.id,
-          locationId,
-          priceCents: new Prisma.Decimal(this.toCents(sellingPrice).toString()),
-          currency: CURRENCY,
-          priceSyncedAt: new Date(),
-        },
-      });
+    } catch (error) {
+      if (squareItemId) {
+        await this.getSquareClient().catalog.batchDelete({ objectIds: [squareItemId] }).catch((deleteError) =>
+          this.logger.error(`[PRODUCT] Failed to delete Square item ${squareItemId} after a failed create: ${deleteError}`),
+        );
+      }
+      throw error;
     }
 
-    // Step 4: Create initial inventory if provided
-    let inventoryCreated = false;
-    if (initialStock && initialStock > 0 && costPrice !== undefined) {
-      await this.prisma.inventory.create({
-        data: {
-          locationId,
-          productId: product.id,
-          quantity: initialStock,
-          unitCost: new Prisma.Decimal(costPrice),
-          receivedAt: new Date(),
-          source: 'OPENING_BALANCE',
-          costSource: 'MANUAL_INPUT',
-        },
-      });
-      inventoryCreated = true;
+    if (inventoryCreated) {
       this.logger.log(`[PRODUCT] Created initial inventory: ${initialStock} units @ $${costPrice} ${CURRENCY}`);
-
       if (squareVariationId && location.squareId) {
         try {
-          await this.setInitialInventoryInSquare(squareVariationId, location.squareId, initialStock, product.id);
+          await this.setInitialInventoryInSquare(squareVariationId, location.squareId, initialStock!, productId);
           this.logger.log(`[PRODUCT] Pushed initial stock to Square: ${initialStock} units`);
         } catch (error) {
           this.logger.error(`[PRODUCT] Failed to push initial stock to Square: ${error}`);
         }
       }
-
-      if (supplierId) {
-        await this.prisma.supplierProduct.upsert({
-          where: { supplierId_productId: { supplierId, productId: product.id } },
-          create: {
-            supplierId,
-            productId: product.id,
-            cost: new Prisma.Decimal(costPrice),
-            isPreferred: true,
-            notes: `Auto-created from initial stock on product creation`,
-          },
-          update: { cost: new Prisma.Decimal(costPrice), isPreferred: true },
-        });
-
-        await this.prisma.supplierCostHistory.create({
-          data: {
-            productId: product.id,
-            supplierId,
-            unitCost: new Prisma.Decimal(costPrice),
-            effectiveAt: new Date(),
-            source: 'MANUAL',
-            isCurrent: true,
-          },
-        });
-      }
     }
 
     // Fetch complete product with relations
     const completeProduct = await this.prisma.product.findUnique({
-      where: { id: product.id },
+      where: { id: productId },
       include: {
         catalogMappings: {
           include: { location: true },
@@ -379,9 +365,62 @@ export class ProductsService {
       squareVariationId,
       inventoryCreated,
       message: squareSynced
-        ? `Product "${name}" created and synced to Square`
-        : `Product "${name}" created locally (Square sync ${syncToSquare ? 'failed' : 'disabled'})`,
+        ? `Product "${resolvedName}" created and synced to Square`
+        : `Product "${resolvedName}" created locally (Square sync ${syncToSquare ? 'failed' : 'disabled'})`,
     };
+  }
+
+  /**
+   * Refuses a create that would fail part-way, before anything is written in
+   * Square or the database. Also run by the controller before it creates
+   * laboratories and medication definitions for the product.
+   */
+  async assertCreatable(input: CreateProductInput) {
+    const { name, sku, sellingPrice, costPrice, initialStock, quantity, supplierId, locationId, clientRequestId } = input;
+    if (!name || name.trim().length === 0) {
+      throw new BadRequestException('El nombre del producto es obligatorio');
+    }
+    assertSellingPrice(sellingPrice);
+    if (costPrice != null && (typeof costPrice !== 'number' || !Number.isFinite(costPrice) || costPrice < 0)) {
+      throw new BadRequestException('El costo debe ser un número de 0 o más');
+    }
+    if (initialStock != null && !isWholeNumber(initialStock)) {
+      throw new BadRequestException('Las existencias iniciales deben ser un número entero de 0 o más');
+    }
+    if (quantity != null && !isWholeNumber(quantity)) {
+      throw new BadRequestException('La cantidad por caja debe ser un número entero de 0 o más');
+    }
+    if (initialStock && costPrice == null) {
+      throw new BadRequestException('Las existencias iniciales necesitan un costo');
+    }
+    if (clientRequestId !== undefined && (typeof clientRequestId !== 'string' || !UUID.test(clientRequestId))) {
+      throw new BadRequestException('clientRequestId must be a UUID');
+    }
+
+    const location = await this.prisma.location.findUnique({ where: { id: locationId } });
+    if (!location) {
+      throw new NotFoundException(`Location ${locationId} not found`);
+    }
+    if (initialStock) {
+      await assertCutOver(this.prisma, locationId);
+    }
+
+    const trimmedSku = sku?.trim();
+    if (trimmedSku) {
+      const existingProduct = await this.prisma.product.findUnique({ where: { sku: trimmedSku } });
+      if (existingProduct && existingProduct.id !== clientRequestId) {
+        throw new BadRequestException(`Ya existe un producto con el SKU "${trimmedSku}"`);
+      }
+    }
+
+    if (supplierId) {
+      const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId } });
+      if (!supplier) {
+        throw new NotFoundException(`Supplier ${supplierId} not found`);
+      }
+    }
+
+    return { location };
   }
 
   /**

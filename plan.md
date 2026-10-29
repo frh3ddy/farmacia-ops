@@ -11,5 +11,5 @@
 - ✅ [Labor Timecards](tasks/labor-timecards-epic.md) — move payroll hours from Square's retired Shifts endpoints to Timecards
 - ✅ [Product Price Sync](tasks/product-price-sync-epic.md) — a price change never hides the item at other stores; all-stores price or one store's own price; owner-only for all stores; no duplicate Square items
 - ✅ [Product Cost Visibility](tasks/product-cost-visibility-epic.md) — cashiers never see supplier costs, cost history or average cost
-- 📋 [Product Create Safety](tasks/product-create-safety-epic.md) — initial stock respects the cutover; input checked before writing; no orphan or duplicate Square items
+- ✅ [Product Create Safety](tasks/product-create-safety-epic.md) — initial stock respects the cutover; input checked before writing; no orphan or duplicate Square items
 - 📋 [Products Review Cleanup](tasks/products-review-cleanup-epic.md) — loose-link, alias and Yastás input checks; typed bodies; duplicated branch and debug log removed

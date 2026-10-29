@@ -56,6 +56,8 @@ interface CreateProductDto {
   looseProductId?: string;
   // Brand-name search tags, e.g. a generic's known brand names.
   searchAliases?: string[];
+  // Dedup key for a retried create (a UUID): the retry answers with the same product.
+  clientRequestId?: string;
   // Either an existing definition id, or enough inline info to find-or-create one.
   medicationDefinitionId?: string;
   medication?: {
@@ -129,6 +131,41 @@ export class ProductsController {
       );
     }
 
+    if (body.medication && !Array.isArray(body.medication.activeIngredients)) {
+      throw new HttpException(
+        { success: false, message: 'El medicamento necesita su lista de principios activos' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const input: CreateProductInput = {
+      name: body.name,
+      sku: body.sku,
+      description: body.description,
+      sellingPrice: body.sellingPrice,
+      costPrice: body.costPrice,
+      initialStock: body.initialStock,
+      supplierId: body.supplierId,
+      locationId,
+      syncToSquare: body.syncToSquare !== false, // Default true
+      categoryId: body.categoryId,
+      medicationType: body.medicationType,
+      presentation: body.presentation,
+      requiresPrescription: body.requiresPrescription,
+      isControlled: body.isControlled,
+      primaryPackaging: body.primaryPackaging,
+      secondaryPackaging: body.secondaryPackaging,
+      quantity: body.quantity,
+      primaryContent: body.primaryContent,
+      manualName: body.manualName,
+      manualPresentation: body.manualPresentation,
+      looseProductId: body.looseProductId,
+      searchAliases: body.searchAliases,
+      clientRequestId: body.clientRequestId,
+    };
+    // Before creating any laboratory or medication definition for it
+    await this.productsService.assertCreatable(input);
+
     // Resolve the laboratory: either an existing id, or a name to find-or-create.
     const labId = body.labId || (body.labName ? await findOrCreateLaboratory(this.prisma, body.labName) : undefined);
 
@@ -153,34 +190,7 @@ export class ProductsController {
       });
     }
 
-    const input: CreateProductInput = {
-      name: body.name,
-      sku: body.sku,
-      description: body.description,
-      sellingPrice: body.sellingPrice,
-      costPrice: body.costPrice,
-      initialStock: body.initialStock,
-      supplierId: body.supplierId,
-      locationId,
-      syncToSquare: body.syncToSquare !== false, // Default true
-      categoryId: body.categoryId,
-      labId,
-      medicationType: body.medicationType,
-      medicationDefinitionId,
-      presentation: body.presentation,
-      requiresPrescription: body.requiresPrescription,
-      isControlled: body.isControlled,
-      primaryPackaging: body.primaryPackaging,
-      secondaryPackaging: body.secondaryPackaging,
-      quantity: body.quantity,
-      primaryContent: body.primaryContent,
-      manualName: body.manualName,
-      manualPresentation: body.manualPresentation,
-      looseProductId: body.looseProductId,
-      searchAliases: body.searchAliases,
-    };
-
-    const result = await this.productsService.createProduct(input);
+    const result = await this.productsService.createProduct({ ...input, labId, medicationDefinitionId });
 
     return {
       success: true,

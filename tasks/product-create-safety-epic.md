@@ -1,6 +1,6 @@
 # Product Create Safety Epic
 
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETED (2026-10-29)
 **Goal**: Creating a product either succeeds completely or leaves nothing behind, in the app or in Square, and initial stock respects the cutover.
 
 ## Overview
@@ -9,7 +9,7 @@
 
 ---
 
-## 📋 Initial stock respects the cutover
+## ✅ Initial stock respects the cutover
 
 **Requirements**:
 - Given initial stock for a location that hasn't finished its cutover, should refuse it with a Spanish message (`assertCutOver`) before creating anything
@@ -18,7 +18,7 @@
 
 ---
 
-## 📋 Validate before writing
+## ✅ Validate before writing
 
 **Requirements**:
 - Given a `costPrice` that isn't a finite number of 0 or more, or an `initialStock` or loose `quantity` that isn't a whole number of 0 or more, should answer 400 before calling Square or the database
@@ -28,17 +28,17 @@
 
 ---
 
-## 📋 All or nothing
+## ✅ All or nothing
 
 **Requirements**:
 - Given the product, mapping, stock batch and supplier cost, should write them in one transaction
 - Given a database failure after the Square item was created, should delete that Square item, or record it so a retry reuses it
-- Given a retried create from the client (same `clientRequestId`), should reuse the Square idempotency key and the existing product instead of creating a second item
+- Given a retried create from the client (same `clientRequestId`), should answer with the existing product before calling Square, instead of creating a second item (the `clientRequestId` becomes the product's id; each attempt that reaches Square uses a fresh key, since a failed attempt's item is deleted)
 - Given a successful create, should report the resolved name in the success message
 
 ---
 
-## 📋 Tests
+## ✅ Tests
 
 **Requirements**:
 - Given each case above, should be covered by a test of `createProduct` (PGlite for the database, a recorded fake Square client)
