@@ -1,27 +1,7 @@
 import { Logger } from '@nestjs/common';
-import { Square, SquareClient, SquareEnvironment } from 'square';
+import { Square, SquareClient } from 'square';
 
 export type SquareSyncResult = { synced: boolean; error?: string };
-
-/**
- * The Square client inventory pushes go through, or null (sync disabled)
- * without SQUARE_ACCESS_TOKEN. NODE_ENV=development always means sandbox, even
- * with SQUARE_ENVIRONMENT=production, so a dev machine can't move real stock.
- */
-export function createSquareClient(logger: Logger): SquareClient | null {
-  const token = process.env.SQUARE_ACCESS_TOKEN?.trim();
-  if (!token) {
-    logger.warn('SQUARE_ACCESS_TOKEN not set - Square sync disabled');
-    return null;
-  }
-  const isSandbox =
-    process.env.SQUARE_ENVIRONMENT?.toLowerCase() === 'sandbox' || process.env.NODE_ENV?.toLowerCase() === 'development';
-  return new SquareClient({
-    token,
-    environment: isSandbox ? SquareEnvironment.Sandbox : SquareEnvironment.Production,
-    version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
-  });
-}
 
 /** Sends the changes; Square's rejection comes back as { synced: false, error }. Thrown errors are the caller's. */
 export async function sendInventoryChanges(

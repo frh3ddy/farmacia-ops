@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { SquareClient, SquareEnvironment, Square } from 'square';
+import { SquareClient, Square } from 'square';
+import { createSquareClient } from '../square/square-client';
 import {
   SquareInventoryItem,
   SquareCatalogObject,
@@ -29,23 +30,9 @@ export class SquareInventoryService {
    * Get or create Square client
    */
   private getSquareClient(): SquareClient {
+    this.squareClient ??= createSquareClient();
     if (!this.squareClient) {
-      const token = process.env.SQUARE_ACCESS_TOKEN?.trim();
-      if (!token) throw new Error('SQUARE_ACCESS_TOKEN is not set');
-
-      const env = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-      const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-      
-      const isSandbox = 
-        env === 'sandbox' || 
-        nodeEnv === 'development' || 
-        process.env.RAILWAY_ENVIRONMENT === 'staging';
-
-      this.squareClient = new SquareClient({
-        token,
-        environment: isSandbox ? SquareEnvironment.Sandbox : SquareEnvironment.Production,
-        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
-      });
+      throw new Error('SQUARE_ACCESS_TOKEN is not set');
     }
     return this.squareClient;
   }

@@ -1,5 +1,6 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { SquareClient, SquareEnvironment } from 'square';
+import { SquareClient } from 'square';
+import { createSquareClient } from '../square/square-client';
 import type { Shift } from 'square/api';
 
 // ============================================================================
@@ -72,41 +73,12 @@ export class LaborService {
   // --------------------------------------------------------------------------
 
   private getSquareClient(): SquareClient {
+    this.squareClient ??= createSquareClient();
     if (!this.squareClient) {
-      const squareAccessToken = process.env.SQUARE_ACCESS_TOKEN?.trim();
-
-      if (!squareAccessToken) {
-        throw new HttpException(
-          {
-            success: false,
-            message: 'SQUARE_ACCESS_TOKEN environment variable is not set',
-          },
-          HttpStatus.INTERNAL_SERVER_ERROR,
-        );
-      }
-
-      let squareEnvironment: SquareEnvironment;
-      const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-      const railwayEnv = process.env.RAILWAY_ENVIRONMENT?.toLowerCase();
-      const squareEnv = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-
-      if (
-        squareEnv === 'sandbox' ||
-        nodeEnv === 'development' ||
-        nodeEnv === 'dev' ||
-        railwayEnv === 'staging' ||
-        railwayEnv === 'development'
-      ) {
-        squareEnvironment = SquareEnvironment.Sandbox;
-      } else {
-        squareEnvironment = SquareEnvironment.Production;
-      }
-
-      this.squareClient = new SquareClient({
-        token: squareAccessToken,
-        environment: squareEnvironment,
-        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
-      });
+      throw new HttpException(
+        { success: false, message: 'SQUARE_ACCESS_TOKEN environment variable is not set' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
     return this.squareClient;
   }

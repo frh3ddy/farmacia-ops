@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { SquareClient, SquareEnvironment } from 'square';
+import { SquareClient } from 'square';
+import { createSquareClient } from '../square/square-client';
 
 @Injectable()
 export class LocationsService {
@@ -13,41 +14,9 @@ export class LocationsService {
    * Get or create Square client
    */
   private getSquareClient(): SquareClient {
+    this.squareClient ??= createSquareClient();
     if (!this.squareClient) {
-      const squareAccessToken = process.env.SQUARE_ACCESS_TOKEN?.trim();
-
-      if (!squareAccessToken) {
-        throw new Error(
-          'SQUARE_ACCESS_TOKEN environment variable is not set',
-        );
-      }
-
-      // Determine Square environment: use Sandbox for staging/dev, Production otherwise
-      let squareEnvironment: SquareEnvironment;
-      const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-      const railwayEnv = process.env.RAILWAY_ENVIRONMENT?.toLowerCase();
-      const squareEnv = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-
-      if (
-        squareEnv === 'sandbox' ||
-        nodeEnv === 'development' ||
-        nodeEnv === 'dev' ||
-        railwayEnv === 'staging' ||
-        railwayEnv === 'development'
-      ) {
-        squareEnvironment = SquareEnvironment.Sandbox;
-      } else if (squareEnv === 'production') {
-        squareEnvironment = SquareEnvironment.Production;
-      } else {
-        // Default to Production for safety
-        squareEnvironment = SquareEnvironment.Production;
-      }
-
-      this.squareClient = new SquareClient({
-        token: squareAccessToken,
-        environment: squareEnvironment,
-        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
-      });
+      throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
     }
     return this.squareClient;
   }
