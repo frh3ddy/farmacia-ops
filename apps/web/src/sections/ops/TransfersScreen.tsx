@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "../../lib/apiFetch";
+import { useAuth } from "../../lib/auth/AuthContext";
+import { isOwner } from "../../lib/auth/types";
 
 type ProductOption = { id: string; name: string; sku: string | null };
 type ProductListResponse = { success: boolean; data: ProductOption[] };
@@ -21,6 +23,8 @@ type Transfer = {
   createdAt: string;
   shippedAt: string | null;
   receivedAt: string | null;
+  squareSynced: boolean;
+  squareSyncError: string | null;
   product: { id: string; name: string; sku: string | null };
   fromLocation: { id: string; name: string };
   toLocation: { id: string; name: string };
@@ -320,6 +324,41 @@ function ReceiveRow({ transfer, onReceived }: { transfer: Transfer; onReceived: 
   );
 }
 
+/** A received transfer Square rejected; the owner can send it again. */
+function SquareSyncFailure({ transfer, onRetried }: { transfer: Transfer; onRetried: () => void }) {
+  const { user } = useAuth();
+  const [retrying, setRetrying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRetry = async () => {
+    setError(null);
+    setRetrying(true);
+    try {
+      await apiFetch(`/transfers/${transfer.id}/retry-square-sync`, { method: "POST" });
+      onRetried();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo reintentar");
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  return (
+    <div className="mt-1 flex items-center gap-2 text-xs text-(--color-destructive)">
+      <span>Sin actualizar en Square: {error ?? transfer.squareSyncError}</span>
+      {isOwner(user) && (
+        <button
+          onClick={handleRetry}
+          disabled={retrying}
+          className="rounded-sm border border-(--color-border-standard) px-2 py-0.5 font-medium text-(--color-ink) hover:bg-(--color-surface-inset) disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {retrying ? "Reintentando…" : "Reintentar"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function TransfersScreen() {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -366,6 +405,7 @@ export function TransfersScreen() {
                 <p className="text-xs text-(--color-ink-tertiary)">
                   {t.fromLocation.name} → {t.toLocation.name} · {t.quantity} unidad(es)
                 </p>
+                {!t.squareSynced && t.squareSyncError && <SquareSyncFailure transfer={t} onRetried={loadTransfers} />}
               </div>
               <StatusBadge status={t.status} />
             </div>

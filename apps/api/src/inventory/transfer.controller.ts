@@ -77,6 +77,21 @@ export class TransferController {
   }
 
   /**
+   * Resend a received transfer whose Square sync failed. OWNER only.
+   * POST /transfers/:id/retry-square-sync
+   */
+  @Post(':id/retry-square-sync')
+  @Roles('OWNER')
+  async retrySquareSync(@Param('id') id: string) {
+    const result = await this.transferService.retrySquareSync(id);
+    return {
+      success: result.synced,
+      message: result.synced ? 'Successfully synced to Square' : `Square sync failed: ${result.error}`,
+      data: result,
+    };
+  }
+
+  /**
    * List transfers. Non-owners are pinned to their own location (either
    * side of the transfer); owners can pass any locationId or omit it for all.
    * GET /transfers?locationId=&status=

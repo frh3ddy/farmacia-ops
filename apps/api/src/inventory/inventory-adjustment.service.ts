@@ -173,7 +173,12 @@ export class InventoryAdjustmentService {
   // --------------------------------------------------------------------------
   // Main adjustment method
   // --------------------------------------------------------------------------
-  async createAdjustment(input: CreateAdjustmentInput): Promise<AdjustmentResult> {
+  /**
+   * Given the caller's transaction `tx`, everything runs inside it and Square
+   * isn't called: the caller syncs (`retrySquareSync(id)`) once its transaction commits.
+   */
+  async createAdjustment(input: CreateAdjustmentInput, tx?: Prisma.TransactionClient): Promise<AdjustmentResult> {
+    const db = tx ?? this.prisma;
     this.logger.log(`[ADJUSTMENT] Creating ${input.type} adjustment for product ${input.productId} at location ${input.locationId}, qty: ${input.quantity}`);
 
     // Idempotent replay: the offline-queue (iOS) may retry a write whose
@@ -204,7 +209,7 @@ export class InventoryAdjustmentService {
     }
 
     // Check if product exists
-    const product = await this.prisma.product.findUnique({
+    const product = await db.product.findUnique({
       where: { id: input.productId },
     });
     if (!product) {
@@ -212,7 +217,7 @@ export class InventoryAdjustmentService {
     }
 
     // Check if location exists
-    const location = await this.prisma.location.findUnique({
+    const location = await db.location.findUnique({
       where: { id: input.locationId },
     });
     if (!location) {
@@ -228,14 +233,14 @@ export class InventoryAdjustmentService {
       throw new BadRequestException('La fecha del ajuste no puede ser futura');
     }
 
-    await assertCutOver(this.prisma, input.locationId, input.effectiveDate);
+    await assertCutOver(db, input.locationId, input.effectiveDate);
 
     try {
       if (input.quantity < 0) {
-        return await this.processNegativeAdjustment(input);
+        return await this.processNegativeAdjustment(input, tx);
       }
 
-      const currentInventory = await this.prisma.inventory.aggregate({
+      const currentInventory = await db.inventory.aggregate({
         where: {
           productId: input.productId,
           locationId: input.locationId,
@@ -243,7 +248,7 @@ export class InventoryAdjustmentService {
         },
         _sum: { quantity: true },
       });
-      return await this.processPositiveAdjustment(input, currentInventory._sum.quantity || 0);
+      return await this.processPositiveAdjustment(input, currentInventory._sum.quantity || 0, tx);
     } catch (error) {
       // Two copies of the same replay raced past the lookup above; the loser's
       // insert hits the unique dedup key and its transaction rolled back.
@@ -259,7 +264,7 @@ export class InventoryAdjustmentService {
   // --------------------------------------------------------------------------
   // Negative adjustment (consume inventory via FIFO)
   // --------------------------------------------------------------------------
-  private async processNegativeAdjustment(input: CreateAdjustmentInput): Promise<AdjustmentResult> {
+  private async processNegativeAdjustment(input: CreateAdjustmentInput, callerTx?: Prisma.TransactionClient): Promise<AdjustmentResult> {
     const quantityToRemove = Math.abs(input.quantity);
     const consumedBatches: ConsumedBatch[] = [];
     let totalCost = new Prisma.Decimal(0);
@@ -269,7 +274,7 @@ export class InventoryAdjustmentService {
     // decrement only applies if the batch still holds that much — a sale or
     // another adjustment taking the same stock in between rolls this back
     // instead of driving the batch negative.
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.inTransaction(callerTx, async (tx) => {
       // Get inventory batches (FIFO order - oldest first)
       const batches = await tx.inventory.findMany({
         where: {
@@ -358,7 +363,7 @@ export class InventoryAdjustmentService {
       `[ADJUSTMENT] Negative adjustment ${result.id}: removed ${quantityToRemove} units from ${consumedBatches.length} batches, total cost ${totalCost.toString()}`
     );
 
-    const squareSync = input.syncToSquare ? await this.recordSquareSync(result) : undefined;
+    const squareSync = input.syncToSquare && !callerTx ? await this.recordSquareSync(result) : undefined;
 
     return {
       adjustment: {
@@ -391,11 +396,12 @@ export class InventoryAdjustmentService {
   // --------------------------------------------------------------------------
   private async processPositiveAdjustment(
     input: CreateAdjustmentInput,
-    previousTotal: number
+    previousTotal: number,
+    callerTx?: Prisma.TransactionClient
   ): Promise<AdjustmentResult> {
     // Unit cost is required for positive adjustments; fall back to the last known
     // cost (a looked-up 0 is no cost — only the caller can say an item is free)
-    const unitCostValue = input.unitCost ?? ((await this.getLastKnownCost(input.productId, input.locationId)) || null);
+    const unitCostValue = input.unitCost ?? ((await this.getLastKnownCost(input.productId, input.locationId, callerTx)) || null);
     if (unitCostValue == null) {
       throw new BadRequestException(
         'Indica el costo unitario: este producto no tiene un costo anterior registrado.'
@@ -404,8 +410,7 @@ export class InventoryAdjustmentService {
     const unitCost = new Prisma.Decimal(unitCostValue);
     const totalCost = unitCost.mul(input.quantity);
 
-    // Execute in transaction
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.inTransaction(callerTx, async (tx) => {
       // 1. Create new inventory batch
       const inventoryBatch = await tx.inventory.create({
         data: {
@@ -443,7 +448,7 @@ export class InventoryAdjustmentService {
       `[ADJUSTMENT] Positive adjustment ${result.adjustment.id}: added ${input.quantity} units as batch ${result.inventoryBatch.id}, cost ${totalCost.toString()}`
     );
 
-    const squareSync = input.syncToSquare ? await this.recordSquareSync(result.adjustment) : undefined;
+    const squareSync = input.syncToSquare && !callerTx ? await this.recordSquareSync(result.adjustment) : undefined;
 
     return {
       adjustment: {
@@ -513,6 +518,11 @@ export class InventoryAdjustmentService {
   // Helper methods
   // --------------------------------------------------------------------------
 
+  /** Runs `fn` in the caller's transaction when there is one, else in a new one. */
+  private inTransaction<T>(tx: Prisma.TransactionClient | undefined, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    return tx ? fn(tx) : this.prisma.$transaction(fn);
+  }
+
   private async findByClientRequestId(input: CreateAdjustmentInput): Promise<AdjustmentResult | null> {
     const existing = await this.prisma.inventoryAdjustment.findUnique({
       where: { clientRequestId: input.clientRequestId },
@@ -563,10 +573,11 @@ export class InventoryAdjustmentService {
     };
   }
 
-  private async getLastKnownCost(productId: string, locationId: string): Promise<number | null> {
+  private async getLastKnownCost(productId: string, locationId: string, tx?: Prisma.TransactionClient): Promise<number | null> {
+    const db = tx ?? this.prisma;
     // What this location last actually paid comes first; zero-cost batches
     // (test or uncosted stock) would make the added stock free.
-    const lastBatch = await this.prisma.inventory.findFirst({
+    const lastBatch = await db.inventory.findFirst({
       where: { productId, locationId, unitCost: { gt: 0 } },
       orderBy: { receivedAt: 'desc' },
     });
@@ -575,7 +586,7 @@ export class InventoryAdjustmentService {
     }
 
     // Then the preferred supplier's list cost
-    const supplierProduct = await this.prisma.supplierProduct.findFirst({
+    const supplierProduct = await db.supplierProduct.findFirst({
       where: { productId, isPreferred: true },
       orderBy: { cost: 'desc' },
     });
@@ -584,7 +595,7 @@ export class InventoryAdjustmentService {
     }
 
     // Try cost approval
-    const approval = await this.prisma.costApproval.findFirst({
+    const approval = await db.costApproval.findFirst({
       where: { productId, migrationStatus: 'APPROVED' },
       orderBy: { approvedAt: 'desc' },
     });

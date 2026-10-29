@@ -22,13 +22,8 @@ export interface BreakBulkInput {
  *
  * Reuses InventoryAdjustmentService.createAdjustment for both legs — same
  * FIFO consumption / batch creation / Square-sync code already used for
- * every other adjustment type, no new inventory-mutation logic here.
- *
- * ponytail: the two createAdjustment calls are not wrapped in one DB
- * transaction (createAdjustment owns its own) — matches this codebase's
- * existing TRANSFER_OUT/TRANSFER_IN pattern, which has the same gap. If the
- * second call fails after the first succeeds, the error is surfaced clearly
- * rather than silently swallowed so it can be reconciled manually.
+ * every other adjustment type, no new inventory-mutation logic here. Both
+ * legs commit in one transaction; Square hears about them only after.
  */
 @Injectable()
 export class BreakBulkService {
@@ -40,8 +35,8 @@ export class BreakBulkService {
   ) {}
 
   async breakBulk(input: BreakBulkInput) {
-    if (input.boxQuantity <= 0) {
-      throw new BadRequestException('La cantidad de cajas debe ser mayor que cero');
+    if (!Number.isInteger(input.boxQuantity) || input.boxQuantity <= 0) {
+      throw new BadRequestException('La cantidad de cajas debe ser un número entero mayor que cero');
     }
 
     const boxProduct = await this.prisma.product.findUnique({ where: { id: input.boxProductId } });
@@ -60,39 +55,38 @@ export class BreakBulkService {
     const looseUnits = looseUnitsFromBoxes(input.boxQuantity, boxProduct.quantity);
     const reason = input.reason ?? `Break bulk: ${input.boxQuantity} box(es) -> ${looseUnits} loose units`;
 
-    // Leg 1: consume boxes from this product's inventory (FIFO, weighted cost)
-    const outResult = await this.adjustments.createAdjustment({
-      locationId: input.locationId,
-      productId: input.boxProductId,
-      type: 'BREAK_BULK_OUT',
-      quantity: -input.boxQuantity,
-      reason,
-      notes: input.notes,
-      syncToSquare: input.syncToSquare,
-      adjustedBy: input.adjustedBy,
-    });
-
-    const unitCost = costPerLooseUnit(Number(outResult.adjustment.totalCost), looseUnits);
-
-    // Leg 2: create the loose units at the preserved cost basis
-    let inResult: Awaited<ReturnType<InventoryAdjustmentService['createAdjustment']>>;
-    try {
-      inResult = await this.adjustments.createAdjustment({
+    const looseProductId = boxProduct.looseProductId;
+    const { outResult, inResult, unitCost } = await this.prisma.$transaction(async (tx) => {
+      // Leg 1: consume boxes from this product's inventory (FIFO, weighted cost)
+      const outResult = await this.adjustments.createAdjustment({
         locationId: input.locationId,
-        productId: boxProduct.looseProductId,
+        productId: input.boxProductId,
+        type: 'BREAK_BULK_OUT',
+        quantity: -input.boxQuantity,
+        reason,
+        notes: input.notes,
+        adjustedBy: input.adjustedBy,
+      }, tx);
+
+      const unitCost = costPerLooseUnit(Number(outResult.adjustment.totalCost), looseUnits);
+
+      // Leg 2: create the loose units at the preserved cost basis
+      const inResult = await this.adjustments.createAdjustment({
+        locationId: input.locationId,
+        productId: looseProductId,
         type: 'BREAK_BULK_IN',
         quantity: looseUnits,
         unitCost,
         reason,
         notes: input.notes,
-        syncToSquare: input.syncToSquare,
         adjustedBy: input.adjustedBy,
-      });
-    } catch (error) {
-      this.logger.error(
-        `[BREAK_BULK] Consumed ${input.boxQuantity} box(es) of ${input.boxProductId} (adjustment ${outResult.adjustment.id}) but failed to create loose units on ${boxProduct.looseProductId} — reconcile manually. Error: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      throw error;
+      }, tx);
+      return { outResult, inResult, unitCost };
+    });
+
+    if (input.syncToSquare) {
+      outResult.squareSync = await this.adjustments.retrySquareSync(outResult.adjustment.id);
+      inResult.squareSync = await this.adjustments.retrySquareSync(inResult.adjustment.id);
     }
 
     this.logger.log(
