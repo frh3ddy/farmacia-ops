@@ -11,6 +11,7 @@ import type { Job } from 'bullmq';
 import { getPrisma, processMatchJob, processRefundJob, processReturnJob, processSaleJob } from './sale.worker';
 import { SaleValidationError } from './errors';
 import { booksMismatches, loadBooks } from './books-check';
+import { findSquareVariationId } from './catalog.mapper';
 
 // The worker's moduleResolution can't see package subpath exports; Node's require can.
 const { pg_trgm } = require('@electric-sql/pglite/contrib/pg_trgm');
@@ -454,4 +455,20 @@ test('a Square refund repeating a line already returned, and a line with no uid'
     // the rest of the refund is still taken back
     crema: Number(p4.totalRevenue) - Number((await prisma.sale.findUniqueOrThrow({ where: { id: p4.id } })).totalRevenue),
   }).toEqual({ jarabe: 0, noUid: 0, crema: 15 });
+});
+
+test("a return's Square item, with a local_ placeholder mapping beside the real one", async () => {
+  const prisma = getPrisma();
+  const location = await prisma.location.findFirstOrThrow({ where: { squareId: 'SQ-CENTRO' } });
+  const mapped = await prisma.product.create({ data: { name: 'Vendas' } });
+  // Written for Centro's price; the real item is global.
+  await prisma.catalogMapping.create({ data: { squareVariationId: `local_${mapped.id}`, productId: mapped.id, locationId: location.id } });
+  await prisma.catalogMapping.create({ data: { squareVariationId: 'v-vendas', productId: mapped.id } });
+  const unmapped = await prisma.product.create({ data: { name: 'Curitas' } });
+  await prisma.catalogMapping.create({ data: { squareVariationId: `local_${unmapped.id}`, productId: unmapped.id, locationId: location.id } });
+
+  expect({
+    mapped: await findSquareVariationId(prisma, mapped.id, location.id),
+    unmapped: await findSquareVariationId(prisma, unmapped.id, location.id),
+  }).toEqual({ mapped: 'v-vendas', unmapped: null });
 });

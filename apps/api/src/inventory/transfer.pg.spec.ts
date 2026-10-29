@@ -247,3 +247,25 @@ describe('TransferService.receive line receipts (Postgres)', () => {
     });
   });
 });
+
+describe('TransferService.getTransfers (Postgres)', () => {
+  test('more transfers than a list holds', async () => {
+    const { productId } = await transferSetup();
+    const { id: oriente } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Oriente' } });
+    await prisma.transfer.createMany({
+      data: Array.from({ length: 101 }, (_, i) => ({
+        productId, fromLocationId: centro, toLocationId: oriente, quantity: 1, status: 'RECEIVED' as const,
+        createdAt: new Date(Date.UTC(2026, 9, 1, 0, i)),
+      })),
+    });
+
+    const listed = await new TransferService(prisma, {} as any).getTransfers({ locationId: oriente });
+
+    assert({
+      given: '101 transfers at a location',
+      should: 'list the newest 100',
+      actual: [listed.length, listed[0].createdAt.toISOString(), listed[listed.length - 1].createdAt.toISOString()],
+      expected: [100, '2026-10-01T01:40:00.000Z', '2026-10-01T00:01:00.000Z'],
+    });
+  });
+});

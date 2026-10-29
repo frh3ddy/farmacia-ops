@@ -1,5 +1,6 @@
 import { assert } from 'riteway/vitest';
 import { InventoryReportsController } from './inventory-reports.controller';
+import { startOfBusinessMonth } from './business-date';
 
 const requestAs = (role: string) => ({
   employee: { id: 'e1' },
@@ -99,6 +100,20 @@ describe('InventoryReportsController.getDashboardSummary period and location', (
       should: "show Norte's numbers, not Centro's",
       actual: reports.getCOGSReport.mock.calls[0][0].locationId,
       expected: 'norte',
+    });
+  });
+});
+
+describe('InventoryReportsController.getCOGSReport', () => {
+  test('no dates', async () => {
+    const { reports, controller } = setup();
+    await controller.getCOGSReport(requestAs('OWNER'));
+
+    assert({
+      given: 'a COGS report asked for without dates',
+      should: 'cover the current business month, not every sale ever',
+      actual: reports.getCOGSReport.mock.calls[0][0].startDate?.toISOString(),
+      expected: startOfBusinessMonth().toISOString(),
     });
   });
 });

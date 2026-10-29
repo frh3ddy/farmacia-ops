@@ -93,3 +93,19 @@ describe('TransferController.receive (allowed)', () => {
     });
   });
 });
+
+describe('TransferController.getTransfers', () => {
+  test('a status that does not exist', async () => {
+    const transferService = { getTransfers: vi.fn() };
+    const controller = new TransferController(transferService as any);
+
+    const status = await controller.getTransfers('centro', 'SHIPPED', managerRequest()).then(() => 200, (e: any) => e.status);
+
+    assert({
+      given: 'a transfers list filtered by an unknown status',
+      should: 'answer 400 without querying',
+      actual: [status, transferService.getTransfers.mock.calls.length],
+      expected: [400, 0],
+    });
+  });
+});
