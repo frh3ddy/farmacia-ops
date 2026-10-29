@@ -102,6 +102,12 @@ function assertSellingPrice(sellingPrice: unknown): void {
 }
 
 const isWholeNumber = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0;
+
+function assertWordList(value: unknown, label: string): asserts value is string[] {
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    throw new BadRequestException(`${label} deben ser una lista de palabras`);
+  }
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
@@ -1074,7 +1080,7 @@ export class ProductsService {
     };
 
     // Build a `where` clause for optional search
-    let where: any = {};
+    let where: Prisma.ProductWhereInput = {};
     let exactMatch = false;
     // Ids of a text search, already in relevance order (null = not a text
     // search). Ranking has to happen in SQL — see product-search.ts — so the
@@ -1084,7 +1090,7 @@ export class ProductsService {
 
     if (search && exact) {
       // EXACT mode: first try exact SKU match (case-insensitive)
-      const exactWhere: any = {
+      const exactWhere: Prisma.ProductWhereInput = {
         sku: { equals: search, mode: 'insensitive' },
       };
 
@@ -1131,11 +1137,6 @@ export class ProductsService {
         0,
       );
       const averageCost = totalInventory > 0 ? totalCost / totalInventory : null;
-      
-      // Debug logging
-      if (product.inventories.length > 0 || totalInventory > 0) {
-        this.logger.debug(`[PRODUCT] ${product.name}: inventories=${product.inventories.length} batches, totalInventory=${totalInventory}`);
-      }
       
       return {
         ...product,
@@ -1239,6 +1240,46 @@ export class ProductsService {
         local: Number(row?.local ?? 0),
       },
     };
+  }
+
+  /** The products a supplier provides, with its last cost and the location's stock. */
+  async getSupplierCatalog(supplierId: string, targetLocationId?: string) {
+    // Get all products this supplier provides
+    const supplierProducts = await this.prisma.supplierProduct.findMany({
+      where: { supplierId },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            squareProductName: true,
+            squareVariationName: true,
+            squareImageUrl: true,
+            inventories: targetLocationId
+              ? { where: { locationId: targetLocationId } }
+              : true,
+          },
+        },
+      },
+      orderBy: {
+        product: { name: 'asc' },
+      },
+    });
+
+    return supplierProducts.map((sp) => {
+      const totalStock = sp.product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
+      return {
+        productId: sp.product.id,
+        productName: sp.product.squareProductName || sp.product.name,
+        sku: sp.product.sku,
+        imageUrl: sp.product.squareImageUrl,
+        lastCost: sp.cost.toString(),
+        isPreferred: sp.isPreferred,
+        notes: sp.notes,
+        currentStock: totalStock,
+      };
+    });
   }
 
   /** Each supplier's current cost for a product, with its contact details. */
@@ -1397,9 +1438,16 @@ export class ProductsService {
       if (!looseProduct) {
         throw new NotFoundException(`Product ${looseProductId} not found`);
       }
+      // Walk the loose product's own chain: reaching this product would loop break-bulk.
+      for (let next = looseProduct.looseProductId; next; ) {
+        if (next === productId) {
+          throw new BadRequestException('El producto suelto ya lleva de vuelta a este producto');
+        }
+        next = (await this.prisma.product.findUnique({ where: { id: next }, select: { looseProductId: true } }))?.looseProductId ?? null;
+      }
     }
-    if (quantity !== undefined && quantity <= 0) {
-      throw new BadRequestException('La cantidad debe ser mayor que cero');
+    if (quantity !== undefined && !(isWholeNumber(quantity) && quantity > 0)) {
+      throw new BadRequestException('La cantidad debe ser un número entero mayor que cero');
     }
 
     return this.prisma.product.update({
@@ -1414,6 +1462,7 @@ export class ProductsService {
    * search surfaces it even when no branded Product row exists at all.
    */
   async setSearchAliases(productId: string, searchAliases: string[]) {
+    assertWordList(searchAliases, 'Los alias de búsqueda');
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       throw new NotFoundException(`Product ${productId} not found`);
@@ -1443,6 +1492,10 @@ export class ProductsService {
       if (!employee) {
         throw new NotFoundException(`Employee ${employeeId} not found`);
       }
+      const { _sum } = await this.prisma.inventory.aggregate({ where: { productId }, _sum: { quantity: true } });
+      if ((_sum.quantity ?? 0) > 0) {
+        throw new BadRequestException('Este producto tiene existencias: dales salida antes de marcarlo como servicio Yastás');
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -1457,6 +1510,7 @@ export class ProductsService {
 
   /** Set (replace) a category's symptom search keywords. */
   async setCategorySymptomKeywords(categoryId: string, symptomKeywords: string[]) {
+    assertWordList(symptomKeywords, 'Los síntomas');
     const category = await this.prisma.category.findUnique({ where: { id: categoryId } });
     if (!category) {
       throw new NotFoundException(`Category ${categoryId} not found`);

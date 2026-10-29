@@ -212,7 +212,7 @@ export class ProductsController {
    */
   @Post('sync-to-square')
   @Roles('OWNER', 'MANAGER')
-  async syncToSquare(@Body() body: any, @Req() req: GuardedRequest) {
+  async syncToSquare(@Body() body: { locationId?: string }, @Req() req: GuardedRequest) {
     const locationId = body.locationId || req.currentLocation?.locationId;
     if (!locationId) {
       throw new BadRequestException('Location ID is required');
@@ -410,45 +410,7 @@ export class ProductsController {
     @Req() req: GuardedRequest,
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
-
-    // Get all products this supplier provides
-    const supplierProducts = await this.prisma.supplierProduct.findMany({
-      where: { supplierId },
-      include: {
-        product: {
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            squareProductName: true,
-            squareVariationName: true,
-            squareImageUrl: true,
-            inventories: targetLocationId
-              ? { where: { locationId: targetLocationId } }
-              : true,
-          },
-        },
-      },
-      orderBy: {
-        product: { name: 'asc' },
-      },
-    });
-
-    const products = supplierProducts.map((sp) => {
-      const totalStock = sp.product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
-      return {
-        productId: sp.product.id,
-        productName: sp.product.squareProductName || sp.product.name,
-        sku: sp.product.sku,
-        imageUrl: sp.product.squareImageUrl,
-        lastCost: sp.cost.toString(),
-        isPreferred: sp.isPreferred,
-        notes: sp.notes,
-        currentStock: totalStock,
-      };
-    });
-
-    return { success: true, products };
+    return { success: true, products: await this.productsService.getSupplierCatalog(supplierId, targetLocationId) };
   }
 
   /**

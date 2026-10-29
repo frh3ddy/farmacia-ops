@@ -1,6 +1,6 @@
 # Products Review Cleanup Epic
 
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETED (2026-10-29)
 **Goal**: The products endpoints reject bad input with a 400, and the obvious duplication and noise are gone.
 
 ## Overview
@@ -9,7 +9,7 @@ Smaller issues from the 2026-10-29 review of `apps/api/src/products/` (finding 8
 
 ---
 
-## 📋 Input checks
+## ✅ Input checks
 
 **Requirements**:
 - Given a loose-product link with a `quantity` that isn't a whole number above 0, should answer 400 instead of 500
@@ -20,7 +20,7 @@ Smaller issues from the 2026-10-29 review of `apps/api/src/products/` (finding 8
 
 ---
 
-## 📋 Remove duplication and noise
+## ✅ Remove duplication and noise
 
 **Requirements**:
 - Given the product list, should drop the per-product debug log
