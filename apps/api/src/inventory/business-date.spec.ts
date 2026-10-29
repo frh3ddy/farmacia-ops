@@ -1,6 +1,6 @@
 import { assert } from 'riteway/vitest';
 import { Prisma } from '@prisma/client';
-import { businessDay, parseBusinessDate, parseDateParam } from './business-date';
+import { businessDay, daysUntilExpiry, expiryDayStart, parseBusinessDate, parseDateParam } from './business-date';
 import { InventoryReportsService } from './inventory-reports.service';
 
 describe('parseBusinessDate', () => {
@@ -52,6 +52,42 @@ describe('businessDay', () => {
       should: 'count on that day, not the next',
       actual: trends.map((t) => t.date),
       expected: ['2026-10-28'],
+    });
+  });
+});
+
+describe('daysUntilExpiry', () => {
+  const evening = new Date('2026-11-14T20:00:00-06:00'); // already Nov 15 in UTC
+
+  test('the evening before the expiry day', () => {
+    assert({
+      given: 'a Nov 15 lot stored as legacy UTC midnight or as Mexico City noon, at 8pm on Nov 14',
+      should: 'be 1 day away, not expired',
+      actual: ['2026-11-15T00:00:00Z', '2026-11-15T18:00:00Z'].map((s) => daysUntilExpiry(new Date(s), evening)),
+      expected: [1, 1],
+    });
+  });
+
+  test('calendar days, not 24h blocks', () => {
+    assert({
+      given: 'a Nov 15 lot at 12:10am Nov 15, 11pm Nov 13 and 9am Nov 20 (Mexico City)',
+      should: 'be 0 on the day, 2 before, -5 after',
+      actual: ['2026-11-15T00:10:00-06:00', '2026-11-13T23:00:00-06:00', '2026-11-20T09:00:00-06:00'].map((now) =>
+        daysUntilExpiry(new Date('2026-11-15T18:00:00Z'), new Date(now)),
+      ),
+      expected: [0, 2, -5],
+    });
+  });
+});
+
+describe('expiryDayStart', () => {
+  test('query bounds for expiry days', () => {
+    const evening = new Date('2026-11-14T20:00:00-06:00');
+    assert({
+      given: '8pm Nov 14 in Mexico City, 1 and 91 days ahead',
+      should: 'be UTC midnight of Nov 15 and Feb 13 (bounds that hold both stored forms)',
+      actual: [1, 91].map((n) => expiryDayStart(n, evening).toISOString()),
+      expected: ['2026-11-15T00:00:00.000Z', '2027-02-13T00:00:00.000Z'],
     });
   });
 });
