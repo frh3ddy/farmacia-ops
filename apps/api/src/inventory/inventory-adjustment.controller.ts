@@ -51,10 +51,8 @@ export class InventoryAdjustmentController {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
 
-    // Use current location if not specified
     const locationId = body.locationId || currentLocation.locationId;
 
-    // Validate required fields
     if (!body.productId || !body.type || body.quantity === undefined) {
       throw new HttpException(
         { success: false, message: 'Missing required fields: productId, type, quantity' },
@@ -62,7 +60,6 @@ export class InventoryAdjustmentController {
       );
     }
 
-    // Validate adjustment type
     if (!USER_ADJUSTMENT_TYPES.includes(body.type)) {
       throw new HttpException(
         { success: false, message: `Invalid adjustment type. Must be one of: ${USER_ADJUSTMENT_TYPES.join(', ')}` },
@@ -86,7 +83,6 @@ export class InventoryAdjustmentController {
       clientRequestId: body.clientRequestId,
     });
 
-    // Build response message
     let message = `Adjustment created successfully: ${body.type} ${Math.abs(body.quantity)} units`;
     if (result.squareSync) {
       message += result.squareSync.synced 

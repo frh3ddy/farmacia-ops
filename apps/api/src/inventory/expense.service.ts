@@ -235,7 +235,6 @@ export class ExpenseService {
       }),
     };
 
-    // Get all expenses for the period
     const expenses = await this.prisma.expense.findMany({ where });
 
     // Calculate totals

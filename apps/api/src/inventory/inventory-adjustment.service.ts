@@ -103,7 +103,6 @@ export class InventoryAdjustmentService {
     }
 
     try {
-      // Get the Square location ID
       const location = await this.prisma.location.findUnique({
         where: { id: locationId },
         select: { squareId: true },
@@ -134,7 +133,6 @@ export class InventoryAdjustmentService {
         toState = adjustmentType === 'BREAK_BULK_OUT' ? 'NONE' : 'WASTE';
       }
 
-      // Call Square Inventory API
       this.logger.log(`[SQUARE_SYNC] Syncing adjustment: catalogObjectId=${catalogObjectId}, locationId=${location.squareId}, quantity=${Math.abs(quantityChange)}, ${fromState} → ${toState}, type=${adjustmentType}`);
       
       return await sendInventoryChanges(client, {
@@ -177,18 +175,6 @@ export class InventoryAdjustmentService {
     const db = tx ?? this.prisma;
     this.logger.log(`[ADJUSTMENT] Creating ${input.type} adjustment for product ${input.productId} at location ${input.locationId}, qty: ${input.quantity}`);
 
-    // Idempotent replay: the offline-queue (iOS) may retry a write whose
-    // original response was lost after it actually committed. Recognize the
-    // client-supplied dedup key and return the existing result instead of
-    // applying the delta twice.
-    if (input.clientRequestId) {
-      const existing = await this.findByClientRequestId(input);
-      if (existing) {
-        this.logger.log(`[ADJUSTMENT] Duplicate clientRequestId ${input.clientRequestId} — returning existing adjustment ${existing.adjustment.id}`);
-        return existing;
-      }
-    }
-
     // Validate input — the controller's DTO is a plain interface, so nothing
     // has checked the runtime types of what the client sent.
     if (!Number.isInteger(input.quantity) || input.quantity === 0) {
@@ -204,7 +190,18 @@ export class InventoryAdjustmentService {
       throw new BadRequestException('El motivo y las notas deben tener 500 caracteres o menos');
     }
 
-    // Check if product exists
+    // Idempotent replay: the offline-queue (iOS) may retry a write whose
+    // original response was lost after it actually committed. Recognize the
+    // client-supplied dedup key and return the existing result instead of
+    // applying the delta twice.
+    if (input.clientRequestId) {
+      const existing = await this.findByClientRequestId(input);
+      if (existing) {
+        this.logger.log(`[ADJUSTMENT] Duplicate clientRequestId ${input.clientRequestId} — returning existing adjustment ${existing.adjustment.id}`);
+        return existing;
+      }
+    }
+
     const product = await db.product.findUnique({
       where: { id: input.productId },
     });
@@ -212,7 +209,6 @@ export class InventoryAdjustmentService {
       throw new NotFoundException(`Product ${input.productId} not found`);
     }
 
-    // Check if location exists
     const location = await db.location.findUnique({
       where: { id: input.locationId },
     });
@@ -307,7 +303,6 @@ export class InventoryAdjustmentService {
         remainingToConsume -= quantityFromBatch;
       }
 
-      // Calculate weighted average unit cost
       const weightedUnitCost = totalCost.div(quantityToRemove);
 
       // 1. Create the adjustment record

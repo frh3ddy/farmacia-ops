@@ -84,7 +84,6 @@ export class InventoryReceivingService {
     }
 
     try {
-      // Get Square location ID
       const location = await this.prisma.location.findUnique({
         where: { id: locationId },
         select: { squareId: true },
@@ -170,7 +169,6 @@ export class InventoryReceivingService {
   }
 
   private async recordReceiving(input: ReceiveInventoryInput): Promise<ReceivingResult> {
-    // Check product exists
     const product = await this.prisma.product.findUnique({
       where: { id: input.productId },
     });
@@ -178,7 +176,6 @@ export class InventoryReceivingService {
       throw new NotFoundException(`Product ${input.productId} not found`);
     }
 
-    // Check location exists
     const location = await this.prisma.location.findUnique({
       where: { id: input.locationId },
     });
@@ -188,7 +185,6 @@ export class InventoryReceivingService {
 
     await assertCutOver(this.prisma, input.locationId);
 
-    // Check supplier if provided
     if (input.supplierId) {
       const supplier = await this.prisma.supplier.findUnique({
         where: { id: input.supplierId },
@@ -200,7 +196,6 @@ export class InventoryReceivingService {
 
     const totalCost = new Prisma.Decimal(input.unitCost).mul(input.quantity);
 
-    // Execute in transaction
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Create inventory batch
       const inventoryBatch = await tx.inventory.create({
@@ -237,7 +232,6 @@ export class InventoryReceivingService {
 
       // 3. Update supplier product cost if supplier provided
       if (input.supplierId) {
-        // Check if this supplier is already the preferred one for this product
         const existingPreferred = await tx.supplierProduct.findFirst({
           where: {
             productId: input.productId,
@@ -307,7 +301,6 @@ export class InventoryReceivingService {
       return { receiving, inventoryBatch };
     });
 
-    // Get updated inventory total
     const inventoryTotal = await this.prisma.inventory.aggregate({
       where: {
         productId: input.productId,
@@ -354,7 +347,8 @@ export class InventoryReceivingService {
     // client bug — or a probe for another location's receiving.
     const sameRequest = existing.locationId === input.locationId
       && existing.productId === input.productId
-      && existing.quantity === input.quantity;
+      && existing.quantity === input.quantity
+      && existing.unitCost.equals(input.unitCost);
     if (!sameRequest) {
       throw new ConflictException('This clientRequestId was already used for a different receiving');
     }
@@ -463,14 +457,12 @@ export class InventoryReceivingService {
       }),
     };
 
-    // Get totals
     const totals = await this.prisma.inventoryReceiving.aggregate({
       where,
       _count: { id: true },
       _sum: { quantity: true, totalCost: true },
     });
 
-    // Get by supplier
     const bySupplier = await this.prisma.inventoryReceiving.groupBy({
       by: ['supplierId'],
       where,
@@ -478,7 +470,6 @@ export class InventoryReceivingService {
       _sum: { quantity: true, totalCost: true },
     });
 
-    // Get supplier names
     const supplierIds = bySupplier
       .filter(s => s.supplierId)
       .map(s => s.supplierId as string);

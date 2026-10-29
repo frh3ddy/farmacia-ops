@@ -39,7 +39,6 @@ interface ReceiveInventoryDto {
   syncPriceToSquare?: boolean;
 }
 
-// Helper to extract error message
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
@@ -68,10 +67,8 @@ export class InventoryReceivingController {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
 
-    // Use current location if not specified
     const locationId = body.locationId || currentLocation.locationId;
 
-    // Validate required fields
     // quantity and unitCost are checked by the service
     if (!body.productId) {
       throw new HttpException(
@@ -80,7 +77,6 @@ export class InventoryReceivingController {
       );
     }
 
-    // Parse dates
     let expiryDate: Date | undefined;
     let manufacturingDate: Date | undefined;
 
@@ -121,7 +117,6 @@ export class InventoryReceivingController {
       clientRequestId: body.clientRequestId,
     });
 
-    // Build response message
     let message = `Received ${body.quantity} units successfully`;
     if (result.squareSync) {
       message += result.squareSync.synced
@@ -129,9 +124,9 @@ export class InventoryReceivingController {
         : ` (Square sync failed: ${result.squareSync.error})`;
     }
 
-    // Update selling price if provided
     let priceUpdate = null;
-    if (body.sellingPrice !== undefined && body.sellingPrice > 0) {
+    // 0 or missing means no price change; anything else updatePrice validates.
+    if (body.sellingPrice != null && body.sellingPrice !== 0) {
       try {
         const priceResult = await this.productsService.updatePrice({
           productId: body.productId,

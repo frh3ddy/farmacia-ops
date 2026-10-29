@@ -125,7 +125,6 @@ export class InventoryReportsService {
   }): Promise<COGSReport> {
     const { locationId, startDate, endDate, groupByCategory } = options;
 
-    // Build where clause for sales
     const salesWhere: Prisma.SaleWhereInput = {
       ...(locationId && { locationId }),
       ...((startDate || endDate) && {
@@ -136,7 +135,6 @@ export class InventoryReportsService {
       }),
     };
 
-    // Get sales with items
     const sales = await this.prisma.sale.findMany({
       where: salesWhere,
       include: {
@@ -484,7 +482,6 @@ export class InventoryReportsService {
       }),
     };
 
-    // Get sales aggregated
     const sales = await this.prisma.sale.findMany({
       where: salesWhere,
       include: {
@@ -1016,7 +1013,6 @@ export class InventoryReportsService {
   // ============================================================================
 
   async getBatchDetail(batchId: string) {
-    // Get the batch with all related data
     const batch = await this.prisma.inventory.findUnique({
       where: { id: batchId },
       include: {

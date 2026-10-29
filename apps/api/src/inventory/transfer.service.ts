@@ -200,13 +200,19 @@ export class TransferService {
       throw new BadRequestException(`La transferencia ${input.transferId} está ${transfer.status}; solo se puede recibir una en tránsito`);
     }
 
-    const lineIds = new Set(transfer.lines.map((l) => l.id));
+    const shippedByLineId = new Map(transfer.lines.map((l) => [l.id, l.quantity]));
     for (const r of input.lineReceipts ?? []) {
-      if (!lineIds.has(r.transferLineId)) {
+      const shipped = shippedByLineId.get(r.transferLineId);
+      if (shipped === undefined) {
         throw new BadRequestException(`La línea ${r.transferLineId} no pertenece a la transferencia ${input.transferId}`);
       }
       if (!Number.isInteger(r.quantityReceived) || r.quantityReceived < 0) {
         throw new BadRequestException(`La cantidad recibida en la línea ${r.transferLineId} debe ser un número entero, cero o mayor`);
+      }
+      if (r.quantityReceived > shipped) {
+        throw new BadRequestException(
+          `La cantidad recibida (${r.quantityReceived}) es mayor que la enviada (${shipped}) en la línea ${r.transferLineId}`,
+        );
       }
     }
     const overrideByLineId = new Map((input.lineReceipts ?? []).map((r) => [r.transferLineId, r.quantityReceived]));
@@ -227,11 +233,6 @@ export class TransferService {
 
       for (const line of transfer.lines) {
         const quantityReceived = resolveQuantityReceived(line.quantity, overrideByLineId.get(line.id));
-        if (quantityReceived > line.quantity) {
-          throw new BadRequestException(
-            `La cantidad recibida (${quantityReceived}) es mayor que la enviada (${line.quantity}) en la línea ${line.id}`,
-          );
-        }
         if (quantityReceived <= 0) {
           await tx.transferLine.update({ where: { id: line.id }, data: { quantityReceived: 0 } });
           continue;
