@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { endOfBusinessDay } from './business-date';
 import { Prisma, AdjustmentType } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
 import { assertCutOver } from './cutover-gate';
@@ -245,10 +246,9 @@ export class InventoryAdjustmentService {
 
     // A positive adjustment's batch is received at effectiveDate, so a future
     // date would park it at the back of the FIFO line. Past dates are fine.
-    // End of today (server-local, like parseDateString) so a date-only "today",
-    // parsed as noon, still passes in the morning.
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
+    // End of today in Mexico City, so a date-only "today", parsed as noon,
+    // still passes in the morning.
+    const endOfToday = endOfBusinessDay();
     if (input.effectiveDate && input.effectiveDate > endOfToday) {
       throw new BadRequestException('La fecha del ajuste no puede ser futura');
     }

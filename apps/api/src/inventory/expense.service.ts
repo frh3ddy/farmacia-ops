@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { listLimit } from './list-limit';
+import { businessDay } from './business-date';
 import { Prisma, ExpenseType } from '@prisma/client';
 
 // ============================================================================
@@ -265,7 +266,7 @@ export class ExpenseService {
 
       // By month
       if (includeMonthly) {
-        const monthKey = expense.date.toISOString().slice(0, 7); // YYYY-MM
+        const monthKey = businessDay(expense.date).slice(0, 7); // YYYY-MM
         const monthEntry = byMonthMap.get(monthKey);
         if (monthEntry) {
           monthEntry.total = monthEntry.total.add(expense.amount);

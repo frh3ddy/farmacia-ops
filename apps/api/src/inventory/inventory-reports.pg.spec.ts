@@ -57,3 +57,31 @@ describe('InventoryReportsService shrinkage', () => {
     });
   });
 });
+
+describe('InventoryReportsService backdated adjustments', () => {
+  test('damage entered in October for a September date', async () => {
+    const reports = new InventoryReportsService(prisma);
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Centro' } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    await prisma.inventoryAdjustment.create({
+      data: {
+        locationId, productId, type: 'DAMAGE', quantity: -1, unitCost: 10, totalCost: 10,
+        effectiveDate: new Date('2026-09-15T18:00:00Z'), adjustedAt: new Date('2026-10-02T18:00:00Z'),
+      },
+    });
+    const september = { locationId, startDate: new Date('2026-09-01T06:00:00Z'), endDate: new Date('2026-10-01T05:59:59.999Z') };
+    const october = { locationId, startDate: new Date('2026-10-01T06:00:00Z'), endDate: new Date('2026-11-01T05:59:59.999Z') };
+
+    const shrinkage = async (period: typeof september) => [
+      (await reports.getProfitAndLossReport(period)).operatingExpenses.shrinkage,
+      (await reports.getAdjustmentImpactReport(period)).summary.totalAdjustments,
+    ];
+
+    assert({
+      given: 'a damaged unit dated Sep 15 but entered on Oct 2',
+      should: "count in September's P&L and loss report, not October's",
+      actual: [await shrinkage(september), await shrinkage(october)],
+      expected: [['10', 1], ['0', 0]],
+    });
+  });
+});

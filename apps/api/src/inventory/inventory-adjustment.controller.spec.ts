@@ -98,9 +98,9 @@ describe('InventoryAdjustmentController.getAdjustmentsByLocation', () => {
     await controller.getAdjustmentsByLocation('centro', '2026-10-01');
     assert({
       given: 'a date-only start date',
-      should: 'read it the same way create does (local noon)',
-      actual: service.getAdjustmentsByLocation.mock.calls[0][1].startDate.getHours(),
-      expected: 12,
+      should: 'start at midnight in Mexico City',
+      actual: service.getAdjustmentsByLocation.mock.calls[0][1].startDate.toISOString(),
+      expected: '2026-10-01T06:00:00.000Z',
     });
   });
 
@@ -110,9 +110,9 @@ describe('InventoryAdjustmentController.getAdjustmentsByLocation', () => {
     const end: Date = service.getAdjustmentsByLocation.mock.calls[0][1].endDate;
     assert({
       given: 'a date-only end date',
-      should: 'include the whole of that day',
-      actual: [end.getDate(), end.getHours(), end.getMinutes()],
-      expected: [1, 23, 59],
+      should: 'include the whole of that day in Mexico City',
+      actual: end.toISOString(),
+      expected: '2026-10-02T05:59:59.999Z',
     });
   });
 });

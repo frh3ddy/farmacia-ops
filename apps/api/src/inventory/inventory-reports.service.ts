@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { businessDay } from './business-date';
 import { Prisma } from '@prisma/client';
 import { saleItemNet } from './sale-item-net';
 import { STOCK_MOVE_TYPES } from './adjustment-types';
@@ -515,7 +516,7 @@ export class InventoryReportsService {
     }>();
 
     for (const sale of sales) {
-      const dateKey = sale.createdAt.toISOString().split('T')[0];
+      const dateKey = businessDay(sale.createdAt);
 
       for (const item of sale.items) {
         const { units, revenue, cost } = saleItemNet(item);
@@ -617,7 +618,7 @@ export class InventoryReportsService {
         type: { notIn: STOCK_MOVE_TYPES },
         ...(locationId && { locationId }),
         ...((startDate || endDate) && {
-          adjustedAt: {
+          effectiveDate: {
             ...(startDate && { gte: startDate }),
             ...(endDate && { lte: endDate }),
           },
@@ -907,7 +908,7 @@ export class InventoryReportsService {
     const adjustmentWhere: Prisma.InventoryAdjustmentWhereInput = {
       ...(locationId && { locationId }),
       ...((startDate || endDate) && {
-        adjustedAt: {
+        effectiveDate: {
           ...(startDate && { gte: startDate }),
           ...(endDate && { lte: endDate }),
         },

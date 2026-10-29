@@ -15,6 +15,7 @@ import { AdjustmentType } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 import { USER_ADJUSTMENT_TYPES } from './adjustment-types';
 import { MAX_LIST_LIMIT } from './list-limit';
+import { parseDateParam } from './business-date';
 
 // ============================================================================
 // DTOs
@@ -31,41 +32,6 @@ interface CreateAdjustmentDto {
   effectiveDate?: string;
   syncToSquare?: boolean; // If true, also update Square inventory
   clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
-}
-
-/**
- * Parse a date string that could be either:
- * - Date-only: "2026-02-03" -> treated as local date (noon to avoid timezone edge cases)
- * - Full ISO: "2026-02-03T12:00:00Z" -> parsed as-is
- */
-function parseDateString(dateStr: string): Date {
-  // If it's a date-only string (YYYY-MM-DD), add noon time to avoid timezone issues
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    // Parse as local date at noon to avoid any timezone day-shift issues
-    const [year, month, day] = dateStr.split('-').map(Number);
-    return new Date(year, month - 1, day, 12, 0, 0);
-  }
-  // Otherwise parse as full ISO date
-  return new Date(dateStr);
-}
-
-/**
- * An optional date parameter, or a 400 naming it when it isn't a date. A
- * date-only endDate covers that whole day.
- */
-function parseDateParam(value: string | undefined, name: string): Date | undefined {
-  if (!value) return undefined;
-  const date = parseDateString(value);
-  if (isNaN(date.getTime())) {
-    throw new HttpException(
-      { success: false, message: `Invalid ${name} format` },
-      HttpStatus.BAD_REQUEST
-    );
-  }
-  if (name === 'endDate' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    date.setHours(23, 59, 59, 999);
-  }
-  return date;
 }
 
 // ============================================================================
@@ -273,8 +239,8 @@ export class InventoryAdjustmentController {
   ) {
     const parsedLimit = limit ? parseInt(limit, 10) : NaN;
     const adjustments = await this.adjustmentService.getAdjustmentsByLocation(locationId, {
-      startDate: parseDateParam(startDate, 'startDate'),
-      endDate: parseDateParam(endDate, 'endDate'),
+      startDate: parseDateParam(startDate, 'startDate', 'start'),
+      endDate: parseDateParam(endDate, 'endDate', 'end'),
       type,
       limit: parsedLimit > 0 ? Math.min(parsedLimit, MAX_LIST_LIMIT) : undefined,
     });

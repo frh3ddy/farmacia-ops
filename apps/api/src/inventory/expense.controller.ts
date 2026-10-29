@@ -13,24 +13,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ExpenseService } from './expense.service';
+import { parseDateParam } from './business-date';
 import { ExpenseType } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, Public, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
-
-/**
- * Parse a date string that could be either:
- * - Date-only: "2026-02-03" -> treated as local date (noon to avoid timezone edge cases)
- * - Full ISO: "2026-02-03T12:00:00Z" -> parsed as-is
- */
-function parseDateString(dateStr: string): Date {
-  // If it's a date-only string (YYYY-MM-DD), add noon time to avoid timezone issues
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    // Parse as local date at noon to avoid any timezone day-shift issues
-    const [year, month, day] = dateStr.split('-').map(Number);
-    return new Date(year, month - 1, day, 12, 0, 0);
-  }
-  // Otherwise parse as full ISO date
-  return new Date(dateStr);
-}
 
 /** A 400 naming the valid types unless `type` is one of them. */
 function assertExpenseType(type: unknown): void {
@@ -98,8 +83,8 @@ export class ExpenseController {
 
     const summary = await this.expenseService.getExpenseSummary({
       locationId: targetLocationId,
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : undefined,
+      startDate: parseDateParam(startDate, 'startDate', 'start'),
+      endDate: parseDateParam(endDate, 'endDate', 'end'),
       includeMonthly: includeMonthly === 'true',
     });
 
@@ -127,8 +112,8 @@ export class ExpenseController {
     const expenses = await this.expenseService.listExpenses({
       locationId: targetLocationId,
       type,
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : undefined,
+      startDate: parseDateParam(startDate, 'startDate', 'start'),
+      endDate: parseDateParam(endDate, 'endDate', 'end'),
       isPaid: isPaid !== undefined ? isPaid === 'true' : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
@@ -168,12 +153,12 @@ export class ExpenseController {
       locationId,
       type: body.type,
       amount: body.amount,
-      date: parseDateString(body.date),
+      date: parseDateParam(body.date, 'date')!, // presence checked above
       description: body.description,
       vendor: body.vendor,
       reference: body.reference,
       isPaid: body.isPaid,
-      paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
+      paidAt: parseDateParam(body.paidAt, 'paidAt'),
       notes: body.notes,
       createdBy: currentEmployee.id,
       clientRequestId: body.clientRequestId,
@@ -222,12 +207,12 @@ export class ExpenseController {
     const expense = await this.expenseService.updateExpense(id, {
       type: body.type,
       amount: body.amount,
-      date: body.date ? parseDateString(body.date) : undefined,
+      date: parseDateParam(body.date, 'date'),
       description: body.description,
       vendor: body.vendor,
       reference: body.reference,
       isPaid: body.isPaid,
-      paidAt: body.paidAt ? parseDateString(body.paidAt) : undefined,
+      paidAt: parseDateParam(body.paidAt, 'paidAt'),
       notes: body.notes,
     });
 
