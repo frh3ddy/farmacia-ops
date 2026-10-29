@@ -53,3 +53,20 @@ describe('InventoryReconciliationController.getSaleItemConsumption', () => {
     });
   });
 });
+
+describe('InventoryReconciliationController.getConsumptionSummary', () => {
+  test('a product that does not exist', async () => {
+    const { InventoryReconciliationService } = await import('./inventory-reconciliation.service');
+    const prisma = { product: { findUnique: vi.fn().mockResolvedValue(null) } };
+    const controller = new InventoryReconciliationController(new InventoryReconciliationService(prisma as any));
+
+    const status = await controller.getConsumptionSummary('missing', 'centro', '', '').then(() => 'done', (e: any) => e.status);
+
+    assert({
+      given: 'a consumption summary for an unknown product',
+      should: 'answer 404, not 500',
+      actual: status,
+      expected: 404,
+    });
+  });
+});

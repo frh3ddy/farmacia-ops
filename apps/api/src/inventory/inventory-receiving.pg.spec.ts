@@ -100,3 +100,26 @@ describe('InventoryReceivingService.receiveInventory request ids (Postgres)', ()
     });
   });
 });
+
+describe('InventoryReceivingService.receiveInventory input (Postgres)', () => {
+  test('a quantity or cost that is not a valid number', async () => {
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Centro' } });
+    await prisma.cutoverLock.create({ data: { locationId, cutoverDate: new Date('2026-09-01') } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+
+    const outcomes = [];
+    for (const attempt of [{ quantity: 1.5 }, { quantity: undefined }, { unitCost: '2' }, { unitCost: NaN }]) {
+      outcomes.push(await service.receiveInventory({ locationId, productId, quantity: 5, unitCost: 2, ...attempt } as any).then(
+        () => 'received',
+        (e: any) => e.status,
+      ));
+    }
+
+    assert({
+      given: 'a fractional or missing quantity, and a unit cost sent as text or NaN',
+      should: 'refuse each with a 400 and add no stock',
+      actual: [outcomes, await prisma.inventory.count({ where: { productId } })],
+      expected: [[400, 400, 400, 400], 0],
+    });
+  });
+});
