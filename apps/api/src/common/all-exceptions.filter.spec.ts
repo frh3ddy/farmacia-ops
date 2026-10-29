@@ -64,3 +64,39 @@ describe('AllExceptionsFilter', () => {
     });
   });
 });
+
+/** The JSON body the filter answers for `exception`. */
+function bodyFor(exception: unknown) {
+  let body: unknown;
+  const response = { status: () => response, json: (b: unknown) => { body = b; return response; } };
+  const request = { method: 'POST', path: '/auth/pin-login', ip: '10.0.0.7', headers: {} };
+  const host = { switchToHttp: () => ({ getRequest: () => request, getResponse: () => response }) } as any;
+  vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+  new AllExceptionsFilter().catch(exception, host);
+  vi.restoreAllMocks();
+  return body;
+}
+
+describe('AllExceptionsFilter response body', () => {
+  test('error details the app reads', () => {
+    const lockedUntil = new Date('2026-11-15T18:30:00.000Z');
+    assert({
+      given: 'a 401 lockout with code ACCOUNT_LOCKED, lockedUntil and secondsRemaining',
+      should: 'pass all three through next to the message',
+      actual: bodyFor(new HttpException(
+        { success: false, message: 'Cuenta bloqueada', code: 'ACCOUNT_LOCKED', lockedUntil, secondsRemaining: 900 },
+        HttpStatus.UNAUTHORIZED,
+      )),
+      expected: { success: false, message: 'Cuenta bloqueada', code: 'ACCOUNT_LOCKED', lockedUntil, secondsRemaining: 900 },
+    });
+  });
+
+  test('anything else in the body', () => {
+    assert({
+      given: 'an error body with fields the app does not read',
+      should: 'drop them',
+      actual: bodyFor(new HttpException({ success: false, message: 'PIN incorrecto', employeeId: 'e1' }, HttpStatus.UNAUTHORIZED)),
+      expected: { success: false, message: 'PIN incorrecto' },
+    });
+  });
+});

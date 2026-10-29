@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmployeeRole } from '@prisma/client';
 import * as crypto from 'crypto';
 import { hashPassword, verifyPassword } from './password';
+import { AuthErrorCode } from './auth-error-code';
 
 // ============================================================================
 // Types
@@ -69,8 +70,14 @@ export class AuthService {
 
   private assertLoginNotLocked(key: string) {
     if (this.isLoginLocked(key)) {
+      const lockedUntil = new Date(this.failedLogins.get(key)!.since + AuthService.LOGIN_LOCK_MS);
       throw new HttpException(
-        { success: false, message: 'Demasiados intentos fallidos. Intenta de nuevo en 15 minutos.' },
+        {
+          success: false,
+          message: 'Demasiados intentos fallidos. Intenta de nuevo en 15 minutos.',
+          code: AuthErrorCode.TOO_MANY_ATTEMPTS,
+          lockedUntil,
+        },
         HttpStatus.TOO_MANY_REQUESTS
       );
     }
@@ -138,14 +145,14 @@ export class AuthService {
     if (!employee) {
       this.recordFailedLogin(loginKey);
       throw new HttpException(
-        { success: false, message: 'Correo o contraseña incorrectos' },
+        { success: false, message: 'Correo o contraseña incorrectos', code: AuthErrorCode.CREDENTIALS_INVALID },
         HttpStatus.UNAUTHORIZED
       );
     }
 
     if (!employee.isActive) {
       throw new HttpException(
-        { success: false, message: 'La cuenta del empleado está desactivada' },
+        { success: false, message: 'La cuenta del empleado está desactivada', code: AuthErrorCode.EMPLOYEE_INACTIVE },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -153,7 +160,7 @@ export class AuthService {
     // Verify password
     if (!employee.passwordHash) {
       throw new HttpException(
-        { success: false, message: 'Account not set up for device activation. Contact administrator.' },
+        { success: false, message: 'Account not set up for device activation. Contact administrator.', code: AuthErrorCode.ACTIVATION_NOT_ALLOWED },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -162,7 +169,7 @@ export class AuthService {
     if (!valid) {
       this.recordFailedLogin(loginKey);
       throw new HttpException(
-        { success: false, message: 'Correo o contraseña incorrectos' },
+        { success: false, message: 'Correo o contraseña incorrectos', code: AuthErrorCode.CREDENTIALS_INVALID },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -318,7 +325,7 @@ export class AuthService {
 
     if (!device || !device.isActive) {
       throw new HttpException(
-        { success: false, message: 'Invalid or deactivated device' },
+        { success: false, message: 'Invalid or deactivated device', code: AuthErrorCode.DEVICE_INVALID },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -386,7 +393,7 @@ export class AuthService {
     if (!matchedEmployee) {
       this.recordFailedLogin(lockoutKey);
       throw new HttpException(
-        { success: false, message: 'PIN incorrecto' },
+        { success: false, message: 'PIN incorrecto', code: AuthErrorCode.PIN_INVALID },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -503,7 +510,7 @@ export class AuthService {
     }
     if (!session || wrongDevice) {
       throw new HttpException(
-        { success: false, message: 'Invalid session' },
+        { success: false, message: 'Invalid session', code: AuthErrorCode.SESSION_INVALID },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -514,14 +521,14 @@ export class AuthService {
         where: { id: session.id },
       });
       throw new HttpException(
-        { success: false, message: 'Session expired' },
+        { success: false, message: 'Session expired', code: AuthErrorCode.SESSION_EXPIRED },
         HttpStatus.UNAUTHORIZED
       );
     }
 
     if (!session.employee.isActive) {
       throw new HttpException(
-        { success: false, message: 'La cuenta del empleado está desactivada' },
+        { success: false, message: 'La cuenta del empleado está desactivada', code: AuthErrorCode.EMPLOYEE_INACTIVE },
         HttpStatus.UNAUTHORIZED
       );
     }
