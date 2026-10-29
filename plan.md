@@ -14,3 +14,5 @@
 - ✅ [Product Create Safety](tasks/product-create-safety-epic.md) — initial stock respects the cutover; input checked before writing; no orphan or duplicate Square items
 - ✅ [Products Review Cleanup](tasks/products-review-cleanup-epic.md) — loose-link, alias and Yastás input checks; typed bodies; duplicated branch and debug log removed
 - ✅ [Products Review Follow-ups](tasks/products-review-followups-epic.md) — loose-link loop walk, no price changes for Yastás products, sell at one store or every store (switch, default every store), one validation pass on create
+- ✅ [Product Price and Access Safety](tasks/product-price-and-access-safety-epic.md) — a failed Square price change is refused; the role at the store acted on; bad create input gets a 400
+- 📋 [Product Lists and Square Cleanup](tasks/product-lists-and-square-cleanup-epic.md) — one-store products only at their store; bounded catalog search; counts without Yastás; rename keeps the item; small fixes
