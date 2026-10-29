@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, BadGatewayException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Square, SquareClient } from 'square';
 import { findSquareVariationId, isSquareMapping, preferredMapping } from '../inventory/square-sync';
@@ -131,6 +131,15 @@ function assertSellingPrice(sellingPrice: unknown): void {
   if (sellingPrice < 0) {
     throw new BadRequestException('El precio de venta no puede ser negativo');
   }
+}
+
+const isOneOf = (values: readonly string[], value: unknown) => typeof value === 'string' && values.includes(value);
+const medicationTypes = ['GENERIC', 'BRAND', 'SIMILAR'] as const;
+
+/** Refuses the first field that is set but isn't what its name says. */
+function assertFieldTypes(fields: Array<[value: unknown, isValid: (value: unknown) => boolean, message: string]>): void {
+  const invalid = fields.find(([value, isValid]) => value != null && !isValid(value));
+  if (invalid) throw new BadRequestException(invalid[2]);
 }
 
 const isWholeNumber = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0;
@@ -453,8 +462,33 @@ export class ProductsService {
     if (initialStock && costPrice == null) {
       throw new BadRequestException('Las existencias iniciales necesitan un costo');
     }
-    if (input.medication && !Array.isArray(input.medication.activeIngredients)) {
-      throw new BadRequestException('El medicamento necesita su lista de principios activos');
+    const isBoolean = (value: unknown) => typeof value === 'boolean';
+    const isText = (value: unknown) => typeof value === 'string';
+    const isPackaging = (value: unknown) => isOneOf(Object.values(PackagingType), value);
+    assertFieldTypes([
+      [sku, isText, 'El SKU debe ser texto'],
+      [input.medicationType, (v) => isOneOf(medicationTypes, v), 'El tipo de medicamento no es válido'],
+      [input.primaryPackaging, isPackaging, 'El empaque primario no es válido'],
+      [input.secondaryPackaging, isPackaging, 'El empaque secundario no es válido'],
+      [input.requiresPrescription, isBoolean, '"Requiere receta" debe ser sí o no'],
+      [input.isControlled, isBoolean, '"Sustancia controlada" debe ser sí o no'],
+      [input.syncToSquare, isBoolean, '"Enviar a Square" debe ser sí o no'],
+      [input.soldAtAllLocations, isBoolean, '"Vender en todas las sucursales" debe ser sí o no'],
+    ]);
+    if (input.medication) {
+      const { name, strength, form, route, activeIngredients } = input.medication;
+      if (!Array.isArray(activeIngredients)) {
+        throw new BadRequestException('El medicamento necesita su lista de principios activos');
+      }
+      if (!activeIngredients.every((i) => typeof i?.name === 'string' && i.name.trim())) {
+        throw new BadRequestException('Cada principio activo necesita un nombre');
+      }
+      if (!isOneOf(Object.values(PharmaceuticalForm), form) || !isOneOf(Object.values(AdministrationRoute), route)) {
+        throw new BadRequestException('La forma o la vía del medicamento no son válidas');
+      }
+      if (typeof name !== 'string' || typeof strength !== 'string') {
+        throw new BadRequestException('El medicamento necesita nombre y concentración');
+      }
     }
     if (clientRequestId !== undefined && (typeof clientRequestId !== 'string' || !UUID.test(clientRequestId))) {
       throw new BadRequestException('clientRequestId must be a UUID');
@@ -481,6 +515,16 @@ export class ProductsService {
       if (!supplier) {
         throw new NotFoundException(`Supplier ${supplierId} not found`);
       }
+    }
+
+    const references: Array<[id: string | undefined, find: (id: string) => Promise<unknown>, message: string]> = [
+      [input.categoryId, (id) => this.prisma.category.findUnique({ where: { id } }), 'La categoría no existe'],
+      [input.labId, (id) => this.prisma.laboratory.findUnique({ where: { id } }), 'El laboratorio no existe'],
+      [input.medicationDefinitionId, (id) => this.prisma.medicationDefinition.findUnique({ where: { id } }), 'El medicamento no existe'],
+      [input.looseProductId, (id) => this.prisma.product.findUnique({ where: { id } }), 'El producto suelto no existe'],
+    ];
+    for (const [id, find, message] of references) {
+      if (id && !(await find(id))) throw new BadRequestException(message);
     }
 
     return { location };
@@ -716,24 +760,24 @@ export class ProductsService {
     const previousPrice = shown ? this.fromCents(Number(shown.priceCents)) : null;
     const placeholder = preferredMapping(product.catalogMappings.filter((m) => !isSquareMapping(m)), locationId);
     let squareVariationId = preferredMapping(product.catalogMappings.filter(isSquareMapping), locationId)?.squareVariationId;
-    let squareSynced = false;
 
     const location = await this.prisma.location.findUnique({
       where: { id: locationId },
     });
 
-    // Step 1: Update in Square if applicable
-    if (syncToSquare) {
+    // Step 1: Send to Square when the change has somewhere to go there; a
+    // rejected change is refused, so the app never shows a price the register doesn't charge.
+    const reachesSquare =
+      syncToSquare &&
+      (squareVariationId
+        ? applyToAllLocations || !!location?.squareId
+        : !!placeholder && (product.soldAtAllLocations || !!location?.squareId));
+    if (reachesSquare) {
       try {
         if (squareVariationId) {
-          const squareLocationId = applyToAllLocations ? undefined : location?.squareId ?? undefined;
-          if (applyToAllLocations || squareLocationId) {
-            await this.updatePriceInSquare(squareVariationId, sellingPrice, squareLocationId);
-            squareSynced = true;
-            this.logger.log(`[PRODUCT] Price updated in Square for variation ${squareVariationId}${applyToAllLocations ? ' (all locations)' : ''}`);
-          }
-        } else if (placeholder) {
-          this.logger.log(`[PRODUCT] Product is local-only, attempting to sync to Square first...`);
+          await this.updatePriceInSquare(squareVariationId, sellingPrice, applyToAllLocations ? undefined : location!.squareId!);
+          this.logger.log(`[PRODUCT] Price updated in Square for variation ${squareVariationId}${applyToAllLocations ? ' (all locations)' : ''}`);
+        } else {
           const squareResult = await this.createProductInSquare({
             name: product.name,
             sku: product.sku || undefined,
@@ -743,14 +787,14 @@ export class ProductsService {
             productId,
           });
           squareVariationId = squareResult.variationId;
-          squareSynced = true;
           this.logger.log(`[PRODUCT] Product synced to Square: Item=${squareResult.itemId}, Variation=${squareResult.variationId}`);
         }
       } catch (error) {
-        this.logger.error(`[PRODUCT] Failed to update price in Square: ${error}`);
-        // Continue with local update
+        this.logger.error(`[PRODUCT] Square refused the price change for ${productId}: ${error}`);
+        throw new BadGatewayException('Square no aceptó el cambio de precio, así que el precio no cambió. Inténtalo de nuevo.');
       }
     }
+    const squareSynced = reachesSquare;
 
     // Step 2: Update the cached prices
     if (placeholder && squareVariationId) {
@@ -812,8 +856,8 @@ export class ProductsService {
       newPrice: sellingPrice,
       squareSynced,
       message: squareSynced
-        ? `Price updated to $${sellingPrice} ${CURRENCY} and synced to Square`
-        : `Price updated to $${sellingPrice} ${CURRENCY} locally`,
+        ? `Precio actualizado a $${sellingPrice} ${CURRENCY} y enviado a Square`
+        : `Precio actualizado a $${sellingPrice} ${CURRENCY} solo en la app (no se envió a Square)`,
     };
   }
 
@@ -1453,6 +1497,7 @@ export class ProductsService {
             }
           : true,
         receivings: {
+          where: locationId ? { locationId } : undefined,
           take: 10,
           orderBy: { receivedAt: 'desc' },
         },

@@ -46,6 +46,26 @@ const imageFileFilter = (_req: any, file: any, cb: any) => {
   }
 };
 
+/**
+ * Role checks use the role at the current store, so a non-owner may only act
+ * there: a manager here who is a cashier elsewhere can't act as a manager elsewhere.
+ */
+function assertActingAtOwnStore(req: GuardedRequest, locationId: string): void {
+  if (req.currentLocation?.role !== 'OWNER' && locationId !== req.currentLocation?.locationId) {
+    throw new HttpException(
+      { success: false, message: 'Solo el dueño puede hacer esto en otras sucursales' },
+      HttpStatus.FORBIDDEN,
+    );
+  }
+}
+
+/** Whether the reader is a cashier at the store being read (an owner never is). */
+function isCashierAt(req: GuardedRequest, locationId?: string): boolean {
+  if (req.currentLocation?.role === 'OWNER') return false;
+  const role = req.accessibleLocations?.find((a) => a.locationId === locationId && a.isActive)?.role ?? req.currentLocation?.role;
+  return role === 'CASHIER';
+}
+
 @Controller('products')
 @UseGuards(AuthGuard, LocationGuard)
 export class ProductsController {
@@ -74,11 +94,9 @@ export class ProductsController {
       );
     }
 
-    const result = await this.productsService.createProduct({
-      ...body,
-      locationId,
-      syncToSquare: body.syncToSquare !== false, // Default true
-    });
+    assertActingAtOwnStore(req, locationId);
+
+    const result = await this.productsService.createProduct({ ...body, locationId });
 
     return {
       success: true,
@@ -105,6 +123,7 @@ export class ProductsController {
     if (!locationId) {
       throw new BadRequestException('Location ID is required');
     }
+    assertActingAtOwnStore(req, locationId);
 
     const result = await this.productsService.syncUnsyncedProducts(locationId);
     return {
@@ -240,7 +259,7 @@ export class ProductsController {
       search: search?.trim() || undefined,
       exact: exact === 'true',
     });
-    return req.currentLocation?.role === 'CASHIER' ? { ...result, data: result.data.map(withoutCosts) } : result;
+    return isCashierAt(req, targetLocationId) ? { ...result, data: result.data.map(withoutCosts) } : result;
   }
 
   /**
@@ -368,7 +387,7 @@ export class ProductsController {
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProduct(id, targetLocationId);
-    return req.currentLocation?.role === 'CASHIER' ? { ...result, data: withoutCosts(result.data) } : result;
+    return isCashierAt(req, targetLocationId) ? { ...result, data: withoutCosts(result.data) } : result;
   }
 
   /**
@@ -397,12 +416,13 @@ export class ProductsController {
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (req.currentLocation?.role !== 'OWNER' && (body.applyToAllLocations === true || locationId !== req.currentLocation?.locationId)) {
+    if (body.applyToAllLocations === true && req.currentLocation?.role !== 'OWNER') {
       throw new HttpException(
         { success: false, message: 'Solo el dueño puede cambiar el precio de otras sucursales' },
         HttpStatus.FORBIDDEN,
       );
     }
+    assertActingAtOwnStore(req, locationId);
 
     const input: UpdatePriceInput = {
       productId: id,
