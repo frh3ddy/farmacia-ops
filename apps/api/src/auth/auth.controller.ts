@@ -16,6 +16,7 @@ import { EmployeeService } from './employee.service';
 import { LocationsService } from '../locations/locations.service';
 import { DeviceType } from '@prisma/client';
 import { AuthGuard, Roles, GuardedRequest, bearerToken } from './guards/auth.guard';
+import { AuthErrorCode } from './auth-error-code';
 
 // ============================================================================
 // DTOs
@@ -245,7 +246,7 @@ export class AuthController {
     const deviceToken = bearerToken(authorization);
     if (!deviceToken) {
       throw new HttpException(
-        { success: false, message: 'Device token required in Authorization header' },
+        { success: false, message: 'Device token required in Authorization header', code: AuthErrorCode.DEVICE_REQUIRED },
         HttpStatus.UNAUTHORIZED
       );
     }

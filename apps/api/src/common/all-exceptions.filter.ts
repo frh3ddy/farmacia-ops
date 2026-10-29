@@ -10,6 +10,16 @@ import { Request, Response } from 'express';
 
 // Normalizes every thrown error into the { success: false, message } shape
 // controllers used to hand-roll in a try/catch on every endpoint.
+
+// Error fields clients act on (a stable `code`, lockout timing). Whitelisted so
+// nothing else an exception body carries leaks into the response.
+const APP_FIELDS = ['code', 'lockedUntil', 'secondsRemaining'] as const;
+
+function appFields(body: unknown): Record<string, unknown> {
+  if (typeof body !== 'object' || body === null) return {};
+  return Object.fromEntries(APP_FIELDS.filter((k) => k in body).map((k) => [k, (body as Record<string, unknown>)[k]]));
+}
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
@@ -33,7 +43,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           `[ACCESS] ${status} ${request.method} ${request.path} employee=${request.employee?.id ?? '-'} ip=${request.ip}: ${message}`,
         );
       }
-      response.status(status).json({ success: false, message });
+      response.status(status).json({ success: false, message, ...appFields(body) });
       return;
     }
 

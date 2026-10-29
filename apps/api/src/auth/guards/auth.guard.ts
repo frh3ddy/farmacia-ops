@@ -10,6 +10,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { AuthService } from '../auth.service';
 import { EmployeeRole } from '@prisma/client';
+import { AuthErrorCode } from '../auth-error-code';
 
 /** A request that passed AuthGuard: the validated session and the employee's location access. */
 export type GuardedRequest = Request & Awaited<ReturnType<AuthService['validateSession']>>;
@@ -41,7 +42,7 @@ export class DeviceGuard implements CanActivate {
     const deviceToken = bearerToken(authorization);
     if (!deviceToken) {
       throw new HttpException(
-        { success: false, message: 'Device token required in Authorization header' },
+        { success: false, message: 'Device token required in Authorization header', code: AuthErrorCode.DEVICE_REQUIRED },
         HttpStatus.UNAUTHORIZED
       );
     }
@@ -80,7 +81,7 @@ export class AuthGuard implements CanActivate {
     const sessionToken = request.headers['x-session-token'];
     if (!sessionToken) {
       throw new HttpException(
-        { success: false, message: 'Session token required' },
+        { success: false, message: 'Session token required', code: AuthErrorCode.SESSION_REQUIRED },
         HttpStatus.UNAUTHORIZED
       );
     }
