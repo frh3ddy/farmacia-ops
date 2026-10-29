@@ -14,6 +14,16 @@ import { productsWithoutCostSql, type ProductWithoutCost } from './products-with
 // Square merchant is configured with USD
 const CURRENCY = 'USD';
 
+/** A product as a cashier sees it: stock and selling price, nothing the pharmacy paid. */
+export function withoutCosts<T extends { averageCost?: unknown; inventories?: object[]; receivings?: object[] }>(product: T) {
+  const { averageCost, inventories, receivings, ...rest } = product;
+  return {
+    ...rest,
+    ...(inventories && { inventories: inventories.map(({ unitCost, costSource, ...batch }: any) => batch) }),
+    ...(receivings && { receivings: receivings.map(({ unitCost, totalCost, ...receiving }: any) => receiving) }),
+  };
+}
+
 export interface CreateProductInput {
   name: string;
   sku?: string;
@@ -1190,6 +1200,90 @@ export class ProductsService {
         local: Number(row?.local ?? 0),
       },
     };
+  }
+
+  /** Each supplier's current cost for a product, with its contact details. */
+  async getProductSuppliers(productId: string) {
+    const supplierProducts = await this.prisma.supplierProduct.findMany({
+      where: { productId },
+      include: {
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            contactInfo: true,
+            isActive: true,
+          },
+        },
+      },
+      orderBy: {
+        supplier: { name: 'asc' },
+      },
+    });
+
+    return supplierProducts.map((sp) => ({
+      id: sp.supplier.id,
+      name: sp.supplier.name,
+      contactInfo: sp.supplier.contactInfo,
+      isActive: sp.supplier.isActive,
+      cost: sp.cost.toString(),
+      isPreferred: sp.isPreferred,
+      notes: sp.notes,
+    }));
+  }
+
+  /** A product's cost timeline, grouped by supplier. */
+  async getProductCostHistory(productId: string) {
+    const costHistories = await this.prisma.supplierCostHistory.findMany({
+      where: { productId },
+      include: {
+        supplier: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: [
+        { supplier: { name: 'asc' } },
+        { effectiveAt: 'desc' },
+      ],
+    });
+
+    // Group by supplier
+    const groupedBySupplier = new Map<
+      string,
+      Array<{
+        id: string;
+        cost: string;
+        effectiveAt: string;
+        createdAt: string;
+        source: string;
+        isCurrent: boolean;
+      }>
+    >();
+
+    for (const entry of costHistories) {
+      const supplierId = entry.supplierId;
+      if (!groupedBySupplier.has(supplierId)) {
+        groupedBySupplier.set(supplierId, []);
+      }
+      groupedBySupplier.get(supplierId)!.push({
+        id: entry.id,
+        cost: entry.unitCost.toString(),
+        effectiveAt: entry.effectiveAt.toISOString(),
+        createdAt: entry.createdAt.toISOString(),
+        source: entry.source,
+        isCurrent: entry.isCurrent,
+      });
+    }
+
+    // Convert to array format with supplier info
+    return Array.from(groupedBySupplier.entries()).map(([supplierId, history]) => {
+      const firstEntry = costHistories.find((e) => e.supplierId === supplierId);
+      return {
+        supplierId,
+        supplierName: firstEntry?.supplier.name || 'Unknown',
+        costHistory: history,
+      };
+    });
   }
 
   /**

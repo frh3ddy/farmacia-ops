@@ -1,6 +1,6 @@
 # Product Cost Visibility Epic
 
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETED (2026-10-29)
 **Goal**: Cashiers never see what the pharmacy pays for a product.
 
 ## Overview
@@ -9,7 +9,7 @@ CASHIER can read a product's supplier costs (`GET /products/:id/suppliers`) and 
 
 ---
 
-## 📋 Cost endpoints closed to cashiers
+## ✅ Cost endpoints closed to cashiers
 
 **Requirements**:
 - Given a CASHIER, `GET /products/:id/suppliers` and `GET /products/:id/cost-history` should answer 403
@@ -18,7 +18,7 @@ CASHIER can read a product's supplier costs (`GET /products/:id/suppliers`) and 
 
 ---
 
-## 📋 Product detail without costs for cashiers
+## ✅ Product detail without costs for cashiers
 
 **Requirements**:
 - Given a CASHIER reading `GET /products/:id`, should omit `averageCost` and the receivings' unit costs, and keep stock and selling price

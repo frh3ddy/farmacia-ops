@@ -17,7 +17,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { ProductsService, CreateProductInput, UpdatePriceInput } from './products.service';
+import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts } from './products.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
 import { findOrCreateActiveIngredient, findOrCreateMedicationDefinition } from './medication-definition';
@@ -342,7 +342,7 @@ export class ProductsController {
       search: search?.trim() || undefined,
       exact: exact === 'true',
     });
-    return result;
+    return req.currentLocation?.role === 'CASHIER' ? { ...result, data: result.data.map(withoutCosts) } : result;
   }
 
   /**
@@ -447,36 +447,9 @@ export class ProductsController {
    * Returns current cost per supplier, preferred status, and notes
    */
   @Get(':id/suppliers')
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getProductSuppliers(@Param('id') productId: string) {
-    const supplierProducts = await this.prisma.supplierProduct.findMany({
-      where: { productId },
-      include: {
-        supplier: {
-          select: {
-            id: true,
-            name: true,
-            contactInfo: true,
-            isActive: true,
-          },
-        },
-      },
-      orderBy: {
-        supplier: { name: 'asc' },
-      },
-    });
-
-    const suppliers = supplierProducts.map((sp) => ({
-      id: sp.supplier.id,
-      name: sp.supplier.name,
-      contactInfo: sp.supplier.contactInfo,
-      isActive: sp.supplier.isActive,
-      cost: sp.cost.toString(),
-      isPreferred: sp.isPreferred,
-      notes: sp.notes,
-    }));
-
-    return { success: true, suppliers };
+    return { success: true, suppliers: await this.productsService.getProductSuppliers(productId) };
   }
 
   /**
@@ -485,60 +458,9 @@ export class ProductsController {
    * Returns cost timeline grouped by supplier
    */
   @Get(':id/cost-history')
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getProductCostHistory(@Param('id') productId: string) {
-    const costHistories = await this.prisma.supplierCostHistory.findMany({
-      where: { productId },
-      include: {
-        supplier: {
-          select: { id: true, name: true },
-        },
-      },
-      orderBy: [
-        { supplier: { name: 'asc' } },
-        { effectiveAt: 'desc' },
-      ],
-    });
-
-    // Group by supplier
-    const groupedBySupplier = new Map<
-      string,
-      Array<{
-        id: string;
-        cost: string;
-        effectiveAt: string;
-        createdAt: string;
-        source: string;
-        isCurrent: boolean;
-      }>
-    >();
-
-    for (const entry of costHistories) {
-      const supplierId = entry.supplierId;
-      if (!groupedBySupplier.has(supplierId)) {
-        groupedBySupplier.set(supplierId, []);
-      }
-      groupedBySupplier.get(supplierId)!.push({
-        id: entry.id,
-        cost: entry.unitCost.toString(),
-        effectiveAt: entry.effectiveAt.toISOString(),
-        createdAt: entry.createdAt.toISOString(),
-        source: entry.source,
-        isCurrent: entry.isCurrent,
-      });
-    }
-
-    // Convert to array format with supplier info
-    const suppliers = Array.from(groupedBySupplier.entries()).map(([supplierId, history]) => {
-      const firstEntry = costHistories.find((e) => e.supplierId === supplierId);
-      return {
-        supplierId,
-        supplierName: firstEntry?.supplier.name || 'Unknown',
-        costHistory: history,
-      };
-    });
-
-    return { success: true, suppliers };
+    return { success: true, suppliers: await this.productsService.getProductCostHistory(productId) };
   }
 
   /**
@@ -586,7 +508,7 @@ export class ProductsController {
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProduct(id, targetLocationId);
-    return result;
+    return req.currentLocation?.role === 'CASHIER' ? { ...result, data: withoutCosts(result.data) } : result;
   }
 
   /**
