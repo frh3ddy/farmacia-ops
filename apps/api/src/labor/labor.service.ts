@@ -1,7 +1,7 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { SquareClient } from 'square';
+import { SquareClient, SquareError } from 'square';
 import { createSquareClient } from '../square/square-client';
-import type { Shift } from 'square/api';
+import type { Timecard } from 'square/api';
 
 // ============================================================================
 // Types
@@ -58,6 +58,9 @@ interface TeamMemberSummary {
 // independent from the server timezone.
 const DEFAULT_TIMEZONE = 'America/Mexico_City';
 const DEFAULT_HOURLY_RATE_CENTS = 0;
+
+/** Square answers an unknown timecard id with a 404 it throws. */
+const isNotFound = (error: unknown) => error instanceof SquareError && error.statusCode === 404;
 
 // ============================================================================
 // Service
@@ -203,8 +206,9 @@ export class LaborService {
     return Math.max(0, Math.round((end - start) / 60000));
   }
 
+  /** A Square timecard in the payroll's shape (still named for shifts: the apps read `shiftId`). */
   private toShiftSummary(
-    shift: Shift,
+    shift: Timecard,
     timeZone: string,
     fallbackRateCents: number,
     currency: string,
@@ -270,7 +274,7 @@ export class LaborService {
   }
 
   // --------------------------------------------------------------------------
-  // Shifts + payroll summary
+  // Timecards + payroll summary
   // --------------------------------------------------------------------------
 
   async getPayrollSummary(
@@ -297,15 +301,15 @@ export class LaborService {
     const timeZone = DEFAULT_TIMEZONE;
 
     this.logger.log(
-      `[LABOR] Searching shifts: teamMemberId=${teamMemberId} period=${period.startDate}..${period.endDate}`,
+      `[LABOR] Searching timecards: teamMemberId=${teamMemberId} period=${period.startDate}..${period.endDate}`,
     );
 
     try {
-      const shifts: Shift[] = [];
+      const shifts: Timecard[] = [];
       let cursor: string | undefined = undefined;
 
       do {
-        const response = await client.labor.shifts.search({
+        const response = await client.labor.searchTimecards({
           query: {
             filter: {
               teamMemberIds: [teamMemberId],
@@ -314,7 +318,7 @@ export class LaborService {
                   startDate: period.startDate,
                   endDate: period.endDate,
                 },
-                matchShiftsBy: 'START_AT',
+                matchTimecardsBy: 'START_AT',
                 defaultTimezone: timeZone,
               },
             },
@@ -324,29 +328,29 @@ export class LaborService {
           ...(cursor && { cursor }),
         });
 
-        shifts.push(...(response.shifts || []));
+        shifts.push(...(response.timecards || []));
         cursor = response.cursor || undefined;
       } while (cursor);
 
       this.logger.log(
-        `[LABOR] Found ${shifts.length} shift(s) for ${teamMemberId} in ${period.startDate}..${period.endDate}`,
+        `[LABOR] Found ${shifts.length} timecard(s) for ${teamMemberId} in ${period.startDate}..${period.endDate}`,
       );
 
       if (shifts.length === 0) {
         // Diagnostic: fetch without workday filter to see if the team member
-        // has ANY shifts at all (helps distinguish "no shifts ever" from
+        // has ANY timecards at all (helps distinguish "none ever" from
         // "workday filter excluded them").
-        const probe = await client.labor.shifts.search({
+        const probe = await client.labor.searchTimecards({
           query: {
             filter: { teamMemberIds: [teamMemberId] },
             sort: { field: 'START_AT', order: 'DESC' },
           },
           limit: 10,
         });
-        const probeShifts = probe.shifts || [];
+        const probeShifts = probe.timecards || [];
         this.logger.warn(
-          `[LABOR] No shifts in period ${period.startDate}..${period.endDate}. ` +
-            `Team member has ${probeShifts.length} total shift(s) (latest 10). ` +
+          `[LABOR] No timecards in period ${period.startDate}..${period.endDate}. ` +
+            `Team member has ${probeShifts.length} total timecard(s) (latest 10). ` +
             `Dates: ${probeShifts.map(s => (s.startAt || '').slice(0, 10)).join(', ') || 'none'}; ` +
             `Locations: ${[...new Set(probeShifts.map(s => s.locationId))].join(', ') || 'none'}; ` +
             `Statuses: ${[...new Set(probeShifts.map(s => s.status))].join(', ') || 'none'}`,
@@ -391,9 +395,9 @@ export class LaborService {
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      this.logger.error('[LABOR] Failed to search shifts', error);
+      this.logger.error('[LABOR] Failed to search timecards', error);
       throw new HttpException(
-        { success: false, message: 'Failed to fetch shifts from Square' },
+        { success: false, message: 'Failed to fetch timecards from Square' },
         HttpStatus.BAD_GATEWAY,
       );
     }
@@ -424,36 +428,26 @@ export class LaborService {
     const client = this.getSquareClient();
 
     try {
-      // 1. Fetch current shift
-      const current = await client.labor.shifts.get({ id: shiftId });
-      const shift = current.shift;
-
-      if (!shift) {
-        throw new HttpException(
-          { success: false, message: `Shift ${shiftId} not found` },
-          HttpStatus.NOT_FOUND,
-        );
+      const { timecard } = await client.labor.retrieveTimecard({ id: shiftId });
+      if (!timecard) {
+        throw this.timecardNotFound(shiftId);
       }
 
-      // 2. Apply the new times. Square requires full precision RFC3339 with
-      // offset; seconds are truncated by Square.
-      const updatedShift: Shift = {
-        ...shift,
-        startAt: updates.startAt ?? shift.startAt,
-        endAt:
-          updates.endAt !== undefined ? (updates.endAt ?? null) : shift.endAt,
-        version: shift.version,
-      };
-
-      // 3. Persist
-      const result = await client.labor.shifts.update({
+      // Square requires full precision RFC3339 with offset; seconds are
+      // truncated by Square. The version guards against a concurrent edit.
+      const result = await client.labor.updateTimecard({
         id: shiftId,
-        shift: updatedShift,
+        timecard: {
+          ...timecard,
+          startAt: updates.startAt ?? timecard.startAt,
+          endAt: updates.endAt !== undefined ? (updates.endAt ?? null) : timecard.endAt,
+          version: timecard.version,
+        },
       });
 
-      const saved = result.shift;
+      const saved = result.timecard;
       if (!saved) {
-        throw new Error('Square did not return the updated shift');
+        throw new Error('Square did not return the updated timecard');
       }
 
       const timeZone = saved.timezone || DEFAULT_TIMEZONE;
@@ -470,12 +464,20 @@ export class LaborService {
       );
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      this.logger.error(`[LABOR] Failed to update shift ${shiftId}`, error);
+      if (isNotFound(error)) throw this.timecardNotFound(shiftId);
+      this.logger.error(`[LABOR] Failed to update timecard ${shiftId}`, error);
       throw new HttpException(
         { success: false, message: 'Failed to update shift in Square' },
         HttpStatus.BAD_GATEWAY,
       );
     }
+  }
+
+  private timecardNotFound(id: string): HttpException {
+    return new HttpException(
+      { success: false, message: `No se encontró el turno ${id} en Square` },
+      HttpStatus.NOT_FOUND,
+    );
   }
 
   // --------------------------------------------------------------------------
@@ -493,10 +495,11 @@ export class LaborService {
     const client = this.getSquareClient();
 
     try {
-      await client.labor.shifts.delete({ id: shiftId });
+      await client.labor.deleteTimecard({ id: shiftId });
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      this.logger.error(`[LABOR] Failed to delete shift ${shiftId}`, error);
+      if (isNotFound(error)) throw this.timecardNotFound(shiftId);
+      this.logger.error(`[LABOR] Failed to delete timecard ${shiftId}`, error);
       throw new HttpException(
         { success: false, message: 'Failed to delete shift in Square' },
         HttpStatus.BAD_GATEWAY,
