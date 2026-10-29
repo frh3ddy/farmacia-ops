@@ -14,6 +14,7 @@ import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { AdjustmentType } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 import { USER_ADJUSTMENT_TYPES } from './adjustment-types';
+import { MAX_LIST_LIMIT } from './list-limit';
 
 // ============================================================================
 // DTOs
@@ -66,8 +67,6 @@ function parseDateParam(value: string | undefined, name: string): Date | undefin
   }
   return date;
 }
-
-const MAX_LIST_LIMIT = 500;
 
 // ============================================================================
 // Controller

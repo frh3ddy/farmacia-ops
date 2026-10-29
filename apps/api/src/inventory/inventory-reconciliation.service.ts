@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
@@ -40,7 +40,7 @@ export class InventoryReconciliationService {
     });
 
     if (!product) {
-      throw new Error(`Product ${productId} not found`);
+      throw new NotFoundException(`Product ${productId} not found`);
     }
 
     // Get consumption records for the period

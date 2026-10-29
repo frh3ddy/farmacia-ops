@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { listLimit } from './list-limit';
 import { Prisma } from '@prisma/client';
 import { SquareClient, SquareEnvironment } from 'square';
 import { assertCutOver } from './cutover-gate';
@@ -168,6 +169,13 @@ export class InventoryReceivingService {
       `[RECEIVING] Receiving ${input.quantity} units of product ${input.productId} at location ${input.locationId}, cost: ${input.unitCost}`
     );
 
+    if (!Number.isInteger(input.quantity) || input.quantity <= 0) {
+      throw new BadRequestException('La cantidad debe ser un número entero mayor que cero');
+    }
+    if (typeof input.unitCost !== 'number' || !Number.isFinite(input.unitCost) || input.unitCost < 0) {
+      throw new BadRequestException('El costo unitario debe ser un número y no puede ser negativo');
+    }
+
     // Idempotent replay: the offline-queue (iOS) may retry a write whose
     // original response was lost after it actually committed. Recognize the
     // client-supplied dedup key and return the existing result instead of
@@ -194,14 +202,6 @@ export class InventoryReceivingService {
   }
 
   private async recordReceiving(input: ReceiveInventoryInput): Promise<ReceivingResult> {
-    // Validate input
-    if (input.quantity <= 0) {
-      throw new BadRequestException('La cantidad debe ser mayor que cero');
-    }
-    if (input.unitCost < 0) {
-      throw new BadRequestException('El costo unitario no puede ser negativo');
-    }
-
     // Check product exists
     const product = await this.prisma.product.findUnique({
       where: { id: input.productId },
@@ -484,7 +484,7 @@ export class InventoryReceivingService {
         supplier: { select: { id: true, name: true } },
       },
       orderBy: { receivedAt: 'desc' },
-      take: options?.limit || 100,
+      take: listLimit(options?.limit),
     });
   }
 
