@@ -13,3 +13,4 @@
 - ✅ [Product Cost Visibility](tasks/product-cost-visibility-epic.md) — cashiers never see supplier costs, cost history or average cost
 - ✅ [Product Create Safety](tasks/product-create-safety-epic.md) — initial stock respects the cutover; input checked before writing; no orphan or duplicate Square items
 - ✅ [Products Review Cleanup](tasks/products-review-cleanup-epic.md) — loose-link, alias and Yastás input checks; typed bodies; duplicated branch and debug log removed
+- ✅ [Products Review Follow-ups](tasks/products-review-followups-epic.md) — loose-link loop walk, no price changes for Yastás products, sell at one store or every store (switch, default every store), one validation pass on create
