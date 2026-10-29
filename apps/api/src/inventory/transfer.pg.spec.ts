@@ -222,6 +222,26 @@ describe('TransferService.retrySquareSync (Postgres, Square recorded)', () => {
 });
 
 describe('TransferService.receive line receipts (Postgres)', () => {
+  test('a receipt above the quantity shipped', async () => {
+    const { transfers, productId } = await transferSetup();
+    const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 });
+    const transaction = vi.spyOn(prisma, '$transaction');
+
+    const status = await transfers.receive({
+      transferId: transfer.id,
+      lineReceipts: [{ transferLineId: transfer.lines[0].id, quantityReceived: 7 }],
+    }).then(() => 200, (e: any) => e.status);
+    const transactions = transaction.mock.calls.length;
+    transaction.mockRestore();
+
+    assert({
+      given: 'a line receipt of 7 for a line that shipped 6',
+      should: 'refuse it with a 400 before claiming the transfer, leaving it in transit',
+      actual: [status, transactions, (await prisma.transfer.findUnique({ where: { id: transfer.id } }))?.status],
+      expected: [400, 0, 'IN_TRANSIT'],
+    });
+  });
+
   test('receipts that do not fit the transfer', async () => {
     const { transfers, productId } = await transferSetup();
     const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 });

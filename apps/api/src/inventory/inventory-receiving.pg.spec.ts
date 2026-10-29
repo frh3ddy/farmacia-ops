@@ -68,7 +68,7 @@ describe('InventoryReceivingService.receiveInventory request ids (Postgres)', ()
 
     const request = { locationId, productId, quantity: 5, unitCost: 2, clientRequestId };
     const outcomes = [];
-    for (const attempt of [{ locationId: norte }, { productId: 'other' }, { quantity: 6 }]) {
+    for (const attempt of [{ locationId: norte }, { productId: 'other' }, { quantity: 6 }, { unitCost: 3 }]) {
       outcomes.push(await service.receiveInventory({ ...request, ...attempt }).then(
         () => 'returned',
         (e: Error) => e.message,
@@ -76,10 +76,10 @@ describe('InventoryReceivingService.receiveInventory request ids (Postgres)', ()
     }
 
     assert({
-      given: 'the request id resent from another location, for another product, or with another quantity',
+      given: 'the request id resent from another location, for another product, with another quantity or another unit cost',
       should: 'refuse each instead of returning the original receiving, and add no stock',
       actual: [outcomes, (await prisma.inventory.aggregate({ where: { productId }, _sum: { quantity: true } }))._sum.quantity],
-      expected: [Array(3).fill('This clientRequestId was already used for a different receiving'), 5],
+      expected: [Array(4).fill('This clientRequestId was already used for a different receiving'), 5],
     });
   });
 

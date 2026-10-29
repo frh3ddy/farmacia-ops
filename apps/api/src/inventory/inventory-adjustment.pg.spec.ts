@@ -127,6 +127,21 @@ describe('InventoryAdjustmentService.createAdjustment (Postgres)', () => {
     });
   });
 
+  test('a replay that fails validation', async () => {
+    const { productId } = await productWithBatches([{ quantity: 10, unitCost: 2, receivedAt: '2026-10-01' }]);
+    const request = { locationId, productId, type: 'OTHER' as const, quantity: -1, notes: 'Roto en mostrador', clientRequestId: `req-${productId}` };
+    await service.createAdjustment(request);
+
+    const status = await service.createAdjustment({ ...request, notes: '' }).then(() => 200, (e: any) => e.status);
+
+    assert({
+      given: 'a request id resent without the note an Otro adjustment needs',
+      should: 'refuse it as invalid, as a receiving would, instead of returning the original',
+      actual: status,
+      expected: 400,
+    });
+  });
+
   test('a request id already used for a different adjustment', async () => {
     const { productId } = await productWithBatches([{ quantity: 10, unitCost: 2, receivedAt: '2026-10-01' }]);
     const { id: elsewhere } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Norte' } });
