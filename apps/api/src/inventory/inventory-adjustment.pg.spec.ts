@@ -127,6 +127,21 @@ describe('InventoryAdjustmentService.createAdjustment (Postgres)', () => {
     });
   });
 
+  test('a replay that fails validation', async () => {
+    const { productId } = await productWithBatches([{ quantity: 10, unitCost: 2, receivedAt: '2026-10-01' }]);
+    const request = { locationId, productId, type: 'OTHER' as const, quantity: -1, notes: 'Roto en mostrador', clientRequestId: `req-${productId}` };
+    await service.createAdjustment(request);
+
+    const status = await service.createAdjustment({ ...request, notes: '' }).then(() => 200, (e: any) => e.status);
+
+    assert({
+      given: 'a request id resent without the note an Otro adjustment needs',
+      should: 'refuse it as invalid, as a receiving would, instead of returning the original',
+      actual: status,
+      expected: 400,
+    });
+  });
+
   test('a request id already used for a different adjustment', async () => {
     const { productId } = await productWithBatches([{ quantity: 10, unitCost: 2, receivedAt: '2026-10-01' }]);
     const { id: elsewhere } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Norte' } });
@@ -228,6 +243,36 @@ describe('InventoryAdjustmentService Square sync (Postgres)', () => {
         { synced: true },
         true,
       ],
+    });
+  });
+
+  test('a product with a placeholder mapping before its real one', async () => {
+    const { synced, productId, batchCreateChanges } = await syncedProduct();
+    // Written for Centro's price; the real item above is global.
+    await prisma.catalogMapping.create({ data: { productId, squareVariationId: `local_${productId}`, locationId } });
+
+    await synced.createAdjustment({ locationId, productId, type: 'DAMAGE', quantity: -1, syncToSquare: true });
+
+    assert({
+      given: 'a local_ placeholder at the location next to the real Square item',
+      should: 'send the change under the real item',
+      actual: batchCreateChanges.mock.calls[0][0].changes[0].adjustment.catalogObjectId,
+      expected: `v-${productId}`,
+    });
+  });
+
+  test('a product with only a placeholder mapping', async () => {
+    const { synced, batchCreateChanges } = await syncedProduct();
+    const { productId } = await productWithBatches([{ quantity: 10, unitCost: 2, receivedAt: '2026-10-01' }]);
+    await prisma.catalogMapping.create({ data: { productId, squareVariationId: `local_${productId}`, locationId } });
+
+    const { squareSync } = await synced.createAdjustment({ locationId, productId, type: 'DAMAGE', quantity: -1, syncToSquare: true });
+
+    assert({
+      given: 'a product with no Square item, only a local_ placeholder',
+      should: 'record it as not mapped without calling Square',
+      actual: [squareSync, batchCreateChanges.mock.calls.length],
+      expected: [{ synced: false, error: 'Product not mapped to Square catalog' }, 0],
     });
   });
 
@@ -377,6 +422,54 @@ describe('Inventory quantity constraint (Postgres)', () => {
       should: 'be refused by the database',
       actual: error?.includes('Inventory_quantity_nonnegative'),
       expected: true,
+    });
+  });
+});
+
+describe('InventoryAdjustmentService.getAdjustmentsByProduct (Postgres)', () => {
+  test("more of a product's adjustments than a list holds", async () => {
+    const { productId } = await productWithBatches([]);
+    await prisma.inventoryAdjustment.createMany({
+      data: Array.from({ length: 101 }, (_, i) => ({
+        locationId, productId, type: 'FOUND' as const, quantity: 1, unitCost: 1, totalCost: 1,
+        adjustedAt: new Date(Date.UTC(2026, 9, 1, 0, i)),
+      })),
+    });
+
+    const listed = await service.getAdjustmentsByProduct(productId);
+
+    assert({
+      given: "101 adjustments of one product",
+      should: 'list the newest 100',
+      actual: [listed.length, listed[0].adjustedAt.toISOString()],
+      expected: [100, '2026-10-01T01:40:00.000Z'],
+    });
+  });
+});
+
+describe('InventoryAdjustmentService.getAdjustmentsByLocation (Postgres)', () => {
+  test('limits outside the allowed range', async () => {
+    const { id: sur } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Sur' } });
+    const { productId } = await productWithBatches([]);
+    const rows = Array.from({ length: 501 }, (_, i) => ({
+      locationId: sur, productId, type: 'FOUND' as const, quantity: 1, unitCost: 1, totalCost: 1,
+      adjustedAt: new Date(Date.UTC(2026, 9, 1, 0, i)),
+    }));
+    // In chunks: one 501-row insert crashes PGlite.
+    for (let i = 0; i < rows.length; i += 100) {
+      await prisma.inventoryAdjustment.createMany({ data: rows.slice(i, i + 100) });
+    }
+
+    const counts = [];
+    for (const limit of [undefined, 0, -1, 1000]) {
+      counts.push((await service.getAdjustmentsByLocation(sur, { limit })).length);
+    }
+
+    assert({
+      given: 'a missing, zero, negative and too-large limit',
+      should: 'apply the same default and cap as every other list',
+      actual: counts,
+      expected: [100, 100, 100, 500],
     });
   });
 });

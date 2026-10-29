@@ -683,6 +683,11 @@ model Transfer {
   receivedAt     DateTime?
   createdBy      String?
 
+  // Square sync of the receipt (sent once, on receive)
+  squareSynced    Boolean   @default(false)
+  squareSyncedAt  DateTime?
+  squareSyncError String?
+
   product      Product        @relation(fields: [productId], references: [id])
   fromLocation Location       @relation("TransferFrom", fields: [fromLocationId], references: [id])
   toLocation   Location       @relation("TransferTo", fields: [toLocationId], references: [id])

@@ -68,7 +68,7 @@ describe('InventoryReceivingService.receiveInventory request ids (Postgres)', ()
 
     const request = { locationId, productId, quantity: 5, unitCost: 2, clientRequestId };
     const outcomes = [];
-    for (const attempt of [{ locationId: norte }, { productId: 'other' }, { quantity: 6 }]) {
+    for (const attempt of [{ locationId: norte }, { productId: 'other' }, { quantity: 6 }, { unitCost: 3 }]) {
       outcomes.push(await service.receiveInventory({ ...request, ...attempt }).then(
         () => 'returned',
         (e: Error) => e.message,
@@ -76,10 +76,10 @@ describe('InventoryReceivingService.receiveInventory request ids (Postgres)', ()
     }
 
     assert({
-      given: 'the request id resent from another location, for another product, or with another quantity',
+      given: 'the request id resent from another location, for another product, with another quantity or another unit cost',
       should: 'refuse each instead of returning the original receiving, and add no stock',
       actual: [outcomes, (await prisma.inventory.aggregate({ where: { productId }, _sum: { quantity: true } }))._sum.quantity],
-      expected: [Array(3).fill('This clientRequestId was already used for a different receiving'), 5],
+      expected: [Array(4).fill('This clientRequestId was already used for a different receiving'), 5],
     });
   });
 
@@ -120,6 +120,68 @@ describe('InventoryReceivingService.receiveInventory input (Postgres)', () => {
       should: 'refuse each with a 400 and add no stock',
       actual: [outcomes, await prisma.inventory.count({ where: { productId } })],
       expected: [[400, 400, 400, 400], 0],
+    });
+  });
+});
+
+describe('InventoryReceivingService Square sync (Postgres)', () => {
+  test('Square rejecting a receipt, then a retry', async () => {
+    const batchCreateChanges = vi.fn()
+      .mockResolvedValueOnce({ errors: [{ code: 'SERVICE_UNAVAILABLE', detail: 'Square is down' }] })
+      .mockResolvedValue({ counts: [] });
+    const synced = new InventoryReceivingService(prisma);
+    synced['squareClient'] = { inventory: { batchCreateChanges } } as any;
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Sur' } });
+    await prisma.cutoverLock.create({ data: { locationId, cutoverDate: new Date('2026-09-01') } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    await prisma.catalogMapping.create({ data: { productId, squareVariationId: `v-${productId}` } });
+
+    const { receiving, squareSync } = await synced.receiveInventory({ locationId, productId, quantity: 3, unitCost: 5, syncToSquare: true });
+    const afterReceive = await prisma.inventoryReceiving.findUniqueOrThrow({ where: { id: receiving.id } });
+    const retry = await synced.retrySquareSync(receiving.id);
+    const afterRetry = await prisma.inventoryReceiving.findUniqueOrThrow({ where: { id: receiving.id } });
+
+    assert({
+      given: 'a receipt Square rejected, then retried while Square is up',
+      should: 'record the failure, then the success, both keyed on the receiving',
+      actual: [
+        squareSync,
+        [afterReceive.squareSynced, afterReceive.squareSyncError],
+        retry,
+        [afterRetry.squareSynced, afterRetry.squareSyncError, afterRetry.squareSyncedAt instanceof Date],
+        batchCreateChanges.mock.calls.map(([r]) => r.idempotencyKey),
+      ],
+      expected: [
+        { synced: false, error: 'Square is down' },
+        [false, 'Square is down'],
+        { synced: true },
+        [true, null, true],
+        [receiving.id, receiving.id],
+      ],
+    });
+  });
+});
+
+describe('InventoryReceivingService.getReceivingsByProduct (Postgres)', () => {
+  test("more of a product's receivings than a list holds", async () => {
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Poniente' } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    const batchIds = Array.from({ length: 101 }, () => crypto.randomUUID());
+    await prisma.inventory.createMany({ data: batchIds.map((id) => ({ id, productId, locationId, quantity: 1, unitCost: 1, receivedAt: new Date('2026-10-01') })) });
+    await prisma.inventoryReceiving.createMany({
+      data: batchIds.map((inventoryBatchId, i) => ({
+        locationId, productId, inventoryBatchId, quantity: 1, unitCost: 1, totalCost: 1,
+        receivedAt: new Date(Date.UTC(2026, 9, 1, 0, i)),
+      })),
+    });
+
+    const listed = await service.getReceivingsByProduct(productId);
+
+    assert({
+      given: "101 receivings of one product",
+      should: 'list the newest 100',
+      actual: [listed.length, listed[0].receivedAt.toISOString()],
+      expected: [100, '2026-10-01T01:40:00.000Z'],
     });
   });
 });

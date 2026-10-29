@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Body, Param, Query, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { TransferStatus } from '@prisma/client';
 import { TransferService } from './transfer.service';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
@@ -77,6 +78,21 @@ export class TransferController {
   }
 
   /**
+   * Resend a received transfer whose Square sync failed. OWNER only.
+   * POST /transfers/:id/retry-square-sync
+   */
+  @Post(':id/retry-square-sync')
+  @Roles('OWNER')
+  async retrySquareSync(@Param('id') id: string) {
+    const result = await this.transferService.retrySquareSync(id);
+    return {
+      success: result.synced,
+      message: result.synced ? 'Successfully synced to Square' : `Square sync failed: ${result.error}`,
+      data: result,
+    };
+  }
+
+  /**
    * List transfers. Non-owners are pinned to their own location (either
    * side of the transfer); owners can pass any locationId or omit it for all.
    * GET /transfers?locationId=&status=
@@ -84,11 +100,17 @@ export class TransferController {
   @Get()
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getTransfers(@Query('locationId') locationId: string, @Query('status') status: string, @Req() req: RoleGuardedRequest) {
+    if (status && !Object.values<string>(TransferStatus).includes(status)) {
+      throw new HttpException(
+        { success: false, message: `Invalid status. Must be one of: ${Object.keys(TransferStatus).join(', ')}` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const targetLocationId = scopedLocationId(req, locationId);
 
     const transfers = await this.transferService.getTransfers({
       locationId: targetLocationId || undefined,
-      status: status || undefined,
+      status: (status as TransferStatus) || undefined,
     });
 
     return { success: true, data: transfers };

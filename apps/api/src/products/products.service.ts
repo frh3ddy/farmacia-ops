@@ -77,6 +77,16 @@ export interface ImageUploadResult {
   message: string;
 }
 
+/** A selling price from untyped JSON: "abc" or NaN would reach the catalog and Square. */
+function assertSellingPrice(sellingPrice: unknown): void {
+  if (typeof sellingPrice !== 'number' || !Number.isFinite(sellingPrice)) {
+    throw new BadRequestException('El precio de venta debe ser un número');
+  }
+  if (sellingPrice < 0) {
+    throw new BadRequestException('El precio de venta no puede ser negativo');
+  }
+}
+
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
@@ -147,9 +157,7 @@ export class ProductsService {
     if (!name || name.trim().length === 0) {
       throw new BadRequestException('El nombre del producto es obligatorio');
     }
-    if (sellingPrice < 0) {
-      throw new BadRequestException('El precio de venta no puede ser negativo');
-    }
+    assertSellingPrice(sellingPrice);
     if (costPrice !== undefined && costPrice < 0) {
       throw new BadRequestException('El costo no puede ser negativo');
     }
@@ -560,9 +568,7 @@ export class ProductsService {
 
     this.logger.log(`[PRODUCT] Updating price for product ${productId} to $${sellingPrice} ${CURRENCY}${applyToAllLocations ? ' (all locations)' : ''}`);
 
-    if (sellingPrice < 0) {
-      throw new BadRequestException('El precio de venta no puede ser negativo');
-    }
+    assertSellingPrice(sellingPrice);
 
     // Find product with catalog mapping
     // Look for location-specific mapping first, then fall back to global mapping (locationId = null)

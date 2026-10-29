@@ -133,7 +133,6 @@ export class ExpenseController {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
 
-    // Use current location if not specified
     const locationId = body.locationId || currentLocation.locationId;
 
     if (!body.type || body.amount === undefined || !body.date) {

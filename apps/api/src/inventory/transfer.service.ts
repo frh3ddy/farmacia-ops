@@ -1,11 +1,13 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { TransferStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { listLimit } from './list-limit';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { assertCutOver } from './cutover-gate';
 import { buildTransferLines, resolveQuantityReceived } from './transfer';
 import { SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
-import { sendInventoryChanges } from './square-sync';
+import { findSquareVariationId, sendInventoryChanges } from './square-sync';
 
 export interface ShipTransferInput {
   productId: string;
@@ -72,11 +74,8 @@ export class TransferService {
       const to = squareIdOf.get(transfer.toLocationId);
       if (!from || !to) return { synced: false, error: 'Location not linked to Square' };
 
-      const catalogMapping = await this.prisma.catalogMapping.findFirst({
-        where: { productId: transfer.productId },
-        select: { squareVariationId: true },
-      });
-      if (!catalogMapping?.squareVariationId) return { synced: false, error: 'Product not mapped to Square catalog' };
+      const catalogObjectId = await findSquareVariationId(this.prisma, transfer.productId, transfer.fromLocationId);
+      if (!catalogObjectId) return { synced: false, error: 'Product not mapped to Square catalog' };
 
       const occurredAt = new Date().toISOString();
       const change = (
@@ -84,7 +83,7 @@ export class TransferService {
       ) => ({
         type: 'ADJUSTMENT' as const,
         adjustment: {
-          catalogObjectId: catalogMapping.squareVariationId,
+          catalogObjectId,
           fromLocationId,
           toLocationId,
           fromState: 'IN_STOCK' as const,
@@ -102,9 +101,9 @@ export class TransferService {
       if (changes.length === 0) return { synced: true };
 
       return await sendInventoryChanges(client, {
-        // Keyed on the transfer itself (not randomUUID()) so a retry of this
-        // receive call replays the same key — Square returns the original
-        // result instead of double-applying the stock change.
+        // Keyed on the transfer itself (not randomUUID()) so a retry
+        // (retrySquareSync) replays the same key — Square returns the
+        // original result instead of double-applying the stock change.
         idempotencyKey: transfer.id,
         changes,
       }, this.logger, 'transfer receive');
@@ -116,8 +115,8 @@ export class TransferService {
   }
 
   async ship(input: ShipTransferInput) {
-    if (input.quantity <= 0) {
-      throw new BadRequestException('La cantidad debe ser mayor que cero');
+    if (!Number.isInteger(input.quantity) || input.quantity <= 0) {
+      throw new BadRequestException('La cantidad debe ser un número entero mayor que cero');
     }
     if (input.fromLocationId === input.toLocationId) {
       throw new BadRequestException('La sucursal de origen y la de destino deben ser distintas');
@@ -137,38 +136,28 @@ export class TransferService {
 
     const reason = input.reason ?? `Transfer to ${toLocation.name}`;
 
-    // Consume FIFO from the origin — existing machinery, already returns a
-    // per-batch breakdown (consumptions) that's exactly what we need to
-    // build one-lot-per-line TransferLines without re-deriving anything.
-    const outResult = await this.adjustments.createAdjustment({
-      locationId: input.fromLocationId,
-      productId: input.productId,
-      type: 'TRANSFER_OUT',
-      quantity: -input.quantity,
-      reason,
-      notes: input.notes,
-      adjustedBy: input.createdBy,
-    });
+    // Consume FIFO from the origin and record the transfer in one transaction,
+    // so stock never leaves the origin without a transfer carrying it. The
+    // adjustment's per-batch consumptions become one TransferLine per lot.
+    const { outResult, transfer } = await this.prisma.$transaction(async (tx) => {
+      const outResult = await this.adjustments.createAdjustment({
+        locationId: input.fromLocationId,
+        productId: input.productId,
+        type: 'TRANSFER_OUT',
+        quantity: -input.quantity,
+        reason,
+        notes: input.notes,
+        adjustedBy: input.createdBy,
+      }, tx);
 
-    const consumptions = outResult.consumptions ?? [];
-    const sourceLots = await this.prisma.inventory.findMany({
-      where: { id: { in: consumptions.map((c) => c.inventoryId) } },
-      select: { id: true, receivedAt: true },
-    });
-    const receivedAtById = new Map(sourceLots.map((l) => [l.id, l.receivedAt]));
+      const consumptions = outResult.consumptions ?? [];
+      const sourceLots = await tx.inventory.findMany({
+        where: { id: { in: consumptions.map((c) => c.inventoryId) } },
+        select: { id: true, receivedAt: true },
+      });
+      const receivedAtById = new Map(sourceLots.map((l) => [l.id, l.receivedAt]));
 
-    const lineDrafts = buildTransferLines(
-      consumptions.map((c) => ({
-        inventoryId: c.inventoryId,
-        quantity: c.quantity,
-        unitCost: Number(c.unitCost),
-        receivedAt: receivedAtById.get(c.inventoryId)!,
-      })),
-    );
-
-    let transfer;
-    try {
-      transfer = await this.prisma.transfer.create({
+      const transfer = await tx.transfer.create({
         data: {
           productId: input.productId,
           fromLocationId: input.fromLocationId,
@@ -177,22 +166,23 @@ export class TransferService {
           status: 'IN_TRANSIT',
           shippedAt: new Date(),
           createdBy: input.createdBy,
-          lines: { create: lineDrafts },
+          lines: {
+            create: buildTransferLines(
+              consumptions.map((c) => ({
+                inventoryId: c.inventoryId,
+                quantity: c.quantity,
+                unitCost: Number(c.unitCost),
+                receivedAt: receivedAtById.get(c.inventoryId)!,
+              })),
+            ),
+          },
         },
         include: { lines: true },
       });
-    } catch (error) {
-      // Known gap, matches break-bulk's precedent: the ship-side adjustment
-      // already committed (stock is decremented) before this call — if
-      // creating the Transfer record itself fails, that stock is orphaned
-      // until reconciled manually. Surfaced clearly, not swallowed.
-      this.logger.error(
-        `[TRANSFER] Consumed ${input.quantity} of ${input.productId} at ${input.fromLocationId} (adjustment ${outResult.adjustment.id}) but failed to create the Transfer record — reconcile manually. Error: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      throw error;
-    }
+      return { outResult, transfer };
+    });
 
-    this.logger.log(`[TRANSFER] Shipped ${input.quantity} of ${input.productId} from ${input.fromLocationId} to ${input.toLocationId} as transfer ${transfer.id} (${lineDrafts.length} lot(s))`);
+    this.logger.log(`[TRANSFER] Shipped ${input.quantity} of ${input.productId} from ${input.fromLocationId} to ${input.toLocationId} as transfer ${transfer.id} (${transfer.lines.length} lot(s))`);
 
     return { transfer, shipAdjustment: outResult };
   }
@@ -210,13 +200,19 @@ export class TransferService {
       throw new BadRequestException(`La transferencia ${input.transferId} está ${transfer.status}; solo se puede recibir una en tránsito`);
     }
 
-    const lineIds = new Set(transfer.lines.map((l) => l.id));
+    const shippedByLineId = new Map(transfer.lines.map((l) => [l.id, l.quantity]));
     for (const r of input.lineReceipts ?? []) {
-      if (!lineIds.has(r.transferLineId)) {
+      const shipped = shippedByLineId.get(r.transferLineId);
+      if (shipped === undefined) {
         throw new BadRequestException(`La línea ${r.transferLineId} no pertenece a la transferencia ${input.transferId}`);
       }
       if (!Number.isInteger(r.quantityReceived) || r.quantityReceived < 0) {
         throw new BadRequestException(`La cantidad recibida en la línea ${r.transferLineId} debe ser un número entero, cero o mayor`);
+      }
+      if (r.quantityReceived > shipped) {
+        throw new BadRequestException(
+          `La cantidad recibida (${r.quantityReceived}) es mayor que la enviada (${shipped}) en la línea ${r.transferLineId}`,
+        );
       }
     }
     const overrideByLineId = new Map((input.lineReceipts ?? []).map((r) => [r.transferLineId, r.quantityReceived]));
@@ -237,11 +233,6 @@ export class TransferService {
 
       for (const line of transfer.lines) {
         const quantityReceived = resolveQuantityReceived(line.quantity, overrideByLineId.get(line.id));
-        if (quantityReceived > line.quantity) {
-          throw new BadRequestException(
-            `La cantidad recibida (${quantityReceived}) es mayor que la enviada (${line.quantity}) en la línea ${line.id}`,
-          );
-        }
         if (quantityReceived <= 0) {
           await tx.transferLine.update({ where: { id: line.id }, data: { quantityReceived: 0 } });
           continue;
@@ -283,10 +274,7 @@ export class TransferService {
       }
     });
 
-    let squareSync: { synced: boolean; error?: string } | undefined;
-    if (input.syncToSquare) {
-      squareSync = await this.syncReceiveToSquare(transfer, totalReceived);
-    }
+    const squareSync = input.syncToSquare ? await this.recordSquareSync(transfer, totalReceived) : undefined;
 
     this.logger.log(`[TRANSFER] Received ${totalReceived} of ${transfer.productId} at ${transfer.toLocationId} for transfer ${transfer.id}`);
 
@@ -297,16 +285,49 @@ export class TransferService {
     return { transfer: updated, totalReceived, squareSync };
   }
 
-  async getTransfers(options: { locationId?: string; status?: string }) {
-    const where: any = {};
-    if (options.locationId) {
-      where.OR = [{ fromLocationId: options.locationId }, { toLocationId: options.locationId }];
+  /**
+   * Resends a received transfer whose Square sync failed. Only a recorded
+   * failure is retried: a receipt never sent (or received before results were
+   * recorded) may already be in Square.
+   */
+  async retrySquareSync(transferId: string): Promise<{ synced: boolean; error?: string }> {
+    const transfer = await this.prisma.transfer.findUnique({ where: { id: transferId }, include: { lines: true } });
+    if (!transfer) {
+      throw new NotFoundException(`Transfer ${transferId} not found`);
     }
-    if (options.status) {
-      where.status = options.status;
+    if (transfer.squareSynced) {
+      return { synced: true };
     }
+    if (transfer.status !== 'RECEIVED' || !transfer.squareSyncError) {
+      throw new BadRequestException('Esta transferencia no tiene un envío fallido a Square que reintentar');
+    }
+    const received = transfer.lines.reduce((sum, l) => sum + (l.quantityReceived ?? 0), 0);
+    return this.recordSquareSync(transfer, received);
+  }
+
+  /** Sends a received transfer to Square and records the outcome on it. */
+  private async recordSquareSync(
+    transfer: Parameters<TransferService['syncReceiveToSquare']>[0],
+    received: number,
+  ): Promise<{ synced: boolean; error?: string }> {
+    const result = await this.syncReceiveToSquare(transfer, received);
+    await this.prisma.transfer.update({
+      where: { id: transfer.id },
+      data: {
+        squareSynced: result.synced,
+        squareSyncedAt: result.synced ? new Date() : null,
+        squareSyncError: result.error ?? null,
+      },
+    });
+    return result;
+  }
+
+  async getTransfers(options: { locationId?: string; status?: TransferStatus }) {
     return this.prisma.transfer.findMany({
-      where,
+      where: {
+        ...(options.locationId && { OR: [{ fromLocationId: options.locationId }, { toLocationId: options.locationId }] }),
+        ...(options.status && { status: options.status }),
+      },
       include: {
         lines: true,
         product: { select: { id: true, name: true, sku: true } },
@@ -314,6 +335,7 @@ export class TransferService {
         toLocation: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: 'desc' },
+      take: listLimit(undefined),
     });
   }
 }

@@ -9,7 +9,7 @@ import {
   SaleValidationError,
   UnmappedVariationError,
 } from './errors';
-import { mapVariationToProduct, type MappedProduct } from './catalog.mapper';
+import { findSquareVariationId, mapVariationToProduct, type MappedProduct } from './catalog.mapper';
 import { toSaleLines, type OrderLine } from './sale-lines';
 import { consumeBatchesFifo, type ConsumedBatch, type FifoConsumptionResult } from './fifo';
 import { debugLog } from './debug-log';
@@ -1013,14 +1013,14 @@ async function syncReturnToSquare(clientRequestId: string): Promise<void> {
 
   for (const { adjustment } of saleReturn.items) {
     if (adjustment.squareSynced) continue;
-    const mapping = await prisma.catalogMapping.findFirst({ where: { productId: adjustment.productId }, select: { squareVariationId: true } });
+    const catalogObjectId = await findSquareVariationId(prisma, adjustment.productId, adjustment.locationId);
     const record = (squareSyncError: string | null) =>
       prisma.inventoryAdjustment.update({
         where: { id: adjustment.id },
         data: { squareSynced: !squareSyncError, squareSyncedAt: squareSyncError ? null : new Date(), squareSyncError },
       });
-    if (!adjustment.location.squareId || !mapping) {
-      await record(!mapping ? 'Product not mapped to Square catalog' : 'Location not linked to Square');
+    if (!adjustment.location.squareId || !catalogObjectId) {
+      await record(!catalogObjectId ? 'Product not mapped to Square catalog' : 'Location not linked to Square');
       continue;
     }
 
@@ -1031,7 +1031,7 @@ async function syncReturnToSquare(clientRequestId: string): Promise<void> {
           {
             type: 'ADJUSTMENT',
             adjustment: {
-              catalogObjectId: mapping.squareVariationId,
+              catalogObjectId,
               fromLocationId: adjustment.location.squareId,
               toLocationId: adjustment.location.squareId,
               quantity: adjustment.quantity.toString(),

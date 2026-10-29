@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import type { PrismaService } from '../prisma/prisma.service';
+import type { Prisma } from '@prisma/client';
 
 /**
  * Refuses a stock movement at a location whose cutover hasn't finished, or one
@@ -7,7 +7,7 @@ import type { PrismaService } from '../prisma/prisma.service';
  * then the cutover will set the location's opening stock from Square's counts,
  * which would count the movement a second time (or drop it).
  */
-export async function assertCutOver(prisma: PrismaService, locationId: string, at: Date = new Date()): Promise<void> {
+export async function assertCutOver(prisma: Pick<Prisma.TransactionClient, 'cutoverLock'>, locationId: string, at: Date = new Date()): Promise<void> {
   const lock = await prisma.cutoverLock.findFirst({
     where: { OR: [{ locationId }, { locationId: null }], isLocked: true },
     orderBy: { cutoverDate: 'desc' },

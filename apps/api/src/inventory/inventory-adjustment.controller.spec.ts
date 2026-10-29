@@ -82,17 +82,6 @@ describe('InventoryAdjustmentController.getAdjustmentsByLocation', () => {
     });
   });
 
-  test('a very large limit', async () => {
-    const { controller, service } = controllerWithList();
-    await controller.getAdjustmentsByLocation('centro', undefined, undefined, undefined, '1000000');
-    assert({
-      given: 'a limit far beyond a page',
-      should: 'cap it',
-      actual: service.getAdjustmentsByLocation.mock.calls[0][1].limit,
-      expected: 500,
-    });
-  });
-
   test('a date-only range', async () => {
     const { controller, service } = controllerWithList();
     await controller.getAdjustmentsByLocation('centro', '2026-10-01');

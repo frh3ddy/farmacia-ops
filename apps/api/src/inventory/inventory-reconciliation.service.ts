@@ -43,7 +43,6 @@ export class InventoryReconciliationService {
       throw new NotFoundException(`Product ${productId} not found`);
     }
 
-    // Get consumption records for the period
     const consumptions = await this.prisma.inventoryConsumption.findMany({
       where: {
         inventory: {
