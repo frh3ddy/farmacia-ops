@@ -2,7 +2,8 @@ import { Injectable, Logger, BadRequestException, ConflictException, NotFoundExc
 import { PrismaService } from '../prisma/prisma.service';
 import { endOfBusinessDay } from './business-date';
 import { Prisma, AdjustmentType } from '@prisma/client';
-import { SquareClient, SquareEnvironment } from 'square';
+import { SquareClient } from 'square';
+import { createSquareClient, sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
 
 // ============================================================================
@@ -74,24 +75,7 @@ export class InventoryAdjustmentService {
   // Square Client
   // --------------------------------------------------------------------------
   private getSquareClient(): SquareClient | null {
-    if (!this.squareClient) {
-      const token = process.env.SQUARE_ACCESS_TOKEN?.trim();
-      if (!token) {
-        this.logger.warn('SQUARE_ACCESS_TOKEN not set - Square sync disabled');
-        return null;
-      }
-
-      const env = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-      const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-      const isSandbox = env === 'sandbox' || nodeEnv === 'development';
-
-      this.squareClient = new SquareClient({
-        token,
-        environment: isSandbox ? SquareEnvironment.Sandbox : SquareEnvironment.Production,
-        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
-      });
-    }
-    return this.squareClient;
+    return (this.squareClient ??= createSquareClient(this.logger));
   }
 
   // --------------------------------------------------------------------------
@@ -156,7 +140,7 @@ export class InventoryAdjustmentService {
       // Call Square Inventory API
       this.logger.log(`[SQUARE_SYNC] Syncing adjustment: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${Math.abs(quantityChange)}, ${fromState} → ${toState}, type=${adjustmentType}`);
       
-      const response = await client.inventory.batchCreateChanges({
+      return await sendInventoryChanges(client, {
         // Keyed on the adjustment record itself (not randomUUID()) so a
         // retry (retrySquareSync) replays the same key — Square returns the
         // original result instead of double-applying the stock change.
@@ -177,17 +161,7 @@ export class InventoryAdjustmentService {
             },
           },
         ],
-      });
-
-      if (response.errors && response.errors.length > 0) {
-        const errorMessage = response.errors.map(e => e.detail || e.code).join('; ');
-        this.logger.error(`[SQUARE_SYNC] Square rejected adjustment: ${errorMessage}`);
-        return { synced: false, error: errorMessage };
-      }
-
-      this.logger.log(`[SQUARE_SYNC] Successfully synced adjustment to Square. Response counts: ${JSON.stringify(response.counts || 'no counts')}`);
-      return { synced: true };
-
+      }, this.logger, 'adjustment');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(`[SQUARE_SYNC] Failed to sync to Square: ${errorMessage}`);
@@ -505,6 +479,9 @@ export class InventoryAdjustmentService {
 
     if (adjustment.squareSynced) {
       return { synced: true };
+    }
+    if (adjustment.type === 'TRANSFER_OUT' || adjustment.type === 'TRANSFER_IN') {
+      throw new BadRequestException('Transfer adjustments sync to Square when the transfer is received, not one by one');
     }
     return this.recordSquareSync(adjustment);
   }

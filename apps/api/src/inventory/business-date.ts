@@ -38,3 +38,8 @@ export function businessDay(date: Date): string {
 export function endOfBusinessDay(date = new Date()): Date {
   return parseBusinessDate(businessDay(date), 'end');
 }
+
+/** Midnight on the first of the Mexico City month that `date` falls in. */
+export function startOfBusinessMonth(date = new Date()): Date {
+  return parseBusinessDate(`${businessDay(date).slice(0, 7)}-01`, 'start');
+}

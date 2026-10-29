@@ -31,7 +31,6 @@ interface ReceiveInventoryDto {
   batchNumber?: string;
   expiryDate?: string;
   manufacturingDate?: string;
-  receivedBy?: string;
   notes?: string;
   syncToSquare?: boolean;
   clientRequestId?: string; // Dedup key for offline-queue replay (iOS)

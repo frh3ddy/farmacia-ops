@@ -35,8 +35,3 @@ export function buildTransferLines(consumedBatches: ConsumedBatchForTransfer[]):
 export function resolveQuantityReceived(quantityShipped: number, override?: number): number {
   return override ?? quantityShipped;
 }
-
-/** quantity - quantityReceived; the shortfall is a loss, never silently reconciled away. */
-export function discrepancy(quantityShipped: number, quantityReceived: number): number {
-  return quantityShipped - quantityReceived;
-}

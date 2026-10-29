@@ -2,7 +2,8 @@ import { Injectable, Logger, BadRequestException, ConflictException, NotFoundExc
 import { PrismaService } from '../prisma/prisma.service';
 import { listLimit } from './list-limit';
 import { Prisma } from '@prisma/client';
-import { SquareClient, SquareEnvironment } from 'square';
+import { SquareClient } from 'square';
+import { createSquareClient, sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
 
 // ============================================================================
@@ -64,24 +65,7 @@ export class InventoryReceivingService {
   // Square Client
   // --------------------------------------------------------------------------
   private getSquareClient(): SquareClient | null {
-    if (!this.squareClient) {
-      const token = process.env.SQUARE_ACCESS_TOKEN?.trim();
-      if (!token) {
-        this.logger.warn('SQUARE_ACCESS_TOKEN not set - Square sync disabled');
-        return null;
-      }
-
-      const env = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-      const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-      const isSandbox = env === 'sandbox' || nodeEnv === 'development';
-
-      this.squareClient = new SquareClient({
-        token,
-        environment: isSandbox ? SquareEnvironment.Sandbox : SquareEnvironment.Production,
-        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
-      });
-    }
-    return this.squareClient;
+    return (this.squareClient ??= createSquareClient(this.logger));
   }
 
   // --------------------------------------------------------------------------
@@ -123,7 +107,7 @@ export class InventoryReceivingService {
       // batchCreateChanges is the current method name in Square SDK
       this.logger.log(`[SQUARE_SYNC] Syncing receiving: catalogObjectId=${catalogMapping.squareVariationId}, locationId=${location.squareId}, quantity=${quantity}`);
       
-      const response = await client.inventory.batchCreateChanges({
+      return await sendInventoryChanges(client, {
         // Keyed on the receiving record itself (not randomUUID()) so a retry
         // (retrySquareSync) replays the same key — Square returns the
         // original result instead of double-applying the stock change.
@@ -143,17 +127,7 @@ export class InventoryReceivingService {
             },
           },
         ],
-      });
-
-      if (response.errors && response.errors.length > 0) {
-        const errorMessage = response.errors.map(e => e.detail || e.code).join('; ');
-        this.logger.error(`[SQUARE_SYNC] Square rejected receiving: ${errorMessage}`);
-        return { synced: false, error: errorMessage };
-      }
-
-      this.logger.log(`[SQUARE_SYNC] Successfully synced receiving to Square. Response counts: ${JSON.stringify(response.counts || 'no counts')}`);
-      return { synced: true };
-
+      }, this.logger, 'receiving');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(`[SQUARE_SYNC] Failed to sync receiving to Square: ${errorMessage}`);
@@ -570,7 +544,7 @@ export class InventoryReceivingService {
     }
 
     if (receiving.squareSynced) {
-      return { synced: true, error: 'Already synced' };
+      return { synced: true };
     }
 
     const result = await this.syncToSquare(

@@ -15,7 +15,7 @@ import {
 import { ExpenseService } from './expense.service';
 import { parseDateParam } from './business-date';
 import { ExpenseType } from '@prisma/client';
-import { AuthGuard, LocationGuard, Roles, Public, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, Public, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 /** A 400 naming the valid types unless `type` is one of them. */
 function assertExpenseType(type: unknown): void {
@@ -40,7 +40,6 @@ interface CreateExpenseDto {
   isPaid?: boolean;
   paidAt?: string;
   notes?: string;
-  createdBy?: string;
   clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
 }
 
@@ -78,8 +77,7 @@ export class ExpenseController {
     @Query('endDate') endDate?: string,
     @Query('includeMonthly') includeMonthly?: string
   ) {
-    const currentLocation = req.currentLocation;
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const summary = await this.expenseService.getExpenseSummary({
       locationId: targetLocationId,
@@ -105,9 +103,7 @@ export class ExpenseController {
     @Query('isPaid') isPaid?: string,
     @Query('limit') limit?: string
   ) {
-    const currentLocation = req.currentLocation;
-    // Non-OWNER can only see their current location's expenses
-    const targetLocationId = currentLocation.role === 'OWNER' ? locationId : currentLocation.locationId;
+    const targetLocationId = scopedLocationId(req, locationId);
 
     const expenses = await this.expenseService.listExpenses({
       locationId: targetLocationId,
