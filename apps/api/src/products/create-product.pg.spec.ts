@@ -142,6 +142,67 @@ describe('ProductsService.createProduct (Postgres)', () => {
     });
   });
 
+  test('sold at every store or at one', async () => {
+    const { products, square } = productsWithSquare();
+    const everywhere = `Todas-${Math.random()}`;
+    const toy = `Juguete-${Math.random()}`;
+    await create(products, { name: everywhere });
+    await create(products, { name: toy, soldAtAllLocations: false });
+    const presence = (name: string) =>
+      square.catalog.object.upsert.mock.calls
+        .filter(([r]: any) => r.object.itemData.name === name)
+        .map(([r]: any) => [
+          r.object.presentAtAllLocations,
+          r.object.presentAtLocationIds,
+          r.object.itemData.variations[0].presentAtAllLocations,
+          r.object.itemData.variations[0].presentAtLocationIds,
+        ]);
+
+    assert({
+      given: 'a product left at the default, then one sold only at Centro',
+      should: 'create the first sold everywhere, and the second with its item and variation present only at Centro',
+      actual: [
+        presence(everywhere),
+        presence(toy),
+        (await prisma.product.findFirst({ where: { name: toy } }))?.soldAtAllLocations,
+      ],
+      expected: [
+        [[undefined, undefined, undefined, undefined]],
+        [[false, ['SQ-CENTRO'], false, ['SQ-CENTRO']]],
+        false,
+      ],
+    });
+  });
+
+  test('sold at one store that is not in Square', async () => {
+    const { products, square } = productsWithSquare();
+    const { id: bodega } = await prisma.location.create({ data: { name: `Bodega-${Math.random()}` } });
+    const result = await create(products, { locationId: bodega, soldAtAllLocations: false });
+
+    assert({
+      given: 'a product sold only at a store with no Square location',
+      should: 'save it without creating it in Square, and say why',
+      actual: [square.catalog.object.upsert.mock.calls.length, result.squareSynced, /no está en Square/.test(result.message)],
+      expected: [0, false, true],
+    });
+  });
+
+  test('a medication without its ingredient list', async () => {
+    const { products } = productsWithSquare();
+    const labName = `Lab-${Math.random()}`;
+    const statuses = [
+      await statusOf(create(products, { labName, medication: { name: 'Paracetamol', form: 'TABLET', route: 'ORAL', strength: '500 mg' } } as any)),
+      await statusOf(create(products, { labName, costPrice: 'abc', medication: { name: 'Paracetamol', form: 'TABLET', route: 'ORAL', strength: '500 mg', activeIngredients: [{ name: `Activo-${labName}` }] } } as any)),
+    ];
+
+    assert({
+      given: 'a new laboratory with a medication missing its ingredient list, then with a bad cost',
+      should: 'refuse both with a 400 before creating the laboratory or ingredient',
+      actual: [statuses, await prisma.laboratory.count({ where: { name: labName } }), await prisma.activeIngredient.count({ where: { name: `Activo-${labName}` } })],
+      expected: [[400, 400], 0, 0],
+    });
+  });
+
   test('a name with spaces around it', async () => {
     const { products } = productsWithSquare();
     const result = await create(products, { name: '  Gel  ' });
