@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { InventoryReconciliationService } from './inventory-reconciliation.service';
+import { parseDateParam } from './business-date';
 import { AuthGuard, LocationGuard, Roles, assertLocationAccess, GuardedRequest } from '../auth/guards/auth.guard';
 
 @Controller('inventory/reconciliation')
@@ -37,17 +38,9 @@ export class InventoryReconciliationController {
     }
 
     // Default to last 30 days if no dates provided
-    const endDate = endDateStr ? new Date(endDateStr) : new Date();
-    const startDate = startDateStr
-      ? new Date(startDateStr)
-      : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-      throw new HttpException(
-        { success: false, message: 'La fecha no es válida' },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
+    const endDate = parseDateParam(endDateStr, 'endDate', 'end') ?? new Date();
+    const startDate = parseDateParam(startDateStr, 'startDate', 'start')
+      ?? new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const result = await this.reconciliationService.getConsumptionSummary(
       productId,

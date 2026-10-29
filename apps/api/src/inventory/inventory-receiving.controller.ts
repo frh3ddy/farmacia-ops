@@ -12,6 +12,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InventoryReceivingService } from './inventory-receiving.service';
+import { parseBusinessDate, parseDateParam } from './business-date';
 import { ProductsService } from '../products/products.service';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
@@ -43,22 +44,6 @@ interface ReceiveInventoryDto {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
-}
-
-/**
- * Parse a date string that could be either:
- * - Date-only: "2026-02-03" -> treated as local date (noon to avoid timezone edge cases)
- * - Full ISO: "2026-02-03T12:00:00Z" -> parsed as-is
- */
-function parseDateString(dateStr: string): Date {
-  // If it's a date-only string (YYYY-MM-DD), add noon time to avoid timezone issues
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    // Parse as local date at noon to avoid any timezone day-shift issues
-    const [year, month, day] = dateStr.split('-').map(Number);
-    return new Date(year, month - 1, day, 12, 0, 0);
-  }
-  // Otherwise parse as full ISO date
-  return new Date(dateStr);
 }
 
 // ============================================================================
@@ -101,7 +86,7 @@ export class InventoryReceivingController {
     let manufacturingDate: Date | undefined;
 
     if (body.expiryDate) {
-      expiryDate = parseDateString(body.expiryDate);
+      expiryDate = parseBusinessDate(body.expiryDate);
       if (isNaN(expiryDate.getTime())) {
         throw new HttpException(
           { success: false, message: 'La fecha de caducidad no es válida' },
@@ -111,7 +96,7 @@ export class InventoryReceivingController {
     }
 
     if (body.manufacturingDate) {
-      manufacturingDate = parseDateString(body.manufacturingDate);
+      manufacturingDate = parseBusinessDate(body.manufacturingDate);
       if (isNaN(manufacturingDate.getTime())) {
         throw new HttpException(
           { success: false, message: 'La fecha de fabricación no es válida' },
@@ -231,8 +216,8 @@ export class InventoryReceivingController {
     @Query('limit') limit?: string
   ) {
     const receivings = await this.receivingService.getReceivingsByLocation(locationId, {
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : undefined,
+      startDate: parseDateParam(startDate, 'startDate', 'start'),
+      endDate: parseDateParam(endDate, 'endDate', 'end'),
       supplierId,
       productId,
       limit: limit ? parseInt(limit, 10) : undefined,
@@ -276,8 +261,8 @@ export class InventoryReceivingController {
   ) {
     const summary = await this.receivingService.getReceivingSummary(
       locationId,
-      startDate ? new Date(startDate) : undefined,
-      endDate ? new Date(endDate) : undefined
+      parseDateParam(startDate, 'startDate', 'start'),
+      parseDateParam(endDate, 'endDate', 'end')
     );
     return {
       success: true,
