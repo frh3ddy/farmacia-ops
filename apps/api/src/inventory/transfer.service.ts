@@ -231,6 +231,15 @@ export class TransferService {
       throw new BadRequestException(`La transferencia ${input.transferId} está ${transfer.status}; solo se puede recibir una en tránsito`);
     }
 
+    const lineIds = new Set(transfer.lines.map((l) => l.id));
+    for (const r of input.lineReceipts ?? []) {
+      if (!lineIds.has(r.transferLineId)) {
+        throw new BadRequestException(`La línea ${r.transferLineId} no pertenece a la transferencia ${input.transferId}`);
+      }
+      if (!Number.isInteger(r.quantityReceived) || r.quantityReceived < 0) {
+        throw new BadRequestException(`La cantidad recibida en la línea ${r.transferLineId} debe ser un número entero, cero o mayor`);
+      }
+    }
     const overrideByLineId = new Map((input.lineReceipts ?? []).map((r) => [r.transferLineId, r.quantityReceived]));
     const now = new Date();
     let totalReceived = 0;

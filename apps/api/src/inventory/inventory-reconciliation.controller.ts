@@ -49,33 +49,23 @@ export class InventoryReconciliationController {
       );
     }
 
-    try {
-      const result = await this.reconciliationService.getConsumptionSummary(
-        productId,
-        locationId,
-        startDate,
-        endDate,
-      );
+    const result = await this.reconciliationService.getConsumptionSummary(
+      productId,
+      locationId,
+      startDate,
+      endDate,
+    );
 
-      return {
-        success: true,
-        summary: {
-          ...result,
-          totalCostConsumed: result.totalCostConsumed.toString(),
-          averageUnitCost: result.averageUnitCost.toString(),
-          periodStart: result.periodStart.toISOString(),
-          periodEnd: result.periodEnd.toISOString(),
-        },
-      };
-    } catch (error) {
-      throw new HttpException(
-        {
-          success: false,
-          message: `Failed to get consumption summary: ${error instanceof Error ? error.message : String(error)}`,
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return {
+      success: true,
+      summary: {
+        ...result,
+        totalCostConsumed: result.totalCostConsumed.toString(),
+        averageUnitCost: result.averageUnitCost.toString(),
+        periodStart: result.periodStart.toISOString(),
+        periodEnd: result.periodEnd.toISOString(),
+      },
+    };
   }
 
   /**

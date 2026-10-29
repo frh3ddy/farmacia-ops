@@ -119,3 +119,30 @@ describe('TransferService (Postgres, Square recorded)', () => {
     });
   });
 });
+
+describe('TransferService.receive line receipts (Postgres)', () => {
+  test('receipts that do not fit the transfer', async () => {
+    const { transfers, productId } = await transferSetup();
+    const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 });
+    const [line] = transfer.lines;
+
+    const outcomes = [];
+    for (const receipt of [
+      { transferLineId: 'not-a-line', quantityReceived: 6 },
+      { transferLineId: line.id, quantityReceived: -1 },
+      { transferLineId: line.id, quantityReceived: 1.5 },
+    ]) {
+      outcomes.push(await transfers.receive({ transferId: transfer.id, lineReceipts: [receipt] }).then(
+        () => 'received',
+        (e: any) => e.status,
+      ));
+    }
+
+    assert({
+      given: "a receipt for another transfer's line, a negative quantity and a fractional one",
+      should: 'refuse each with a 400 and leave the transfer in transit',
+      actual: [outcomes, (await prisma.transfer.findUnique({ where: { id: transfer.id } }))?.status],
+      expected: [[400, 400, 400], 'IN_TRANSIT'],
+    });
+  });
+});

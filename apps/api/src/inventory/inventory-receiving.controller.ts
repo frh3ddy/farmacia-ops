@@ -88,25 +88,10 @@ export class InventoryReceivingController {
     const locationId = body.locationId || currentLocation.locationId;
 
     // Validate required fields
-    if (!body.productId || !body.quantity || body.unitCost === undefined) {
+    // quantity and unitCost are checked by the service
+    if (!body.productId) {
       throw new HttpException(
-        { success: false, message: 'Missing required fields: productId, quantity, unitCost' },
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    // Validate quantity
-    if (body.quantity <= 0) {
-      throw new HttpException(
-        { success: false, message: 'La cantidad debe ser mayor que cero' },
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    // Validate unit cost
-    if (body.unitCost < 0) {
-      throw new HttpException(
-        { success: false, message: 'El costo unitario no puede ser negativo' },
+        { success: false, message: 'Missing required field: productId' },
         HttpStatus.BAD_REQUEST
       );
     }

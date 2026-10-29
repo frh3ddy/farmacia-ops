@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { listLimit } from './list-limit';
 import { Prisma, ExpenseType } from '@prisma/client';
 
 // ============================================================================
@@ -208,7 +209,7 @@ export class ExpenseService {
         location: { select: { id: true, name: true } },
       },
       orderBy: { date: 'desc' },
-      take: limit || 100,
+      take: listLimit(limit),
     });
   }
 
