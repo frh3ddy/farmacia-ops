@@ -592,7 +592,7 @@ export class ProductsController {
   /**
    * Update product price
    * PATCH /products/:id/price
-   * Roles: OWNER, MANAGER
+   * Roles: OWNER, MANAGER (a manager prices only their own location)
    */
   @Patch(':id/price')
   @Roles('OWNER', 'MANAGER')
@@ -613,6 +613,12 @@ export class ProductsController {
       throw new HttpException(
         { success: false, message: 'Location ID is required' },
         HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (req.currentLocation?.role !== 'OWNER' && (body.applyToAllLocations === true || locationId !== req.currentLocation?.locationId)) {
+      throw new HttpException(
+        { success: false, message: 'Solo el dueño puede cambiar el precio de otras sucursales' },
+        HttpStatus.FORBIDDEN,
       );
     }
 

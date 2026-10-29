@@ -1,21 +1,17 @@
 /**
  * Shared shape + mapper for a Product as shown in catalog search / equivalence
  * results. Mirrors the availability/price computation already used by
- * ProductsService.getProducts (mapping preference: location-specific over
- * global, sum of inventories.quantity) so search results stay consistent
+ * ProductsService.getProducts (mapping preference: preferredMapping, sum of
+ * inventories.quantity) so search results stay consistent
  * with the rest of the app.
  */
 import { Prisma } from '@prisma/client';
+import { preferredMapping } from '../inventory/square-sync';
 
 export const CATALOG_PRODUCT_INCLUDE = (locationId?: string) =>
   ({
     laboratory: { select: { id: true, name: true } },
-    catalogMappings: {
-      where: locationId
-        ? { OR: [{ locationId }, { locationId: null }] }
-        : undefined,
-      orderBy: { locationId: 'desc' as const },
-    },
+    catalogMappings: { orderBy: { createdAt: 'desc' as const } },
     inventories: locationId ? { where: { locationId } } : true,
   }) satisfies Prisma.ProductInclude;
 
@@ -40,10 +36,7 @@ export type CatalogProductView = {
 };
 
 export function toProductView(product: CatalogProduct, locationId?: string): CatalogProductView {
-  const mapping = locationId
-    ? (product.catalogMappings.find((m) => m.locationId === locationId) ??
-      product.catalogMappings.find((m) => m.locationId === null))
-    : product.catalogMappings[0];
+  const mapping = preferredMapping(product.catalogMappings, locationId);
 
   const quantity = product.inventories.reduce((sum, inv) => sum + inv.quantity, 0);
 

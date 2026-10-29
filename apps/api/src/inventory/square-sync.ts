@@ -4,12 +4,26 @@ import { Square, SquareClient } from 'square';
 
 export type SquareSyncResult = { synced: boolean; error?: string };
 
+type MappingRef = { squareVariationId: string; locationId: string | null };
+
+/** A real Square item, not a `local_` placeholder (a product or price saved without one). */
+export const isSquareMapping = (m: MappingRef) => !m.squareVariationId.startsWith('local_');
+
 /**
- * The Square item a product's stock change at a location is sent under: the
- * location's mapping, else the global one, else any — Square items are the
- * same at every location. Never a `local_` placeholder (a product or price
- * saved without a Square item); null when only those exist.
+ * The mapping a product is read or synced through at a location: the
+ * location's, else the global one, else any — Square items are the same at
+ * every location — with real Square items before placeholders. Another
+ * location's placeholder never counts here.
  */
+export function preferredMapping<T extends MappingRef>(mappings: T[], locationId?: string): T | undefined {
+  const where = (m: T) => (m.locationId === locationId ? 0 : m.locationId === null ? 1 : 2);
+  return mappings
+    .filter((m) => isSquareMapping(m) || !locationId || where(m) < 2)
+    .map((m) => ({ m, rank: (isSquareMapping(m) ? 0 : 3) + where(m) }))
+    .sort((a, b) => a.rank - b.rank)[0]?.m;
+}
+
+/** The Square item a product's stock change at a location is sent under; null when it has none. */
 export async function findSquareVariationId(
   prisma: Pick<Prisma.TransactionClient, 'catalogMapping'>,
   productId: string,
@@ -19,10 +33,7 @@ export async function findSquareVariationId(
     where: { productId, NOT: { squareVariationId: { startsWith: 'local_' } } },
     select: { squareVariationId: true, locationId: true },
   });
-  const preferred = mappings.find((m) => m.locationId === locationId)
-    ?? mappings.find((m) => m.locationId === null)
-    ?? mappings[0];
-  return preferred?.squareVariationId ?? null;
+  return preferredMapping(mappings, locationId)?.squareVariationId ?? null;
 }
 
 /** Sends the changes; Square's rejection comes back as { synced: false, error }. Thrown errors are the caller's. */
