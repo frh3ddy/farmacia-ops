@@ -4,7 +4,8 @@ import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { assertCutOver } from './cutover-gate';
 import { buildTransferLines, resolveQuantityReceived } from './transfer';
 import { SquareClient } from 'square';
-import { createSquareClient, sendInventoryChanges } from './square-sync';
+import { createSquareClient } from '../square/square-client';
+import { sendInventoryChanges } from './square-sync';
 
 export interface ShipTransferInput {
   productId: string;
@@ -45,7 +46,7 @@ export class TransferService {
   ) {}
 
   private getSquareClient(): SquareClient | null {
-    return (this.squareClient ??= createSquareClient(this.logger));
+    return (this.squareClient ??= createSquareClient());
   }
 
   /**

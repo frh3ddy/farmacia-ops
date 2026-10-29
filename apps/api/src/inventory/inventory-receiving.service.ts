@@ -3,7 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { listLimit } from './list-limit';
 import { Prisma } from '@prisma/client';
 import { SquareClient } from 'square';
-import { createSquareClient, sendInventoryChanges } from './square-sync';
+import { createSquareClient } from '../square/square-client';
+import { sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
 
 // ============================================================================
@@ -65,7 +66,7 @@ export class InventoryReceivingService {
   // Square Client
   // --------------------------------------------------------------------------
   private getSquareClient(): SquareClient | null {
-    return (this.squareClient ??= createSquareClient(this.logger));
+    return (this.squareClient ??= createSquareClient());
   }
 
   // --------------------------------------------------------------------------

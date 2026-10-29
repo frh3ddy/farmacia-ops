@@ -3,7 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { endOfBusinessDay } from './business-date';
 import { Prisma, AdjustmentType } from '@prisma/client';
 import { SquareClient } from 'square';
-import { createSquareClient, sendInventoryChanges } from './square-sync';
+import { createSquareClient } from '../square/square-client';
+import { sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
 
 // ============================================================================
@@ -75,7 +76,7 @@ export class InventoryAdjustmentService {
   // Square Client
   // --------------------------------------------------------------------------
   private getSquareClient(): SquareClient | null {
-    return (this.squareClient ??= createSquareClient(this.logger));
+    return (this.squareClient ??= createSquareClient());
   }
 
   // --------------------------------------------------------------------------

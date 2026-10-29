@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { SquareClient, SquareEnvironment } from 'square';
+import { SquareClient } from 'square';
+import { createSquareClient } from '../square/square-client';
 import { Prisma, PackagingType } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { deriveName, derivePresentation, type Substance } from './derived-naming';
@@ -87,39 +88,9 @@ export class ProductsService {
    * Get or create Square client
    */
   private getSquareClient(): SquareClient {
+    this.squareClient ??= createSquareClient();
     if (!this.squareClient) {
-      const squareAccessToken = process.env.SQUARE_ACCESS_TOKEN?.trim();
-
-      if (!squareAccessToken) {
-        throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
-      }
-
-      // Determine Square environment
-      let squareEnvironment: SquareEnvironment;
-      const nodeEnv = process.env.NODE_ENV?.toLowerCase();
-      const railwayEnv = process.env.RAILWAY_ENVIRONMENT?.toLowerCase();
-      const squareEnv = process.env.SQUARE_ENVIRONMENT?.toLowerCase();
-
-      if (
-        squareEnv === 'sandbox' ||
-        nodeEnv === 'development' ||
-        nodeEnv === 'dev' ||
-        railwayEnv === 'staging' ||
-        railwayEnv === 'development'
-      ) {
-        squareEnvironment = SquareEnvironment.Sandbox;
-      } else {
-        squareEnvironment = SquareEnvironment.Production;
-      }
-
-      this.logger.log(`[SQUARE] Initializing Square client with environment: ${squareEnvironment === SquareEnvironment.Sandbox ? 'SANDBOX' : 'PRODUCTION'}`);
-      this.logger.log(`[SQUARE] Environment vars: NODE_ENV=${nodeEnv}, SQUARE_ENVIRONMENT=${squareEnv}, RAILWAY_ENVIRONMENT=${railwayEnv}`);
-
-      this.squareClient = new SquareClient({
-        token: squareAccessToken,
-        environment: squareEnvironment,
-        version: '2026-09-16', // pinned so an SDK bump can't silently change behavior
-      });
+      throw new Error('SQUARE_ACCESS_TOKEN environment variable is not set');
     }
     return this.squareClient;
   }
