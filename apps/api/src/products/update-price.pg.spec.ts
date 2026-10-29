@@ -42,22 +42,22 @@ const variation = (id: string) => ({
   },
 });
 
-/** The service over a recorded Square catalog. */
-function productsWithSquare() {
+/** The service over a recorded Square catalog; `upsert` is what Square answers a write with. */
+function productsWithSquare(upsert = vi.fn().mockResolvedValue({})) {
   const products = new ProductsService(prisma);
   const catalog = {
     object: {
       get: vi.fn(async ({ objectId }: { objectId: string }) => ({ object: variation(objectId) })),
-      upsert: vi.fn().mockResolvedValue({}),
+      upsert,
     },
   };
   products['squareClient'] = { catalog } as any;
   return { products, catalog };
 }
 
-/** Square items created through the recorded catalog (a variation update is not one). */
-const itemsCreated = (catalog: ReturnType<typeof productsWithSquare>['catalog']) =>
-  catalog.object.upsert.mock.calls.filter(([r]) => r.object.type === 'ITEM').length;
+/** Square items created through the recorded catalog (a variation update is not one), optionally only those named `name`. */
+const itemsCreated = (catalog: ReturnType<typeof productsWithSquare>['catalog'], name?: string) =>
+  catalog.object.upsert.mock.calls.filter(([r]) => r.object.type === 'ITEM' && (!name || r.object.itemData.name === name)).length;
 
 async function productWithMappings(mappings: Array<{ squareVariationId: string; locationId: string | null; priceCents: number }>) {
   const product = await prisma.product.create({ data: { name: `Producto-${Math.random()}` } });
@@ -133,6 +133,41 @@ describe('ProductsService.updatePrice (Postgres)', () => {
   });
 });
 
+describe('ProductsService.updatePrice when Square fails (Postgres)', () => {
+  test('Square rejecting the change', async () => {
+    const { products } = productsWithSquare(vi.fn().mockRejectedValue(new Error('Square is down')));
+    const inSquare = await productWithMappings([{ squareVariationId: `VAR-F-${Math.random()}`, locationId: null, priceCents: 3000 }]);
+    const localOnly = await productWithMappings([{ squareVariationId: `local_f-${Math.random()}`, locationId: centro, priceCents: 3000 }]);
+
+    const statuses = [];
+    for (const [productId, applyToAllLocations] of [[inSquare, true], [inSquare, false], [localOnly, false]] as const) {
+      statuses.push(await products.updatePrice({ productId, sellingPrice: 40, locationId: centro, applyToAllLocations }).then(() => 200, (e: any) => e.status));
+    }
+
+    assert({
+      given: 'Square failing a price for every store, for one store, and the first price that creates a local product in Square',
+      should: 'refuse each with a 502 and leave every stored price as it was',
+      actual: [statuses, (await cachedPrices(inSquare)).map(([, , cents]) => cents), (await cachedPrices(localOnly)).map(([, , cents]) => cents)],
+      expected: [[502, 502, 502], [3000], [3000]],
+    });
+  });
+
+  test('a store with no Square location', async () => {
+    const { products, catalog } = productsWithSquare();
+    const { id: bodega } = await prisma.location.create({ data: { name: `Bodega-${Math.random()}` } });
+    const productId = await productWithMappings([{ squareVariationId: `VAR-B-${Math.random()}`, locationId: null, priceCents: 3000 }]);
+
+    const result = await products.updatePrice({ productId, sellingPrice: 45, locationId: bodega });
+
+    assert({
+      given: "one store's price at a store that has no Square location",
+      should: 'save it in the app only, without calling Square, and say so',
+      actual: [catalog.object.upsert.mock.calls.length, result.squareSynced, /solo en la app/.test(result.message)],
+      expected: [0, false, true],
+    });
+  });
+});
+
 describe('ProductsService.updatePrice for Yastás (Postgres)', () => {
   test('a Yastás product', async () => {
     const { products, catalog } = productsWithSquare();
@@ -163,12 +198,13 @@ describe('ProductsService.syncUnsyncedProducts (Postgres)', () => {
     ]);
 
     const result = await products.syncUnsyncedProducts(centro);
+    const { name } = (await prisma.product.findUnique({ where: { id: productId } }))!;
 
     assert({
       given: "a Centro placeholder for a product already in Square under Norte's mapping",
       should: 'point the placeholder at the real Square item instead of creating a second one',
-      actual: [itemsCreated(catalog), result.synced, await cachedPrices(productId)],
-      expected: [0, 1, [['VAR-3', 'norte', 3000], ['VAR-3', 'centro', 3200]]],
+      actual: [itemsCreated(catalog, name), result.results.find((r) => r.productId === productId)?.success, await cachedPrices(productId)],
+      expected: [0, true, [['VAR-3', 'norte', 3000], ['VAR-3', 'centro', 3200]]],
     });
   });
 });
@@ -195,7 +231,8 @@ describe('A product sold at one store reaching Square later (Postgres)', () => {
     await synced.products.syncUnsyncedProducts(centro);
     const priced = productsWithSquare();
     const otherToy = await oneStoreProduct();
-    await priced.products.updatePrice({ productId: otherToy.id, sellingPrice: 99, locationId: centro });
+    // The fake answers the create with no item, so the price change itself is refused.
+    await priced.products.updatePrice({ productId: otherToy.id, sellingPrice: 99, locationId: centro }).catch(() => {});
 
     assert({
       given: 'a product sold only at Centro reaching Square through "sync to Square", then through its first price',
@@ -210,6 +247,24 @@ describe('A product sold at one store reaching Square later (Postgres)', () => {
 });
 
 describe('ProductsService reads (Postgres)', () => {
+  test("a product's recent receivings", async () => {
+    const products = new ProductsService(prisma);
+    const productId = await productWithMappings([]);
+    for (const locationId of [centro, norte]) {
+      const batch = await prisma.inventory.create({ data: { productId, locationId, quantity: 1, unitCost: 10, receivedAt: new Date('2026-10-01') } });
+      await prisma.inventoryReceiving.create({ data: { productId, locationId, quantity: 1, unitCost: 10, totalCost: 10, inventoryBatchId: batch.id } });
+    }
+
+    const { data } = await products.getProduct(productId, centro);
+
+    assert({
+      given: 'receivings at Centro and Norte, read for Centro',
+      should: "show only Centro's",
+      actual: data.receivings.map((r) => r.locationId),
+      expected: [centro],
+    });
+  });
+
   test('a product mapped only under another location', async () => {
     const products = new ProductsService(prisma);
     const before = (await products.getProductCounts(centro)).data;
