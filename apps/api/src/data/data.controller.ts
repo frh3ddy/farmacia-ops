@@ -92,32 +92,10 @@ export class DataController {
     };
   }
 
-  @Get('sales')
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async getSales() {
-    const sales = await this.prisma.sale.findMany({
-      include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
-        location: true,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    return {
-      success: true,
-      data: sales,
-      count: sales.length,
-    };
-  }
-
+  // Every batch with its unit cost, across all branches (no location scoping):
+  // owners only — they may see every branch. Stays readable in production.
   @Get('inventory')
-  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  @Roles('OWNER')
   async getInventory() {
     const inventory = await this.prisma.inventory.findMany({
       include: {
