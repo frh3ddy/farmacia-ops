@@ -29,11 +29,14 @@ vi.mock("../../lib/apiFetch", () => ({
             returnedAt: "2026-10-27T19:00:00Z",
             reason: "Caducidad cercana",
             revenue: "45",
+            cashRefunded: "45",
             returnedByName: "Ana",
             sale: { location: { name: "Oriente" } },
             items: [{ id: "ri-1", quantity: 1, saleItem: { product: { name: "Jarabe" } }, adjustment: { squareSynced: false, squareSyncError: "Square is down" } }],
           },
         ],
+        cashByDay: [{ day: "2026-10-27", location: "Oriente", cash: "60.5" }],
+        failed: [{ jobId: "j-2", saleId: "s-2", items: [], reason: "Roto", error: "Solo quedan 0 de Jarabe por devolver", failedAt: "2026-10-28T10:00:00Z" }],
       };
     return { success: true, queued: true };
   }),
@@ -64,6 +67,14 @@ describe("ReturnsHistoryScreen", () => {
     render(<ReturnsHistoryScreen />);
     expect(await screen.findByText(/Ana/)).toBeTruthy();
     expect(screen.getByText(/1 × Jarabe/)).toBeTruthy();
+    expect(screen.getByText(/Efectivo devuelto: \$45\.00/)).toBeTruthy();
     expect(screen.getByText("Sin actualizar en Square: Square is down")).toBeTruthy();
+  });
+
+  it("totals the cash paid back per day and store, and shows returns that were never recorded", async () => {
+    render(<ReturnsHistoryScreen />);
+    expect(await screen.findByText("2026-10-27 · Oriente")).toBeTruthy();
+    expect(screen.getByText("$60.50")).toBeTruthy();
+    expect(screen.getByText(/No se registró: Solo quedan 0 de Jarabe por devolver/)).toBeTruthy();
   });
 });

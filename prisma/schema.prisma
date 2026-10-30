@@ -471,7 +471,8 @@ model Sale {
 }
 
 /// Items a customer brought back from a sale. Revenue and cost are what the
-/// returned units took off the sale's totals.
+/// returned units gave back; reports count them on `returnedAt`, and the sale
+/// keeps its totals as sold.
 model SaleReturn {
   id              String   @id @default(uuid())
   saleId          String
@@ -481,6 +482,7 @@ model SaleReturn {
   returnedAt      DateTime @default(now())
   revenue         Decimal
   cost            Decimal
+  cashRefunded    Decimal? // paid back in cash outside Square (a return by hand); null when Square refunded it
 
   sale  Sale             @relation(fields: [saleId], references: [id])
   items SaleReturnItem[]

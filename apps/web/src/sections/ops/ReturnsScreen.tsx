@@ -8,9 +8,16 @@ type SaleReturn = {
   returnedAt: string;
   reason: string | null;
   revenue: string;
+  cashRefunded: string | null;
   returnedByName: string | null;
   sale: { location: { name: string } };
   items: { id: string; quantity: number; saleItem: { product: { name: string } }; adjustment: { squareSynced: boolean; squareSyncError: string | null } }[];
+};
+
+type History = {
+  data: SaleReturn[];
+  cashByDay: { day: string; location: string; cash: string }[];
+  failed: { jobId: string; reason?: string; error: string; failedAt: string }[];
 };
 
 const left = (item: SaleItem) => item.quantity - item.returns.reduce((n, r) => n + r.quantity, 0);
@@ -42,7 +49,8 @@ export function ReturnsScreen() {
     <div className="max-w-3xl">
       <h1 className="mb-1 text-xl font-semibold text-(--color-ink)">Devoluciones</h1>
       <p className="mb-4 text-sm text-(--color-ink-secondary)">
-        Ventas de los últimos 3 días. Lo devuelto regresa a la existencia y se descuenta de la venta.
+        Ventas de los últimos 3 días. Lo devuelto regresa a la existencia y cuenta como devolución del día; se
+        paga en efectivo.
       </p>
       {sales.length === 0 ? (
         <p className="text-sm text-(--color-ink-tertiary)">No hay ventas recientes.</p>
@@ -142,23 +150,50 @@ function ReturnForm({ sale, onReturned }: { sale: RecentSale; onReturned: (items
   );
 }
 
-/** Every return, newest first, with who made it (owners and managers). */
+/**
+ * Every return, newest first, with who made it (owners and managers); the cash
+ * returns by hand paid back per day and store; and returns never recorded.
+ */
 export function ReturnsHistoryScreen() {
-  const [returns, setReturns] = useState<SaleReturn[] | null>(null);
+  const [history, setHistory] = useState<History | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<{ data: SaleReturn[] }>("/api/sales/returns")
-      .then(body => setReturns(body.data))
+    apiFetch<History>("/api/sales/returns")
+      .then(setHistory)
       .catch(err => setError(err instanceof ApiError ? err.message : "No se pudieron cargar las devoluciones"));
   }, []);
 
   if (error) return <p className="text-sm text-(--color-destructive)">{error}</p>;
-  if (!returns) return <p className="text-sm text-(--color-ink-tertiary)">Cargando…</p>;
+  if (!history) return <p className="text-sm text-(--color-ink-tertiary)">Cargando…</p>;
+  const { data: returns, cashByDay, failed } = history;
 
   return (
     <div className="max-w-3xl">
       <h1 className="mb-4 text-xl font-semibold text-(--color-ink)">Historial de devoluciones ({returns.length})</h1>
+      {failed.length > 0 && (
+        <ul className="mb-4 space-y-1 rounded-md border border-(--color-destructive) p-3 text-sm text-(--color-destructive)">
+          {failed.map(f => (
+            <li key={f.jobId}>
+              {dateTime(f.failedAt)} · No se registró: {f.error}
+              {f.reason && ` (${f.reason})`}
+            </li>
+          ))}
+        </ul>
+      )}
+      {cashByDay.length > 0 && (
+        <section className="mb-4">
+          <h2 className="mb-1 text-sm font-medium text-(--color-ink)">Efectivo devuelto (últimos 31 días)</h2>
+          <ul className="divide-y divide-(--color-border-standard) rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) text-sm">
+            {cashByDay.map(c => (
+              <li key={`${c.day}|${c.location}`} className="flex justify-between p-2">
+                <span className="text-(--color-ink-secondary)">{`${c.day} · ${c.location}`}</span>
+                <span className="font-medium text-(--color-ink)">${Number(c.cash).toFixed(2)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {returns.length === 0 ? (
         <p className="text-sm text-(--color-ink-tertiary)">Sin devoluciones.</p>
       ) : (
@@ -172,6 +207,7 @@ export function ReturnsHistoryScreen() {
                 {dateTime(r.returnedAt)} · {r.sale.location.name} · {r.returnedByName ?? "—"}
                 {r.reason && ` · ${r.reason}`}
               </p>
+              {r.cashRefunded && <p className="text-(--color-ink-tertiary)">Efectivo devuelto: ${Number(r.cashRefunded).toFixed(2)}</p>}
               {r.items
                 .filter(i => !i.adjustment.squareSynced && i.adjustment.squareSyncError)
                 .map(i => (

@@ -8,6 +8,8 @@ type UnmatchedLine = {
   quantity: number;
   amount: string;
   sale: { createdAt: string; location: { id: string; name: string } };
+  /** The last match the worker gave up on, if any. */
+  matchError: { error: string } | null;
 };
 
 /**
@@ -57,6 +59,7 @@ export function UnmatchedLinesScreen() {
                   {new Date(l.sale.createdAt).toLocaleDateString("es-MX")}
                 </span>
               </button>
+              {l.matchError && <p className="mt-1 text-sm text-(--color-destructive)">No se pudo asignar: {l.matchError.error}</p>}
               {openId === l.id && <MatchForm line={l} onMatched={() => remove(l.id)} />}
             </li>
           ))}

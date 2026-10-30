@@ -42,8 +42,11 @@ describe('businessDay', () => {
   });
 
   test("the margin report's daily trend", async () => {
-    const item = { productId: 'p1', product: { name: 'P' }, quantity: 1, price: new Prisma.Decimal(10), cost: new Prisma.Decimal(4), returns: [] };
-    const prisma = { sale: { findMany: vi.fn().mockResolvedValue([{ createdAt: new Date('2026-10-29T02:00:00Z'), items: [item] }]) } };
+    const item = { productId: 'p1', product: { name: 'P' }, quantity: 1, price: new Prisma.Decimal(10), cost: new Prisma.Decimal(4) };
+    const prisma = {
+      sale: { findMany: vi.fn().mockResolvedValue([{ createdAt: new Date('2026-10-29T02:00:00Z'), items: [item] }]) },
+      saleReturn: { findMany: vi.fn().mockResolvedValue([]) },
+    };
 
     const { trends } = await new InventoryReportsService(prisma as any).getProfitMarginReport({});
 

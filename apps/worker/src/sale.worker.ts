@@ -837,9 +837,10 @@ export type ReturnJobData = {
 };
 
 /**
- * Records a customer return: each item goes back to stock as a RETURN batch at
- * its sold unit cost, and the sale's revenue, cost and profit drop by what came
- * back. Then Square's count goes up too. A resent request records nothing twice.
+ * Records a customer return made by hand: each item goes back to stock as a
+ * RETURN batch at its sold unit cost, and the return keeps what it gave back
+ * (reports count it on the day it happened). Then Square's count goes up too.
+ * A resent request records nothing twice.
  */
 export async function processReturnJob(job: Job<ReturnJobData>): Promise<void> {
   await recordReturn(job.data);
@@ -858,16 +859,23 @@ async function recordReturn({ saleId, items, reason, returnedBy, clientRequestId
     // Jobs run concurrently: lock the sale first, so two returns (or a resent one) can't both pass the checks.
     await tx.$queryRaw`SELECT id FROM "Sale" WHERE id = ${saleId} FOR UPDATE`;
     if (await tx.saleReturn.findUnique({ where: { clientRequestId } })) return;
-    const sale = await tx.sale.findUniqueOrThrow({ where: { id: saleId }, include: { items: { include: { returns: true } } } });
+    const sale = await tx.sale.findUniqueOrThrow({
+      where: { id: saleId },
+      include: { items: { include: { returns: true, product: { select: { name: true } } } } },
+    });
+
+    // One request can list an item twice: check what it takes back in total.
+    const requested = new Map<string, number>();
+    for (const { saleItemId, quantity } of items) requested.set(saleItemId, (requested.get(saleItemId) ?? 0) + quantity);
 
     let revenue = amountOnly ?? new Prisma.Decimal(0);
     let cost = new Prisma.Decimal(0);
     const returned = [];
-    for (const { saleItemId, quantity } of items) {
+    for (const [saleItemId, quantity] of requested) {
       const item = sale.items.find((i) => i.id === saleItemId);
-      const alreadyReturned = item?.returns.reduce((n, r) => n + r.quantity, 0) ?? 0;
-      if (!item || !(quantity > 0) || alreadyReturned + quantity > item.quantity) {
-        throw new SaleValidationError('Return exceeds what is left of the sale item', { saleId, saleItemId, quantity, alreadyReturned });
+      const left = item ? item.quantity - item.returns.reduce((n, r) => n + r.quantity, 0) : 0;
+      if (!item || !(quantity > 0) || quantity > left) {
+        throw new SaleValidationError(`Solo quedan ${left} de ${item?.product.name ?? 'ese artículo'} por devolver`, { saleId, saleItemId, quantity });
       }
       const unitCost = item.cost.div(item.quantity);
       const batch = await tx.inventory.create({
@@ -895,11 +903,10 @@ async function recordReturn({ saleId, items, reason, returnedBy, clientRequestId
       returned.push({ saleItemId, adjustmentId: adjustment.id, quantity, revenue: itemRevenue, cost: itemCost });
     }
 
-    await tx.saleReturn.create({ data: { saleId, clientRequestId, reason, returnedBy, revenue, cost, items: { create: returned } } });
-    await tx.sale.update({
-      where: { id: saleId },
-      data: { totalRevenue: { decrement: revenue }, totalCost: { decrement: cost }, grossProfit: { decrement: revenue.sub(cost) } },
-    });
+    // A return counts in its own month, so the sale keeps its totals as sold.
+    // Square paid its own refunds back; one made by hand was paid in cash.
+    const cashRefunded = squareRestocked || amountOnly ? null : revenue;
+    await tx.saleReturn.create({ data: { saleId, clientRequestId, reason, returnedBy, revenue, cost, cashRefunded, items: { create: returned } } });
   });
 }
 

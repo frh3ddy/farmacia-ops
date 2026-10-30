@@ -1,6 +1,6 @@
 # Sale Accuracy Epic
 
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETED (2026-10-29) — the paused returns screen was built owner-only; what's left moved to [Sale Returns](sale-returns-epic.md)
 **Goal**: A sale's revenue, stock and cost stay true after custom amounts, returns and non-completed payments.
 
 ## Overview

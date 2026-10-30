@@ -4,7 +4,7 @@
 - ✅ [Inventory Integrity](tasks/inventory-integrity-epic.md) — nightly check that the books add up and every Square payment has its sale; removes the always-"reconciled" report
 - ✅ [Worker Hardening](tasks/worker-hardening-epic.md) — keep test sales out of production stock, fix Yastás payments in the sales check and multi-line orders, test the sale mapping, clean logs and dead code
 - ✅ [Dev Tools in Production](tasks/dev-tools-production-epic.md) — test sales, test inventory, catalog cleanup and full wipe refused in production
-- 📋 [Sale Accuracy](tasks/sale-accuracy-epic.md) — custom-amount lines matched later, Square refunds and hand returns put stock and revenue back
+- ✅ [Sale Accuracy](tasks/sale-accuracy-epic.md) — custom-amount lines matched later, Square refunds and hand returns put stock and revenue back
 - ✅ [Stock Movement Safety](tasks/stock-movement-safety-epic.md) — transfers and break-bulk move all their stock or none; a transfer's failed Square sync can be retried
 - ✅ [Square Sync Lookup and List Limits](tasks/square-sync-and-list-limits-epic.md) — stock syncs use the product's real Square item, not a `local_` placeholder; inventory lists and COGS stay bounded
 - ✅ [Inventory Review Cleanup](tasks/inventory-review-cleanup-epic.md) — selling prices must be numbers, replay checks agree, transfer receipts checked before claiming, comments that only restate code removed
@@ -16,3 +16,4 @@
 - ✅ [Products Review Follow-ups](tasks/products-review-followups-epic.md) — loose-link loop walk, no price changes for Yastás products, sell at one store or every store (switch, default every store), one validation pass on create
 - ✅ [Product Price and Access Safety](tasks/product-price-and-access-safety-epic.md) — a failed Square price change is refused; the role at the store acted on; bad create input gets a 400
 - ✅ [Product Lists and Square Cleanup](tasks/product-lists-and-square-cleanup-epic.md) — one-store products only at their store; bounded catalog search; counts without Yastás; rename keeps the item; small fixes
+- ✅ [Sale Returns](tasks/sale-returns-epic.md) — a return never exceeds what was sold; returns count in their own month; cash note for hand returns; failed returns and matches shown

@@ -4,6 +4,9 @@ import IORedis from 'ioredis';
 
 export const FAILED_JOB_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 
+/** The worker's refusals are in Spanish behind an English label; anything else is shown as it came. */
+export const workerError = (failedReason: string | undefined) => failedReason?.replace(/^Sale validation error: /, '') ?? 'Error desconocido';
+
 @Injectable()
 export class SaleQueue {
   private readonly logger = new Logger(SaleQueue.name);
@@ -62,7 +65,12 @@ export class SaleQueue {
     return this.queue.add('match-sale-line', data);
   }
 
-  /** A customer return made by hand; the worker restocks and updates the sale. */
+  /** Jobs of one kind that failed every attempt (kept FAILED_JOB_RETENTION_SECONDS). */
+  async failedJobs(name: 'record-return' | 'match-sale-line') {
+    return (await this.queue.getFailed()).filter((job) => job?.name === name);
+  }
+
+  /** A customer return made by hand; the worker restocks it and records what it gave back. */
   async enqueueReturn(data: {
     saleId: string;
     items: Array<{ saleItemId: string; quantity: number }>;
