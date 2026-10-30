@@ -169,6 +169,13 @@ export function assertLocationAccess(request: LocationAccess, locationId: string
  * instead of every location's data — or a 403 when they have none (e.g. their
  * assignment there was deactivated), never "all".
  */
+/** Whether the reader is a cashier at the store being read (an owner never is). */
+export function isCashierAt(request: LocationAccess, locationId?: string): boolean {
+  if (request.currentLocation?.role === 'OWNER') return false;
+  const role = request.accessibleLocations?.find((a) => a.locationId === locationId && a.isActive)?.role ?? request.currentLocation?.role;
+  return role === 'CASHIER';
+}
+
 export function scopedLocationId(request: LocationAccess, locationId?: string): string | undefined {
   if (locationId || request.currentLocation?.role === 'OWNER') return locationId;
   const ownLocationId = request.currentLocation?.locationId;

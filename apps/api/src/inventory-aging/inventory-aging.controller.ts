@@ -8,8 +8,29 @@ import {
   UseGuards,
   Req,
 } from '@nestjs/common';
-import { AuthGuard, LocationGuard, Roles, scopedLocationId, GuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, scopedLocationId, GuardedRequest, isCashierAt } from '../auth/guards/auth.guard';
 import { InventoryAgingService } from './inventory-aging.service';
+
+/**
+ * The expiring products as a cashier sees them: what expires, how many units and
+ * when, but nothing the pharmacy paid (unit cost, batch value, cash at risk).
+ */
+export function expiringWithoutCosts<
+  T extends {
+    products: Array<{ totalCashAtRisk: unknown; batches: Array<{ unitCost: unknown; cashValue: unknown }> }>;
+    summary: { totalCashAtRisk: unknown };
+  },
+>({ products, summary, ...rest }: T) {
+  const { totalCashAtRisk: _summaryCash, ...summaryWithoutCost } = summary;
+  return {
+    ...rest,
+    products: products.map(({ totalCashAtRisk: _cash, batches, ...product }) => ({
+      ...product,
+      batches: batches.map(({ unitCost: _unitCost, cashValue: _cashValue, ...batch }) => batch),
+    })),
+    summary: summaryWithoutCost,
+  };
+}
 
 @Controller('inventory/aging')
 @UseGuards(AuthGuard, LocationGuard)
@@ -348,6 +369,8 @@ export class InventoryAgingController {
   }
 
   @Get('expiring')
+  // Cashiers on the floor see what is about to expire, without its cost (expiringWithoutCosts).
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
   async getExpiringProducts(
     @Req() req: GuardedRequest,
     @Query('locationId') locationId?: string,
@@ -365,7 +388,7 @@ export class InventoryAgingController {
         expired,
       );
 
-      return {
+      const response = {
         products: analyses.map((product) => ({
           productId: product.productId,
           productName: product.productName,
@@ -401,6 +424,7 @@ export class InventoryAgingController {
           highCount: analyses.filter((p) => p.severity === 'HIGH').length,
         },
       };
+      return isCashierAt(req, normalizedLocationId) ? expiringWithoutCosts(response) : response;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
