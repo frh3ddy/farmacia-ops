@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { businessDay } from './business-date';
 import { Prisma } from '@prisma/client';
-import { saleItemNet } from './sale-item-net';
 import { STOCK_MOVE_TYPES } from './adjustment-types';
 
 // ============================================================================
@@ -104,6 +103,32 @@ interface ProfitMarginReport {
   }>;
 }
 
+const COGS_PRODUCT = {
+  id: true,
+  name: true,
+  sku: true,
+  categoryId: true,
+  category: { select: { id: true, name: true } },
+} satisfies Prisma.ProductSelect;
+
+/** A date filter for a report period, or undefined for all time. */
+const between = (startDate?: Date, endDate?: Date) =>
+  startDate || endDate ? { ...(startDate && { gte: startDate }), ...(endDate && { lte: endDate }) } : undefined;
+
+/** Returned units as negative sale lines, dated when they came back. */
+function returnedLines<P>(returns: Array<{ returnedAt: Date; items: Array<{ quantity: number; revenue: Prisma.Decimal; cost: Prisma.Decimal; saleItem: { productId: string; product: P } }> }>) {
+  return returns.flatMap((r) =>
+    r.items.map((item) => ({
+      productId: item.saleItem.productId,
+      product: item.saleItem.product,
+      day: r.returnedAt,
+      units: -item.quantity,
+      revenue: item.revenue.neg(),
+      cost: item.cost.neg(),
+    })),
+  );
+}
+
 // ============================================================================
 // Service
 // ============================================================================
@@ -113,6 +138,18 @@ export class InventoryReportsService {
   private readonly logger = new Logger(InventoryReportsService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /** Returns that came back in the period at the location, with each returned item's product. */
+  private returnsInPeriod<S extends Prisma.ProductSelect>(period: { locationId?: string } & DateRange, product: S) {
+    const returnedAt = between(period.startDate, period.endDate);
+    return this.prisma.saleReturn.findMany({
+      where: { ...(period.locationId && { sale: { locationId: period.locationId } }), ...(returnedAt && { returnedAt }) },
+      select: {
+        returnedAt: true,
+        items: { select: { quantity: true, revenue: true, cost: true, saleItem: { select: { productId: true, product: { select: product } } } } },
+      },
+    });
+  }
 
   // --------------------------------------------------------------------------
   // COGS Report (Cost of Goods Sold)
@@ -140,20 +177,12 @@ export class InventoryReportsService {
       include: {
         items: {
           include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                categoryId: true,
-                category: { select: { id: true, name: true } },
-              },
-            },
-            returns: { select: { quantity: true, revenue: true, cost: true } },
+            product: { select: COGS_PRODUCT },
           },
         },
       },
     });
+    const returns = await this.returnsInPeriod({ locationId, startDate, endDate }, COGS_PRODUCT);
 
     // Aggregate by product
     const productMap = new Map<string, {
@@ -171,34 +200,37 @@ export class InventoryReportsService {
     let totalRevenue = new Prisma.Decimal(0);
     let totalUnitsSold = 0;
 
-    for (const sale of sales) {
-      for (const item of sale.items) {
-        const key = item.productId;
-        const existing = productMap.get(key);
+    // Sales count in the period they were made, returns in the period they came back.
+    const lines = [
+      ...sales.flatMap((sale) => sale.items.map((item) => ({ ...item, units: item.quantity, revenue: item.price.mul(item.quantity) }))),
+      ...returnedLines(returns),
+    ];
+    for (const item of lines) {
+      const key = item.productId;
+      const existing = productMap.get(key);
 
-        const { units, revenue: itemRevenue, cost: itemCost } = saleItemNet(item);
+      const { units, revenue: itemRevenue, cost: itemCost } = item;
 
-        if (existing) {
-          existing.unitsSold += units;
-          existing.totalCost = existing.totalCost.add(itemCost);
-          existing.totalRevenue = existing.totalRevenue.add(itemRevenue);
-        } else {
-          productMap.set(key, {
-            productId: item.productId,
-            productName: item.product.name,
-            sku: item.product.sku,
-            categoryId: item.product.categoryId,
-            categoryName: item.product.category?.name || 'Uncategorized',
-            unitsSold: units,
-            totalCost: itemCost,
-            totalRevenue: itemRevenue,
-          });
-        }
-
-        totalCOGS = totalCOGS.add(itemCost);
-        totalRevenue = totalRevenue.add(itemRevenue);
-        totalUnitsSold += units;
+      if (existing) {
+        existing.unitsSold += units;
+        existing.totalCost = existing.totalCost.add(itemCost);
+        existing.totalRevenue = existing.totalRevenue.add(itemRevenue);
+      } else {
+        productMap.set(key, {
+          productId: item.productId,
+          productName: item.product.name,
+          sku: item.product.sku,
+          categoryId: item.product.categoryId,
+          categoryName: item.product.category?.name || 'Uncategorized',
+          unitsSold: units,
+          totalCost: itemCost,
+          totalRevenue: itemRevenue,
+        });
       }
+
+      totalCOGS = totalCOGS.add(itemCost);
+      totalRevenue = totalRevenue.add(itemRevenue);
+      totalUnitsSold += units;
     }
 
     const grossProfit = totalRevenue.sub(totalCOGS);
@@ -488,12 +520,12 @@ export class InventoryReportsService {
         items: {
           include: {
             product: { select: { id: true, name: true } },
-            returns: { select: { quantity: true, revenue: true, cost: true } },
           },
         },
       },
       orderBy: { createdAt: 'asc' },
     });
+    const returns = await this.returnsInPeriod({ locationId, startDate, endDate }, { id: true, name: true });
 
     // Calculate overall and by product
     let totalRevenue = new Prisma.Decimal(0);
@@ -512,39 +544,43 @@ export class InventoryReportsService {
       cost: Prisma.Decimal;
     }>();
 
-    for (const sale of sales) {
-      const dateKey = businessDay(sale.createdAt);
+    // Sales count on the day they were made, returns on the day they came back.
+    const lines = [
+      ...sales.flatMap((sale) =>
+        sale.items.map((item) => ({ ...item, day: sale.createdAt, units: item.quantity, revenue: item.price.mul(item.quantity) })),
+      ),
+      ...returnedLines(returns),
+    ];
+    for (const item of lines) {
+      const dateKey = businessDay(item.day);
+      const { units, revenue, cost } = item;
 
-      for (const item of sale.items) {
-        const { units, revenue, cost } = saleItemNet(item);
+      totalRevenue = totalRevenue.add(revenue);
+      totalCost = totalCost.add(cost);
 
-        totalRevenue = totalRevenue.add(revenue);
-        totalCost = totalCost.add(cost);
+      // By product
+      const existing = productMap.get(item.productId);
+      if (existing) {
+        existing.revenue = existing.revenue.add(revenue);
+        existing.cost = existing.cost.add(cost);
+        existing.unitsSold += units;
+      } else {
+        productMap.set(item.productId, {
+          productId: item.productId,
+          productName: item.product.name,
+          revenue,
+          cost,
+          unitsSold: units,
+        });
+      }
 
-        // By product
-        const existing = productMap.get(item.productId);
-        if (existing) {
-          existing.revenue = existing.revenue.add(revenue);
-          existing.cost = existing.cost.add(cost);
-          existing.unitsSold += units;
-        } else {
-          productMap.set(item.productId, {
-            productId: item.productId,
-            productName: item.product.name,
-            revenue,
-            cost,
-            unitsSold: units,
-          });
-        }
-
-        // Daily
-        const dailyExisting = dailyMap.get(dateKey);
-        if (dailyExisting) {
-          dailyExisting.revenue = dailyExisting.revenue.add(revenue);
-          dailyExisting.cost = dailyExisting.cost.add(cost);
-        } else {
-          dailyMap.set(dateKey, { revenue, cost });
-        }
+      // Daily
+      const dailyExisting = dailyMap.get(dateKey);
+      if (dailyExisting) {
+        dailyExisting.revenue = dailyExisting.revenue.add(revenue);
+        dailyExisting.cost = dailyExisting.cost.add(cost);
+      } else {
+        dailyMap.set(dateKey, { revenue, cost });
       }
     }
 
@@ -874,9 +910,18 @@ export class InventoryReportsService {
       _count: { id: true },
     });
 
-    const revenue = salesAgg._sum.totalRevenue || new Prisma.Decimal(0);
-    const cogs = salesAgg._sum.totalCost || new Prisma.Decimal(0);
-    const grossProfit = salesAgg._sum.grossProfit || new Prisma.Decimal(0);
+    // Returns count in the month they came back (Devoluciones), not the sale's.
+    const returnsAgg = await this.prisma.saleReturn.aggregate({
+      where: { ...(locationId && { sale: { locationId } }), ...(between(startDate, endDate) && { returnedAt: between(startDate, endDate) }) },
+      _sum: { revenue: true, cost: true },
+    });
+    const salesRevenue = salesAgg._sum.totalRevenue || new Prisma.Decimal(0);
+    const salesCost = salesAgg._sum.totalCost || new Prisma.Decimal(0);
+    const returnsRevenue = returnsAgg._sum.revenue || new Prisma.Decimal(0);
+    const returnsCost = returnsAgg._sum.cost || new Prisma.Decimal(0);
+    const revenue = salesRevenue.sub(returnsRevenue);
+    const cogs = salesCost.sub(returnsCost);
+    const grossProfit = revenue.sub(cogs);
 
     // 2. Get Operating Expenses
     const expenseWhere: Prisma.ExpenseWhereInput = {
@@ -972,12 +1017,15 @@ export class InventoryReportsService {
       locationId,
       // Income Statement
       revenue: {
-        sales: revenue.toString(),
+        sales: salesRevenue.toString(),
+        returns: returnsRevenue.toString(),
+        netSales: revenue.toString(),
         yastasServiceRevenue: yastasRevenue.toString(),
         total: totalRevenue.toString(),
       },
       costOfGoodsSold: {
-        productCosts: cogs.toString(),
+        productCosts: salesCost.toString(),
+        returns: returnsCost.toString(), // cost of the units that came back
         total: cogs.toString(),
       },
       grossProfit: {

@@ -286,8 +286,11 @@ export class InventoryReportsController {
             amount: profitLoss.netProfit.amount,
             marginPercent: profitLoss.netProfit.marginPercent,
             yastasServiceRevenue: profitLoss.revenue.yastasServiceRevenue,
-            salesRevenue: profitLoss.revenue.sales,
-            costOfSales: profitLoss.costOfGoodsSold.total,
+            // Net of returns, as net profit is; Ventas = salesRevenue + salesReturns, and
+            // salesReturns is the period's Devoluciones (returns count when they came back).
+            salesRevenue: profitLoss.revenue.netSales,
+            salesReturns: profitLoss.revenue.returns,
+            costOfSales: profitLoss.costOfGoodsSold.total, // net of the returned units' cost
           },
         }),
     };
