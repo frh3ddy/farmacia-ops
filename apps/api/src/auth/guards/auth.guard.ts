@@ -187,3 +187,16 @@ export function scopedLocationId(request: LocationAccess, locationId?: string): 
   }
   return ownLocationId;
 }
+
+/**
+ * Role checks use the role at the current store, so a non-owner may only act
+ * there: a manager here who is a cashier elsewhere can't act as a manager elsewhere.
+ */
+export function assertActingAtOwnStore(req: LocationAccess, locationId: string): void {
+  if (req.currentLocation?.role !== 'OWNER' && locationId !== req.currentLocation?.locationId) {
+    throw new HttpException(
+      { success: false, message: 'Solo el dueño puede hacer esto en otras sucursales' },
+      HttpStatus.FORBIDDEN,
+    );
+  }
+}

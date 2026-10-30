@@ -21,7 +21,7 @@ import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/m
 import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts } from './products.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
-import { AuthGuard, LocationGuard, Roles, GuardedRequest, isCashierAt } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest, isCashierAt, assertActingAtOwnStore } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 
 // DTOs
@@ -47,18 +47,6 @@ const imageFileFilter: MulterOptions['fileFilter'] = (_req, file, cb) => {
   }
 };
 
-/**
- * Role checks use the role at the current store, so a non-owner may only act
- * there: a manager here who is a cashier elsewhere can't act as a manager elsewhere.
- */
-function assertActingAtOwnStore(req: GuardedRequest, locationId: string): void {
-  if (req.currentLocation?.role !== 'OWNER' && locationId !== req.currentLocation?.locationId) {
-    throw new HttpException(
-      { success: false, message: 'Solo el dueño puede hacer esto en otras sucursales' },
-      HttpStatus.FORBIDDEN,
-    );
-  }
-}
 
 @Controller('products')
 @UseGuards(AuthGuard, LocationGuard)
