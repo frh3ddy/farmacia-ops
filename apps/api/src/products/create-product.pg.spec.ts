@@ -202,12 +202,12 @@ describe('ProductsService.createProduct (Postgres)', () => {
       actual: [
         presence(everywhere),
         presence(toy),
-        (await prisma.product.findFirst({ where: { name: toy } }))?.soldAtAllLocations,
+        (await prisma.product.findFirst({ where: { name: toy } }))?.soldOnlyAtLocationId,
       ],
       expected: [
         [[undefined, undefined, undefined, undefined]],
         [[false, ['SQ-CENTRO'], false, ['SQ-CENTRO']]],
-        false,
+        centro,
       ],
     });
   });
@@ -241,6 +241,23 @@ describe('ProductsService.createProduct (Postgres)', () => {
     });
   });
 
+  test('the same retry sent twice at once', async () => {
+    const { products, square } = productsWithSquare();
+    const clientRequestId = randomUUID();
+    const name = `Doble-${Math.random()}`;
+    const [first, second] = await Promise.all([
+      create(products, { name, clientRequestId }),
+      create(products, { name, clientRequestId }),
+    ]);
+
+    assert({
+      given: 'two creates with one clientRequestId arriving together',
+      should: "answer both with the one product, and delete the Square item the losing request made",
+      actual: [first.product?.id, second.product?.id, await productsNamed(name), square.catalog.batchDelete.mock.calls.length],
+      expected: [clientRequestId, clientRequestId, 1, square.catalog.object.upsert.mock.calls.length - 1],
+    });
+  });
+
   test('a name with spaces around it', async () => {
     const { products } = productsWithSquare();
     const result = await create(products, { name: '  Gel  ' });
@@ -249,7 +266,7 @@ describe('ProductsService.createProduct (Postgres)', () => {
       given: 'a name with spaces around it',
       should: 'report the name the product was saved under',
       actual: result.message,
-      expected: 'Product "Gel" created and synced to Square',
+      expected: 'Producto "Gel" creado y enviado a Square',
     });
   });
 });

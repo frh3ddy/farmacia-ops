@@ -1,4 +1,5 @@
-import { classifyProductName, classifySubcategory, stripAccents, type CategoryRow } from './category-classifier';
+import { classifyProductName, classifySubcategory, type CategoryRow } from './category-classifier';
+import { stripAccents } from '../common/strip-accents';
 
 describe('stripAccents', () => {
   it('removes accents and diacritics', () => {

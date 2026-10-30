@@ -46,7 +46,7 @@ beforeAll(async () => {
   // Only the columns the search touches — the rest of the schema is irrelevant here.
   await db.exec(`CREATE TABLE "Product" (
     id text PRIMARY KEY, name text NOT NULL, "squareProductName" text, sku text,
-    "tracksInventory" boolean NOT NULL DEFAULT true
+    "tracksInventory" boolean NOT NULL DEFAULT true, "soldOnlyAtLocationId" text
   )`);
   await db.exec(`CREATE TABLE "Inventory" (id serial PRIMARY KEY, "productId" text NOT NULL, "locationId" text NOT NULL, quantity int NOT NULL)`);
   await db.exec(readFileSync(MIGRATION, 'utf8'));
@@ -210,5 +210,29 @@ describe('index', () => {
     } finally {
       await db.exec('SET enable_seqscan = on');
     }
+  });
+});
+
+describe('one-store products and wildcards', () => {
+  test('a product sold only at one store', async () => {
+    await db.exec(`INSERT INTO "Product" (id, name, "soldOnlyAtLocationId") VALUES ('juguete-loc-2', 'Juguete Dinosaurio', 'loc-2')`);
+
+    assert({
+      given: 'a product sold only at loc-2',
+      should: 'match at loc-2 and with no location, never at loc-1',
+      actual: [await search('dinosaurio', 'loc-1'), await search('dinosaurio', 'loc-2'), await search('dinosaurio')],
+      expected: [[], ['juguete-loc-2'], ['juguete-loc-2']],
+    });
+  });
+
+  test('% and _ in a search', async () => {
+    await db.exec(`INSERT INTO "Product" (id, name) VALUES ('comodin-literal', 'Pomada a_c extra'), ('comodin-letra', 'Pomada abc')`);
+
+    assert({
+      given: 'a search for "a_c" where "abc" would match it as a wildcard',
+      should: 'rank the literal "a_c" first',
+      actual: (await search('pomada a_c'))[0],
+      expected: 'comodin-literal',
+    });
   });
 });

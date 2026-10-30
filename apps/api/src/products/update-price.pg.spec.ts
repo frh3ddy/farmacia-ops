@@ -212,7 +212,7 @@ describe('ProductsService.syncUnsyncedProducts (Postgres)', () => {
 describe('A product sold at one store reaching Square later (Postgres)', () => {
   /** A web-created product (no Square item yet) sold only at Centro. */
   async function oneStoreProduct() {
-    const product = await prisma.product.create({ data: { name: `Juguete-${Math.random()}`, soldAtAllLocations: false } });
+    const product = await prisma.product.create({ data: { name: `Juguete-${Math.random()}`, soldOnlyAtLocationId: centro } });
     await prisma.catalogMapping.create({ data: { squareVariationId: `local_${product.id}`, productId: product.id, locationId: centro, priceCents: 9900, currency: 'USD' } });
     return product;
   }
