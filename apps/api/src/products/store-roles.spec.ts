@@ -14,6 +14,10 @@ function routesForManagerAtCentroCashierAtNorte() {
     syncUnsyncedProducts: vi.fn().mockResolvedValue({ synced: 0, total: 0, failed: 0 }),
     getProduct: vi.fn(async () => ({ success: true, data: product() })),
     getProducts: vi.fn(async () => ({ success: true, data: [product()] })),
+    getProductCounts: vi.fn(async () => ({
+      success: true,
+      data: { total: 10, outOfStock: 1, lowStock: 2, lowMargin: 3, synced: 9, local: 1 },
+    })),
   };
   const controller = new ProductsController(service as any, {} as any, {} as any, {} as any);
   const centro = { locationId: 'centro', role: 'MANAGER', isActive: true };
@@ -50,6 +54,19 @@ describe('ProductsController at another store', () => {
       should: 'hide costs for Norte, where they are a cashier, and show them for Centro',
       actual: [atNorte.averageCost, listAtNorte.averageCost, atCentro.averageCost],
       expected: [undefined, undefined, 12.5],
+    });
+  });
+
+  test('reading product counts there', async () => {
+    const { controller, req } = routesForManagerAtCentroCashierAtNorte();
+    const atNorte = (await controller.getProductCounts('norte', req)).data as any;
+    const atCentro = (await controller.getProductCounts('centro', req)).data as any;
+
+    assert({
+      given: 'a manager at Centro who is a cashier at Norte reading product counts for each store',
+      should: 'leave out the low-margin count (it comes from cost) for Norte and keep it for Centro',
+      actual: [atNorte.lowMargin, atNorte.total, atCentro.lowMargin],
+      expected: [undefined, 10, 3],
     });
   });
 });

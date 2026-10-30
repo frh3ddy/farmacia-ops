@@ -21,7 +21,7 @@ import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/m
 import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts } from './products.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
-import { AuthGuard, LocationGuard, Roles, GuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest, isCashierAt } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 
 // DTOs
@@ -58,13 +58,6 @@ function assertActingAtOwnStore(req: GuardedRequest, locationId: string): void {
       HttpStatus.FORBIDDEN,
     );
   }
-}
-
-/** Whether the reader is a cashier at the store being read (an owner never is). */
-function isCashierAt(req: GuardedRequest, locationId?: string): boolean {
-  if (req.currentLocation?.role === 'OWNER') return false;
-  const role = req.accessibleLocations?.find((a) => a.locationId === locationId && a.isActive)?.role ?? req.currentLocation?.role;
-  return role === 'CASHIER';
 }
 
 @Controller('products')
@@ -369,7 +362,10 @@ export class ProductsController {
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProductCounts(targetLocationId);
-    return result;
+    if (!isCashierAt(req, targetLocationId)) return result;
+    // The low-margin count is worked out from cost; a cashier never sees costs.
+    const { lowMargin, ...counts } = result.data;
+    return { ...result, data: counts };
   }
 
   /**
