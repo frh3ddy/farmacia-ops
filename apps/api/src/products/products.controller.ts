@@ -18,7 +18,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
-import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts } from './products.service';
+import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts, PRODUCT_LIST_FILTERS, ProductListFilter } from './products.service';
+import { InventoryAgingService } from '../inventory-aging/inventory-aging.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
 import { AuthGuard, LocationGuard, Roles, GuardedRequest, isCashierAt } from '../auth/guards/auth.guard';
@@ -68,7 +69,38 @@ export class ProductsController {
     private readonly prisma: PrismaService,
     private readonly catalogSearchService: CatalogSearchService,
     private readonly referenceDataService: ReferenceDataService,
+    private readonly inventoryAgingService: InventoryAgingService,
   ) {}
+
+  /**
+   * What a list chip (`?filter=`) narrows GET /products to. Stock and margin chips
+   * run in SQL; expiring and at-risk take their ids from the aging service, the
+   * same lists their chips count. Margin and at-risk come from cost: never a cashier.
+   */
+  private async listNarrowing(
+    req: GuardedRequest,
+    locationId: string | undefined,
+    filter?: string,
+  ): Promise<{ filter?: ProductListFilter; onlyIds?: string[] }> {
+    if (!filter) return {};
+    if ((filter === 'lowMargin' || filter === 'atRisk') && isCashierAt(req, locationId)) {
+      throw new HttpException({ success: false, message: 'No tienes acceso a este filtro' }, HttpStatus.FORBIDDEN);
+    }
+    if ((PRODUCT_LIST_FILTERS as readonly string[]).includes(filter)) return { filter: filter as ProductListFilter };
+    if (filter === 'expiring') {
+      // Same window as the Por Vencer chip (GET /inventory/aging/expiring as the app calls it)
+      const expiring = await this.inventoryAgingService.getExpiringProducts(locationId, 90, true);
+      return { onlyIds: expiring.map((p) => p.productId) };
+    }
+    if (filter === 'atRisk') {
+      const batches = await this.inventoryAgingService.classifyInventoryAging(locationId);
+      const atRisk = this.inventoryAgingService
+        .analyzeProductAging(batches)
+        .filter((p) => p.riskLevel === 'HIGH' || p.riskLevel === 'CRITICAL');
+      return { onlyIds: atRisk.map((p) => p.productId) };
+    }
+    throw new HttpException({ success: false, message: `Filtro desconocido: ${filter}` }, HttpStatus.BAD_REQUEST);
+  }
 
   /**
    * Create a new product
@@ -239,9 +271,11 @@ export class ProductsController {
     @Query('search') search: string,
     @Query('exact') exact: string,
     @Req() req: GuardedRequest,
+    @Query('filter') filter?: string,
   ) {
     // Use query param or current location
     const targetLocationId = locationId || req.currentLocation?.locationId;
+    const narrowing = await this.listNarrowing(req, targetLocationId, filter?.trim());
 
     // Parse pagination params with sensible defaults
     const page = Math.max(1, parseInt(pageStr, 10) || 1);
@@ -252,6 +286,7 @@ export class ProductsController {
       limit,
       search: search?.trim() || undefined,
       exact: exact === 'true',
+      ...narrowing,
     });
     return isCashierAt(req, targetLocationId) ? { ...result, data: result.data.map(withoutCosts) } : result;
   }
