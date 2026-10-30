@@ -8,7 +8,7 @@ import { DataController } from '../../data/data.controller';
 // inventory cost/aging or trigger a Square catalog sync.
 describe('route guards', () => {
   it.each([
-    [CatalogController, ['OWNER', 'MANAGER']],
+    [CatalogController, ['OWNER']],
     [InventoryAgingController, ['OWNER', 'MANAGER', 'ACCOUNTANT']],
   ])('%p requires a session and a role', (controller, roles) => {
     expect(Reflect.getMetadata(GUARDS_METADATA, controller)).toContain(AuthGuard);
