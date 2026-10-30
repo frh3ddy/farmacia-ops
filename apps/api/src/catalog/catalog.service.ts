@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
-import { SquareClient } from 'square';
+import { Square, SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
 
 /**
@@ -30,15 +30,18 @@ interface CatalogData {
   productName: string | null;
   productDescription: string | null;
   imageUrl: string | null;
-  priceCents: number | null;  // Selling price in cents (from price_money.amount)
-  currency: string | null;     // Currency code (e.g., "USD")
+  priceCents: number | null; // the variation's base price (priceMoney.amount)
+  currency: string | null;
 }
+
+const NO_CATALOG_DATA: CatalogData = { productName: null, productDescription: null, imageUrl: null, priceCents: null, currency: null };
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Labels that end up where a product name should be: Square's default
  * variation names, and this sync's own fallback when a variation has none.
- * Exact match on purpose — "Insulina Regular" is a real name. Must stay in
- * sync with the placeholder-name data migration (20261024120000).
+ * Exact match on purpose — "Insulina Regular" and "Regular 500 ml" are real
+ * names. Must stay in sync with the placeholder-name data migration (20261024120000).
  */
 const PLACEHOLDER_NAMES = new Set(['regular', 'sin variación', 'sin variacion', 'no variation', 'unknown']);
 
@@ -75,9 +78,6 @@ export class CatalogService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Get or create Square client
-   */
   private getSquareClient(): SquareClient {
     this.squareClient ??= createSquareClient();
     if (!this.squareClient) {
@@ -87,159 +87,48 @@ export class CatalogService {
   }
 
   /**
-   * Square labels a variation "Sin variación" / "Regular" when an item has no
-   * real named variations — never usable as a display name on its own.
+   * Name, description, image and price per variation, read in batches of 100
+   * with each variation's item: the item's name, plus the variation's own name
+   * when it isn't a placeholder ("Aspirina (500 mg)"). A batch Square fails to
+   * return gets no data rather than failing the sync.
    */
-  private isGenericVariationName(name: string | null | undefined): boolean {
-    if (!name) return true;
-    const lower = name.toLowerCase();
-    return (
-      lower.includes('sin variación') ||
-      lower.includes('no variation') ||
-      lower.includes('regular')
-    );
-  }
-
-  /**
-   * Fetch multiple catalog objects in batch from Square
-   * Handles "Sin variación" logic and Parent/Child image inheritance
-   */
-  private async fetchBatchCatalogObjects(
-    variationIds: string[],
-  ): Promise<Map<string, CatalogData>> {
+  private async fetchBatchCatalogObjects(variationIds: string[]): Promise<Map<string, CatalogData>> {
     const client = this.getSquareClient();
     const resultMap = new Map<string, CatalogData>();
     const BATCH_SIZE = 100;
 
     for (let i = 0; i < variationIds.length; i += BATCH_SIZE) {
       const batch = variationIds.slice(i, i + BATCH_SIZE);
-
       try {
-        const response = await client.catalog.batchGet({
-          objectIds: batch,
-          includeRelatedObjects: true,
-        });
+        const response = await client.catalog.batchGet({ objectIds: batch, includeRelatedObjects: true });
+        const related = response.relatedObjects ?? [];
 
-        // Normalize response structure
-        const objects = (response as any).objects || [];
-        const relatedObjects =
-          (response as any).relatedObjects ||
-          (response as any).related_objects ||
-          [];
+        for (const obj of response.objects ?? []) {
+          if (obj.type !== 'ITEM_VARIATION') continue;
+          const variationData = obj.itemVariationData;
+          const variationName = variationData?.name ?? '';
+          const itemData = related.find((r): r is Square.CatalogObject.Item => r.type === 'ITEM' && r.id === variationData?.itemId)?.itemData;
+          const itemName = itemData?.name ?? null;
+          const productName = itemName && (isPlaceholderProductName(variationName) ? itemName : `${itemName} (${variationName})`);
 
-        // Process each object in the batch
-        for (const obj of objects) {
-          if (obj.type !== 'ITEM_VARIATION') {
-            resultMap.set(obj.id, {
-              productName: null,
-              productDescription: null,
-              imageUrl: null,
-              priceCents: null,
-              currency: null,
-            });
-            continue;
-          }
+          // The variation's own photo first, then the item's.
+          const imageId = [...(variationData?.imageIds ?? []), ...(itemData?.imageIds ?? [])][0];
+          const image = related.find((r): r is Square.CatalogObject.Image => r.type === 'IMAGE' && r.id === imageId);
 
-          // 1. Safe Data Extraction
-          const variationData =
-            obj.itemVariationData || obj.item_variation_data;
-          const parentId = variationData?.itemId || variationData?.item_id;
-          const variationName = variationData?.name || '';
+          const amount = variationData?.priceMoney?.amount;
+          const priceCents = amount == null || amount < 0 ? null : Number(amount);
 
-          // 2. PARENT ITEM LOOKUP (CRITICAL FIX: Match by ID)
-          const itemObject = relatedObjects.find(
-            (r: any) => r.type === 'ITEM' && r.id === parentId,
-          );
-          const itemData = itemObject?.itemData || itemObject?.item_data;
-          const itemName = itemData?.name || 'Unknown Product';
-
-          // 3. NAMING LOGIC: Filter out "Sin variación"
-          const isGeneric = this.isGenericVariationName(variationName);
-
-          // If generic, use just "Aspirina". If specific, use "Aspirina (Small)"
-          const finalName = isGeneric
-            ? itemName
-            : `${itemName} (${variationName})`;
-
-          // 4. IMAGE LOGIC: Check Variation -> Then Parent Item
-          let imageUrl: string | null = null;
-          const varImageIds =
-            variationData?.imageIds || variationData?.image_ids || [];
-          const itemImageIds =
-            itemData?.imageIds || itemData?.image_ids || [];
-          
-          // Combine IDs to check variation-specific photos first
-          const allImageIds = [...varImageIds, ...itemImageIds];
-
-          if (allImageIds.length > 0) {
-            // Find the first matching image object in related objects
-            const imageObj = relatedObjects.find(
-              (r: any) => r.type === 'IMAGE' && r.id === allImageIds[0],
-            );
-            imageUrl =
-              imageObj?.imageData?.url || imageObj?.image_data?.url || null;
-          }
-
-          // Extract price from variation data (handle both camelCase and snake_case)
-          // In Square API, price is in itemVariationData.priceMoney or itemVariationData.price_money
-          const pm = variationData?.priceMoney || variationData?.price_money;
-          const rawAmount = pm?.amount;
-          
-          // Handle different amount types (number, string, bigint)
-          let priceCents: number | null = null;
-          if (rawAmount !== null && rawAmount !== undefined) {
-            if (typeof rawAmount === 'number') {
-              priceCents = rawAmount;
-            } else if (typeof rawAmount === 'string') {
-              priceCents = parseInt(rawAmount, 10);
-            } else if (typeof rawAmount === 'bigint') {
-              priceCents = Number(rawAmount);
-            }
-          }
-          
-          // Validate priceCents is a valid number
-          if (!Number.isFinite(priceCents) || priceCents === null || priceCents < 0) {
-            priceCents = null;
-          }
-          
-          const currency = typeof pm?.currency === 'string' 
-            ? pm.currency 
-            : (typeof variationData?.price_money?.currency === 'string' 
-                ? variationData.price_money.currency 
-                : null);
-
-          const finalPriceCents = Number.isFinite(priceCents) && priceCents !== null && priceCents >= 0 ? priceCents : null;
-          
-          // Log when price is found for debugging
-          if (finalPriceCents !== null) {
-            this.logger.debug(`[CATALOG_SYNC] Found price for variation ${obj.id}: ${finalPriceCents} cents (${currency || 'USD'})`);
-          }
-          
           resultMap.set(obj.id, {
-            productName: finalName,
-            productDescription: itemData?.description || null,
-            imageUrl: imageUrl,
-            priceCents: finalPriceCents,
-            currency: currency || 'USD',
+            productName,
+            productDescription: itemData?.description ?? null,
+            imageUrl: image?.imageData?.url ?? null,
+            priceCents,
+            currency: variationData?.priceMoney?.currency ?? null,
           });
         }
       } catch (error) {
-        this.logger.warn(
-          `[CATALOG_SYNC] Failed to fetch batch: ${batch.join(', ')}`,
-          error,
-        );
-        // Fallback: Set null values so the sync doesn't crash
-        for (const id of batch) {
-          if (!resultMap.has(id)) {
-            resultMap.set(id, {
-              productName: null,
-              productDescription: null,
-              imageUrl: null,
-              priceCents: null,
-              currency: null,
-            });
-          }
-        }
+        this.logger.warn(`[CATALOG_SYNC] Failed to fetch batch: ${batch.join(', ')}`, error);
+        for (const id of batch) if (!resultMap.has(id)) resultMap.set(id, NO_CATALOG_DATA);
       }
     }
 
@@ -247,46 +136,56 @@ export class CatalogService {
   }
 
   /**
-   * Sync Square catalog items with Optimized Batch Processing
+   * Catalog sync is for the migration (the owner's rule): once a store has cut
+   * over, products are created in the app, which creates their Square item and
+   * mapping itself. Refuses a store that has cut over, and every store once any has.
    */
-  async syncSquareCatalog(
-    locationId: string | null,
-    forceResync: boolean,
-  ): Promise<CatalogSyncResult> {
+  private async assertBeforeCutover(locationId: string | null): Promise<void> {
+    const lock = await this.prisma.cutoverLock.findFirst({
+      where: locationId ? { isLocked: true, OR: [{ locationId }, { locationId: null }] } : { isLocked: true },
+    });
+    if (lock) {
+      throw new BadRequestException(
+        locationId
+          ? 'La sincronización del catálogo es solo para la migración: esta sucursal ya hizo su corte.'
+          : 'La sincronización del catálogo es solo para la migración: ya hay sucursales con corte.',
+      );
+    }
+  }
+
+  /**
+   * Maps every Square variation to a product, creating the product when no
+   * mapping or SKU finds one, for one store (locationId) or globally. Skips
+   * archived items and Yastás items, whose mapping carries the employee the
+   * worker needs; a store mapping without it would take priority and fail every sale.
+   */
+  async syncSquareCatalog(locationId: string | null, forceResync: boolean): Promise<CatalogSyncResult> {
     const client = this.getSquareClient();
 
-    // Validate locationId if provided
     if (locationId) {
-      const location = await this.prisma.location.findUnique({
-        where: { id: locationId },
-      });
-      if (!location) {
-        throw new Error(`Location with ID "${locationId}" not found. Please use a valid location ID from your database, not a Square location ID.`);
-      }
+      const location = await this.prisma.location.findUnique({ where: { id: locationId } });
+      if (!location) throw new BadRequestException('Sucursal no encontrada');
       this.logger.log(`[CATALOG_SYNC] Syncing for location: ${location.name} (${locationId})`);
     } else {
       this.logger.log(`[CATALOG_SYNC] Syncing globally (no location specified)`);
     }
+    await this.assertBeforeCutover(locationId);
 
-    // 1. Fetch ALL Variations (using cursor pagination)
-    let catalogObjects: any[] = [];
-    let cursor: string | undefined = undefined;
-
+    // 1. Every variation, with their items (to see which are archived).
+    const variations: Square.CatalogObject.ItemVariation[] = [];
+    const archivedItemIds = new Set<string>();
+    let cursor: string | undefined;
     try {
       do {
-        const response = await client.catalog.search({
-          objectTypes: ['ITEM_VARIATION'],
-          cursor: cursor,
-        });
-        if (response.objects) catalogObjects.push(...response.objects);
+        const response = await client.catalog.search({ objectTypes: ['ITEM_VARIATION'], includeRelatedObjects: true, cursor });
+        for (const o of response.objects ?? []) if (o.type === 'ITEM_VARIATION') variations.push(o);
+        for (const o of response.relatedObjects ?? []) if (o.type === 'ITEM' && o.itemData?.isArchived) archivedItemIds.add(o.id);
         cursor = response.cursor || undefined;
       } while (cursor);
     } catch (error) {
       this.logger.error('[CATALOG_SYNC] Square API error:', error);
       throw new Error(`Failed to fetch catalog: ${error}`);
     }
-
-    const variations = catalogObjects.filter(o => o.type === 'ITEM_VARIATION');
 
     const result: CatalogSyncResult = {
       totalVariationsFound: variations.length,
@@ -296,13 +195,10 @@ export class CatalogService {
       mappingsSkipped: 0,
       errors: [],
     };
-
     this.logger.log(`[CATALOG_SYNC] Found ${variations.length} variations. Starting sync...`);
 
-    // 2. Pre-fetch Data (Minimize DB Reads)
+    // 2. What the app already has.
     const variationIds = variations.map((v) => v.id);
-    
-    // Fetch Mappings
     const existingMappings = await this.prisma.catalogMapping.findMany({
       where: { squareVariationId: { in: variationIds }, locationId },
       include: { product: true },
@@ -313,190 +209,142 @@ export class CatalogService {
     // already has its product. Without this, a location sync found no mapping
     // for that location and, for a SKU-less variation, created a duplicate.
     // Unfiltered by scope on purpose: the in-scope mapping is checked first.
-    const anyScopeProductMap = productByVariation(
-      await this.prisma.catalogMapping.findMany({
-        where: { squareVariationId: { in: variationIds } },
-        include: { product: true },
-      }),
-    );
+    const anyScopeMappings = await this.prisma.catalogMapping.findMany({
+      where: { squareVariationId: { in: variationIds } },
+      include: { product: true },
+    });
+    const anyScopeProductMap = productByVariation(anyScopeMappings);
+    const yastasVariationIds = new Set(anyScopeMappings.filter((m) => m.employeeId).map((m) => m.squareVariationId));
 
-    // Fetch Products by SKU
-    const skus = variations
-      .map((v) => v.itemVariationData?.sku)
-      .filter((sku): sku is string => !!sku);
-    
-    const productsBySku = skus.length > 0 
-      ? await this.prisma.product.findMany({ where: { sku: { in: skus } } }) 
-      : [];
+    const skus = variations.map((v) => v.itemVariationData?.sku).filter((sku): sku is string => !!sku);
+    const productsBySku = skus.length > 0 ? await this.prisma.product.findMany({ where: { sku: { in: skus } } }) : [];
     const productBySkuMap = new Map(productsBySku.map((p) => [p.sku!, p]));
 
-    // 3. Identification Phase (Who needs fetching?)
-    const variationsNeedingFetch: string[] = [];
-    
-    // Helper to get cached product
-    const getCachedProduct = (varId: string, sku: string | null) => {
-        let p = mappingMap.get(varId)?.product || anyScopeProductMap.get(varId) || null;
-        if (!p && sku) p = productBySkuMap.get(sku) || null;
-        return p;
-    };
+    const getCachedProduct = (varId: string, sku: string | null) =>
+      mappingMap.get(varId)?.product ?? anyScopeProductMap.get(varId) ?? (sku ? productBySkuMap.get(sku) : undefined) ?? null;
 
-    for (const variation of variations) {
-      const p = getCachedProduct(variation.id, variation.itemVariationData?.sku || null);
-      const isStale = p?.squareDataSyncedAt 
-        ? (Date.now() - p.squareDataSyncedAt.getTime() > 24 * 60 * 60 * 1000) 
-        : true;
-      
-      if (!p || isStale || forceResync) {
-        variationsNeedingFetch.push(variation.id);
-      }
-    }
+    // 3. Which variations this sync writes, and of those, which need Square's details.
+    const toSync = variations.filter((v) => {
+      const archived = !!v.itemVariationData?.itemId && archivedItemIds.has(v.itemVariationData.itemId);
+      // A Yastás item keeps its employee's mapping; another without the employee would take priority.
+      const yastas = yastasVariationIds.has(v.id) && !mappingMap.has(v.id);
+      const upToDate = mappingMap.has(v.id) && !forceResync;
+      if (archived || yastas || upToDate) result.mappingsSkipped++;
+      return !archived && !yastas && !upToDate;
+    });
+    const variationsNeedingFetch = toSync
+      .filter((v) => {
+        const synced = getCachedProduct(v.id, v.itemVariationData?.sku ?? null)?.squareDataSyncedAt;
+        return forceResync || !synced || Date.now() - synced.getTime() > DAY_MS;
+      })
+      .map((v) => v.id);
 
-    // 4. Batch Fetch from Square
     this.logger.log(`[CATALOG_SYNC] Fetching details for ${variationsNeedingFetch.length} items...`);
-    const catalogDataMap = variationsNeedingFetch.length > 0
-      ? await this.fetchBatchCatalogObjects(variationsNeedingFetch)
-      : new Map();
+    const catalogDataMap = variationsNeedingFetch.length > 0 ? await this.fetchBatchCatalogObjects(variationsNeedingFetch) : new Map<string, CatalogData>();
 
-    // 5. CHUNKED EXECUTION (The Performance Fix)
-    // We process 20 items in parallel. This is fast but won't exhaust the connection pool.
-    const CHUNK_SIZE = 20; 
-    
-    for (let i = 0; i < variations.length; i += CHUNK_SIZE) {
-      const batch = variations.slice(i, i + CHUNK_SIZE);
-      
-      // Execute batch in parallel
-      await Promise.all(batch.map(async (variation) => {
-        try {
-          const variationId = variation.id;
-          const variationData = variation.itemVariationData;
-          const variationName = variationData?.name || 'Unknown';
-          const variationSku = variationData?.sku || null;
-          
-          const existingMapping = mappingMap.get(variationId);
-          if (existingMapping && !forceResync) return; // Skip logic
-
-          // Determine Product Data
-          let product = getCachedProduct(variationId, variationSku);
-          
-          let catalogData: CatalogData;
-          if (catalogDataMap.has(variationId)) {
-            catalogData = catalogDataMap.get(variationId)!;
-          } else if (product) {
-            catalogData = {
-              productName: product.squareProductName,
-              productDescription: product.squareDescription,
-              imageUrl: product.squareImageUrl,
-              priceCents: null,
-              currency: null,
-            };
-          } else {
-             catalogData = { 
-               productName: variationName, 
-               productDescription: null, 
-               imageUrl: null,
-               priceCents: null,
-               currency: null,
-             };
+    // 4. Write 20 at a time: fast without exhausting the connection pool.
+    const CHUNK_SIZE = 20;
+    for (let i = 0; i < toSync.length; i += CHUNK_SIZE) {
+      await Promise.all(
+        toSync.slice(i, i + CHUNK_SIZE).map(async (variation) => {
+          try {
+            await this.syncVariation(variation, { locationId, forceResync, existingMapping: mappingMap.get(variation.id), catalogDataMap, getCachedProduct, productBySkuMap, result });
+            result.variationsProcessed++;
+          } catch (error) {
+            result.errors.push({
+              variationId: variation.id,
+              variationName: variation.itemVariationData?.name || 'Unknown',
+              error: error instanceof Error ? error.message : String(error),
+              skipped: true,
+            });
           }
-
-          // Don't let a failed/missing Square detail fetch leak the raw
-          // generic variation label ("Sin variación"/"Regular") into the name.
-          const squareProductName =
-            catalogData.productName ||
-            (this.isGenericVariationName(variationName) ? null : variationName);
-
-          // --- ATOMIC DB WRITE START ---
-          // We use a transaction here to ensure Product and Mapping are synced together
-          await this.prisma.$transaction(async (tx) => {
-            
-            // A. UPSERT PRODUCT
-            if (!product) {
-              // Try creating (Handle race condition with try/catch inside transaction if needed, 
-              // but purely serial transactions in a batch is safer)
-              try {
-                product = await tx.product.create({
-                  data: {
-                    // The item name, not the variation label ("Regular"/"Sin variación").
-                    name: squareProductName ?? variationName,
-                    sku: variationSku,
-                    squareProductName: squareProductName,
-                    squareDescription: catalogData.productDescription,
-                    squareImageUrl: catalogData.imageUrl,
-                    squareVariationName: variationName,
-                    squareDataSyncedAt: new Date(),
-                  },
-                });
-                result.productsCreated++;
-              } catch (e: any) {
-                // If parallel SKU create clash, recover
-                if (e.code === 'P2002' && variationSku) {
-                   product = await tx.product.findUnique({ where: { sku: variationSku } });
-                   if (!product) throw e; 
-                } else {
-                  throw e;
-                }
-              }
-            } else if (forceResync || catalogDataMap.has(variationId)) {
-              product = await tx.product.update({
-                where: { id: product.id },
-                data: {
-                  // Repair a name still stuck on a placeholder label; never touch a real one.
-                  ...(squareProductName && isPlaceholderProductName(product.name) ? { name: squareProductName } : {}),
-                  squareProductName: squareProductName,
-                  squareDescription: catalogData.productDescription,
-                  squareImageUrl: catalogData.imageUrl,
-                  squareVariationName: variationName,
-                  squareDataSyncedAt: new Date(),
-                },
-              });
-            }
-
-            // B. UPSERT MAPPING (with price data)
-            const priceData = mappingPriceFields(catalogData.priceCents, catalogData.currency);
-            if (priceData.priceCents) {
-              this.logger.debug(`[CATALOG_SYNC] Saving price for variation ${variationId}: ${catalogData.priceCents} cents (${priceData.currency})`);
-            }
-
-            if (existingMapping) {
-              await tx.catalogMapping.update({
-                where: { id: existingMapping.id },
-                data: { 
-                  syncedAt: new Date(), 
-                  ...priceData,
-                  ...(locationId ? { locationId } : {}) 
-                },
-              });
-            } else {
-              await tx.catalogMapping.create({
-                data: {
-                  squareVariationId: variationId,
-                  productId: product!.id,
-                  locationId: locationId,
-                  syncedAt: new Date(),
-                  ...priceData,
-                },
-              });
-              result.mappingsCreated++;
-            }
-          }); 
-          // --- ATOMIC DB WRITE END ---
-
-          // Update Memory Cache (Thread-safe enough for this logic)
-          if (product && product.sku) productBySkuMap.set(product.sku, product);
-          result.variationsProcessed++;
-
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          result.errors.push({
-            variationId: variation.id,
-            variationName: variation.itemVariationData?.name || 'Unknown',
-            error: msg,
-            skipped: true,
-          });
-        }
-      }));
+        }),
+      );
     }
 
     return result;
+  }
+
+  /** One variation's product and mapping, written together. */
+  private async syncVariation(
+    variation: Square.CatalogObject.ItemVariation,
+    ctx: {
+      locationId: string | null;
+      forceResync: boolean;
+      existingMapping: { id: string } | undefined;
+      catalogDataMap: Map<string, CatalogData>;
+      getCachedProduct: (varId: string, sku: string | null) => Prisma.ProductGetPayload<object> | null;
+      productBySkuMap: Map<string, Prisma.ProductGetPayload<object>>;
+      result: CatalogSyncResult;
+    },
+  ): Promise<void> {
+    const { locationId, forceResync, existingMapping, catalogDataMap, result } = ctx;
+    const variationId = variation.id;
+    const variationName = variation.itemVariationData?.name || 'Unknown';
+    const variationSku = variation.itemVariationData?.sku || null;
+    let product = ctx.getCachedProduct(variationId, variationSku);
+
+    const fetched = catalogDataMap.get(variationId);
+    const catalogData: CatalogData =
+      fetched ??
+      (product
+        ? { ...NO_CATALOG_DATA, productName: product.squareProductName, productDescription: product.squareDescription, imageUrl: product.squareImageUrl }
+        : NO_CATALOG_DATA);
+    // Never a placeholder label ("Sin variación"/"Regular") as the Square name.
+    const squareProductName = catalogData.productName || (isPlaceholderProductName(variationName) ? null : variationName);
+
+    const write = () =>
+      this.prisma.$transaction(async (tx) => {
+        if (!product) {
+          product = await tx.product.create({
+            data: {
+              // The item name, not the variation label; a placeholder here is repaired by a later sync.
+              name: squareProductName ?? variationName,
+              sku: variationSku,
+              squareProductName,
+              squareDescription: catalogData.productDescription,
+              squareImageUrl: catalogData.imageUrl,
+              squareVariationName: variationName,
+              squareDataSyncedAt: new Date(),
+            },
+          });
+          result.productsCreated++;
+        } else if (forceResync || fetched) {
+          product = await tx.product.update({
+            where: { id: product.id },
+            data: {
+              // Repair a name still stuck on a placeholder label; never touch a real one.
+              ...(squareProductName && isPlaceholderProductName(product.name) ? { name: squareProductName } : {}),
+              squareProductName,
+              squareDescription: catalogData.productDescription,
+              squareImageUrl: catalogData.imageUrl,
+              squareVariationName: variationName,
+              squareDataSyncedAt: new Date(),
+            },
+          });
+        }
+
+        const priceData = mappingPriceFields(catalogData.priceCents, catalogData.currency);
+        if (existingMapping) {
+          await tx.catalogMapping.update({ where: { id: existingMapping.id }, data: { syncedAt: new Date(), ...priceData } });
+        } else {
+          await tx.catalogMapping.create({
+            data: { squareVariationId: variationId, productId: product!.id, locationId, syncedAt: new Date(), ...priceData },
+          });
+          result.mappingsCreated++;
+        }
+      });
+
+    try {
+      await write();
+    } catch (error) {
+      // Another variation with this SKU created its product meanwhile. Postgres
+      // aborted that transaction, so look it up outside it and map to it.
+      if ((error as { code?: string }).code !== 'P2002' || !variationSku || product) throw error;
+      product = await this.prisma.product.findUnique({ where: { sku: variationSku } });
+      if (!product) throw error;
+      await write();
+    }
+    if (product?.sku) ctx.productBySkuMap.set(product.sku, product);
   }
 }

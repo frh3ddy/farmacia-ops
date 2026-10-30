@@ -1,12 +1,4 @@
-import {
-  Controller,
-  Post,
-  Body,
-  HttpCode,
-  HttpStatus,
-  HttpException,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, HttpException, UseGuards } from '@nestjs/common';
 import { AuthGuard, Roles } from '../auth/guards/auth.guard';
 import { CatalogService, CatalogSyncResult } from './catalog.service';
 
@@ -21,46 +13,27 @@ interface SyncCatalogResponse {
   message: string;
 }
 
+/** Square catalog sync: the owner's migration tool, refused once stores have cut over. */
 @Controller('admin/square/catalog')
 @UseGuards(AuthGuard)
-@Roles('OWNER', 'MANAGER')
+@Roles('OWNER')
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
 
   @Post('sync')
   @HttpCode(HttpStatus.OK)
-  async syncCatalog(
-    @Body() body: SyncCatalogDto,
-  ): Promise<SyncCatalogResponse> {
+  async syncCatalog(@Body() body: SyncCatalogDto): Promise<SyncCatalogResponse> {
     try {
-      const locationId = body.locationId || null;
-      const forceResync = body.forceResync || false;
-
-      const result = await this.catalogService.syncSquareCatalog(
-        locationId,
-        forceResync,
-      );
-
-      return {
-        success: true,
-        result,
-        message: 'Catalog sync completed successfully',
-      };
+      const result = await this.catalogService.syncSquareCatalog(body.locationId || null, body.forceResync || false);
+      return { success: true, result, message: 'Catálogo sincronizado' };
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error';
-      
-      console.error('[CATALOG_SYNC] Error syncing catalog:', errorMessage);
-
+      if (error instanceof HttpException) throw error;
+      // The raw error (a database or Square message) goes to the log, not the screen.
+      console.error('[CATALOG_SYNC] Error syncing catalog:', error instanceof Error ? error.message : error);
       throw new HttpException(
-        {
-          success: false,
-          message: `Catalog sync failed: ${errorMessage}`,
-          error: errorMessage,
-        },
+        { success: false, message: 'No se pudo sincronizar el catálogo. Intenta de nuevo.' },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 }
-
