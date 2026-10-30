@@ -7,6 +7,13 @@
 import { Prisma } from '@prisma/client';
 import { preferredMapping } from '../inventory/square-sync';
 
+/**
+ * Products a location's lists show: everything except another store's
+ * one-store products. No location (the owner's every-store view): everything.
+ */
+export const soldAt = (locationId?: string): Prisma.ProductWhereInput =>
+  locationId ? { OR: [{ soldOnlyAtLocationId: null }, { soldOnlyAtLocationId: locationId }] } : {};
+
 export const CATALOG_PRODUCT_INCLUDE = (locationId?: string) =>
   ({
     laboratory: { select: { id: true, name: true } },

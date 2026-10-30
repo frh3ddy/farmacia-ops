@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MedicationEquivalenceService } from './medication-equivalence.service';
-import { CATALOG_PRODUCT_INCLUDE, toProductView, type CatalogProductView } from './catalog-product-view';
+import { CATALOG_PRODUCT_INCLUDE, soldAt, toProductView, type CatalogProductView } from './catalog-product-view';
 import {
   rankSearchCandidates,
   buildSearchResult,
@@ -10,9 +11,12 @@ import {
   matchSymptomKeyword,
   type MatchType,
 } from './catalog-search';
-import { stripAccents } from '../inventory-migration/category-classifier';
+import { stripAccents } from '../common/strip-accents';
 
 type SearchProductCandidate = CatalogProductView & { matchType: MatchType };
+
+/** The most products one search returns, and loads from any one branch — as the product list's search. */
+const SEARCH_LIMIT = 500;
 
 @Injectable()
 export class CatalogSearchService {
@@ -34,6 +38,10 @@ export class CatalogSearchService {
     const normalizedQuery = stripAccents(q.toLowerCase());
 
     const include = CATALOG_PRODUCT_INCLUDE(locationId);
+    const visible = soldAt(locationId);
+    const oneStoreSql = locationId
+      ? Prisma.sql`AND ("soldOnlyAtLocationId" IS NULL OR "soldOnlyAtLocationId" = ${locationId})`
+      : Prisma.empty;
 
     // Prisma's `contains` can't ignore accents, so "Suspension" would miss a
     // product named "Suspensión" — translate() strips accents at the DB level
@@ -45,12 +53,15 @@ export class CatalogSearchService {
           POSITION(${normalizedQuery} IN translate(lower(name), 'áéíóúñü', 'aeiounu')) > 0
           OR POSITION(${normalizedQuery} IN translate(lower(COALESCE("squareProductName", '')), 'áéíóúñü', 'aeiounu')) > 0
         )
+        ${oneStoreSql}
+      LIMIT ${SEARCH_LIMIT}
     `;
 
     const [skuMatches, nameMatches, aliasMatches, ingredientMatches, definitionMatches, categoryMatches] = await Promise.all([
       this.prisma.product.findMany({
-        where: { sku: { equals: q, mode: 'insensitive' }, isDiscontinued: false },
+        where: { AND: [{ sku: { equals: q, mode: 'insensitive' }, isDiscontinued: false }, visible] },
         include,
+        take: SEARCH_LIMIT,
       }),
       nameMatchIds.length
         ? this.prisma.product.findMany({ where: { id: { in: nameMatchIds.map((r) => r.id) } }, include })
@@ -59,7 +70,7 @@ export class CatalogSearchService {
         // Prisma's array `has` is exact-membership only, so this can't filter
         // by substring at the DB level — fetch every tagged product (cheap;
         // most products carry none) and substring-match in JS below.
-        where: { isDiscontinued: false, searchAliases: { isEmpty: false } },
+        where: { AND: [{ isDiscontinued: false, searchAliases: { isEmpty: false } }, visible] },
         include,
       }),
       this.prisma.activeIngredient.findMany({
@@ -70,15 +81,17 @@ export class CatalogSearchService {
           ingredients: {
             include: {
               medicationDefinition: {
-                include: { products: { where: { isDiscontinued: false }, include } },
+                include: { products: { where: { AND: [{ isDiscontinued: false }, visible] }, include, take: SEARCH_LIMIT } },
               },
             },
           },
         },
+        take: SEARCH_LIMIT,
       }),
       this.prisma.medicationDefinition.findMany({
         where: { name: { contains: q, mode: 'insensitive' } },
-        include: { products: { where: { isDiscontinued: false }, include } },
+        include: { products: { where: { AND: [{ isDiscontinued: false }, visible] }, include, take: SEARCH_LIMIT } },
+        take: SEARCH_LIMIT,
       }),
       this.prisma.category.findMany({
         // Category count is small (~100 rows) — cheap to fetch every symptom-tagged
@@ -138,8 +151,9 @@ export class CatalogSearchService {
     }
     if (categoryIdToMatchType.size) {
       const categoryProducts = await this.prisma.product.findMany({
-        where: { categoryId: { in: [...categoryIdToMatchType.keys()] }, isDiscontinued: false },
+        where: { AND: [{ categoryId: { in: [...categoryIdToMatchType.keys()] }, isDiscontinued: false }, visible] },
         include,
+        take: SEARCH_LIMIT,
       });
       for (const product of categoryProducts) {
         candidates.push({
@@ -149,7 +163,7 @@ export class CatalogSearchService {
       }
     }
 
-    const ranked = rankSearchCandidates(candidates);
+    const ranked = rankSearchCandidates(candidates).slice(0, SEARCH_LIMIT);
     const alternativesChecked = shouldShowAlternatives(ranked);
 
     const alternatives = alternativesChecked
@@ -160,14 +174,8 @@ export class CatalogSearchService {
 
     // Always tag each result with its own equivalents (same MedicationDefinition),
     // in stock or not — not just the out-of-stock top-match branch above.
-    const requested = await Promise.all(
-      result.requested.map(async (p) => ({
-        ...p,
-        equivalents: p.medicationDefinitionId
-          ? await this.equivalenceService.findEquivalentProducts(p.id, locationId)
-          : [],
-      })),
-    );
+    const equivalents = await this.equivalenceService.findEquivalentsOf(result.requested, locationId);
+    const requested = result.requested.map((p) => ({ ...p, equivalents: equivalents.get(p.id) ?? [] }));
 
     return { requested, alternatives: result.alternatives, alternativesChecked };
   }

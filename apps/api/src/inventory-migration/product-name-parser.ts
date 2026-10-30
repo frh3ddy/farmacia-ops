@@ -1,5 +1,5 @@
 import { PharmaceuticalForm, AdministrationRoute, PackagingType } from '@prisma/client';
-import { stripAccents } from './category-classifier';
+import { stripAccents } from '../common/strip-accents';
 import {
   findIngredientInText,
   normalizeForIngredientMatch,

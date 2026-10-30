@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts } from './products.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
@@ -38,7 +39,7 @@ interface UpdatePriceDto {
 // The buffer is sent directly to Square and the Square-hosted URL is stored.
 const productImageMemoryStorage = memoryStorage();
 
-const imageFileFilter = (_req: any, file: any, cb: any) => {
+const imageFileFilter: MulterOptions['fileFilter'] = (_req, file, cb) => {
   if (file.mimetype.startsWith('image/')) {
     cb(null, true);
   } else {
@@ -402,13 +403,6 @@ export class ProductsController {
     @Body() body: UpdatePriceDto,
     @Req() req: GuardedRequest,
   ) {
-    if (body.sellingPrice === undefined || body.sellingPrice === null) {
-      throw new HttpException(
-        { success: false, message: 'El precio de venta es obligatorio' },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
     const locationId = body.locationId || req.currentLocation?.locationId;
     if (!locationId) {
       throw new HttpException(

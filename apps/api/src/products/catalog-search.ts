@@ -5,7 +5,7 @@
  * matchType, and hands them to this module.
  */
 import { rankEquivalents, type EquivalenceCandidate } from './medication-equivalence';
-import { stripAccents } from '../inventory-migration/category-classifier';
+import { stripAccents } from '../common/strip-accents';
 
 export type MatchType =
   | 'sku'

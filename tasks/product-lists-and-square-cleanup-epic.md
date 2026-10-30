@@ -1,6 +1,6 @@
 # Product Lists and Square Cleanup Epic
 
-**Status**: 📋 PLANNED
+**Status**: ✅ COMPLETED (2026-10-29)
 **Goal**: Product lists show each store only what it sells, stay fast for any search, and the remaining Square and typing rough edges are gone.
 
 ## Overview
@@ -9,7 +9,7 @@ From the third review of `apps/api/src/products/` (2026-10-29), findings 4–9. 
 
 ---
 
-## 📋 The store a one-store product belongs to
+## ✅ The store a one-store product belongs to
 
 **Requirements**:
 - Given a product sold at one store, should record that store (`Product.soldOnlyAtLocationId`, null = every store) instead of the true/false `soldAtAllLocations`; the `20261030120000` migration has never been deployed, so rewrite it rather than stack a second one (confirm no local database applied it first)
@@ -17,7 +17,7 @@ From the third review of `apps/api/src/products/` (2026-10-29), findings 4–9. 
 
 ---
 
-## 📋 One-store products only at their store
+## ✅ One-store products only at their store
 
 **Requirements**:
 - Given another store's product list, catalog search, equivalents or dashboard counts, should leave out a product sold only at a different store
@@ -26,7 +26,7 @@ From the third review of `apps/api/src/products/` (2026-10-29), findings 4–9. 
 
 ---
 
-## 📋 Bounded catalog search
+## ✅ Bounded catalog search
 
 **Requirements**:
 - Given any query, should return at most a fixed number of results, as the product list's search does (500)
@@ -34,21 +34,21 @@ From the third review of `apps/api/src/products/` (2026-10-29), findings 4–9. 
 
 ---
 
-## 📋 Dashboard counts only stocked merchandise
+## ✅ Dashboard counts only stocked merchandise
 
 **Requirements**:
 - Given Yastás products (no inventory) and discontinued products, should leave them out of the counts
 
 ---
 
-## 📋 Renaming keeps the whole item
+## ✅ Renaming keeps the whole item
 
 **Requirements**:
 - Given a rename in Square, should send back the item as Square returned it with only the name changed, as price changes do, and fix the docblock that says otherwise
 
 ---
 
-## 📋 Small fixes and cleanup
+## ✅ Small fixes and cleanup
 
 **Requirements**:
 - Given two simultaneous creates with one `clientRequestId`, should answer the second with the existing product, not a 500
@@ -60,7 +60,7 @@ From the third review of `apps/api/src/products/` (2026-10-29), findings 4–9. 
 
 ---
 
-## 📋 Tests
+## ✅ Tests
 
 **Requirements**:
 - Given each case above, should be covered: one-store visibility per store and for the owner, the search cap, counts without Yastás and discontinued, the rename payload, the concurrent retry, the $0 skip and literal wildcards

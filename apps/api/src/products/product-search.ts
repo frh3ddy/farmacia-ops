@@ -14,7 +14,7 @@
  * over Product, which is why it only runs on the rare miss.
  */
 import { Prisma } from '@prisma/client';
-import { stripAccents } from '../inventory-migration/category-classifier';
+import { stripAccents } from '../common/strip-accents';
 
 /** Below 4 chars a word has too few trigrams for similarity to mean anything. */
 const MIN_FUZZY_TOKEN_LENGTH = 4;
@@ -64,16 +64,27 @@ function availableFirstSql(locationId?: string): Prisma.Sql {
       (SELECT SUM(i.quantity) FROM "Inventory" i WHERE i."productId" = p.id ${atLocation}), 0) > 0) DESC`;
 }
 
+/** `%`, `_` and a backslash taken literally in a LIKE pattern (backslash is Postgres's default escape). */
+const escapeLike = (text: string) => text.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/** Another store's one-store products never match; no location (every store) sees all. */
+function soldAtSql(locationId?: string): Prisma.Sql {
+  return locationId
+    ? Prisma.sql`AND (p."soldOnlyAtLocationId" IS NULL OR p."soldOnlyAtLocationId" = ${locationId})`
+    : Prisma.empty;
+}
+
 /**
  * Relevance, highest first: exact SKU, then name-starts-with, then the whole
  * query appearing verbatim; ties go to what's in stock, then the shortest name
  * (a bare "Tylenol" outranks "Tylenol Infantil Jarabe 120ml" for "tylenol").
  */
 function rankSql(query: string, locationId?: string): Prisma.Sql {
+  const literal = escapeLike(query);
   return Prisma.sql`
     (CASE WHEN translate(lower(COALESCE(p.sku, '')), 'áéíóúñü', 'aeiounu') = ${query} THEN 1000 ELSE 0 END
-     + CASE WHEN ${HAY} LIKE ${`${query}%`} THEN 500 ELSE 0 END
-     + CASE WHEN ${HAY} LIKE ${`%${query}%`} THEN 300 ELSE 0 END) DESC,
+     + CASE WHEN ${HAY} LIKE ${`${literal}%`} THEN 500 ELSE 0 END
+     + CASE WHEN ${HAY} LIKE ${`%${literal}%`} THEN 300 ELSE 0 END) DESC,
     ${availableFirstSql(locationId)},
     length(p.name) ASC, p.name ASC`;
 }
@@ -95,7 +106,7 @@ export function substringMatchSql(tokens: string[], query: string, locationId?: 
   const conditions = tokens.map(tokenMatchSql);
   return Prisma.sql`
     SELECT p.id FROM "Product" p
-    WHERE ${Prisma.join(conditions, ' AND ')}
+    WHERE ${Prisma.join(conditions, ' AND ')} ${soldAtSql(locationId)}
     ORDER BY ${rankSql(query, locationId)}
     LIMIT ${MAX_RESULTS}`;
 }
@@ -112,7 +123,7 @@ export function fuzzyMatchSql(tokens: string[], query: string, locationId?: stri
   );
   return Prisma.sql`
     SELECT p.id FROM "Product" p
-    WHERE ${Prisma.join(conditions, ' AND ')}
+    WHERE ${Prisma.join(conditions, ' AND ')} ${soldAtSql(locationId)}
     ORDER BY word_similarity(${query}, ${HAY}) DESC, ${availableFirstSql(locationId)}, length(p.name) ASC, p.name ASC
     LIMIT ${MAX_RESULTS}`;
 }

@@ -35,7 +35,8 @@ model Location {
   yastasTransfersOut YastasWalletTransfer[] @relation("YastasTransferFrom")
   yastasTransfersIn  YastasWalletTransfer[] @relation("YastasTransferTo")
 
-  createdAt DateTime @default(now())
+  createdAt            DateTime  @default(now())
+  productsSoldOnlyHere Product[] @relation("ProductSoldOnlyAt")
 }
 
 // ============================================================================
@@ -181,13 +182,14 @@ enum MigrationStatus {
 }
 
 model Product {
-  id                 String  @id @default(uuid())
-  name               String
-  sku                String? @unique
-  categoryId         String?
-  isDiscontinued     Boolean @default(false)
-  tracksInventory    Boolean @default(true) // false only for per-employee Yastás service items — never touches Inventory/FIFO
-  soldAtAllLocations Boolean @default(true) // false: created in Square present only at the store that created it
+  id                   String    @id @default(uuid())
+  name                 String
+  sku                  String?   @unique
+  categoryId           String?
+  isDiscontinued       Boolean   @default(false)
+  tracksInventory      Boolean   @default(true) // false only for per-employee Yastás service items — never touches Inventory/FIFO
+  soldOnlyAtLocationId String? // set: sold only at this store (created in Square there alone, hidden at other stores); null: every store
+  soldOnlyAtLocation   Location? @relation("ProductSoldOnlyAt", fields: [soldOnlyAtLocationId], references: [id], onDelete: SetNull)
 
   // Square catalog data (cached to avoid API calls during extraction)
   squareProductName   String? // Product name from Square ITEM

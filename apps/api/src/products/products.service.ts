@@ -12,6 +12,7 @@ import { deriveName, derivePresentation, type Substance } from './derived-naming
 import { normalizeSearchAliases } from './catalog-search';
 import { findSearchMatchIds, sortByIdOrder } from './product-search';
 import { productsWithoutCostSql, type ProductWithoutCost } from './products-without-cost';
+import { soldAt } from './catalog-product-view';
 
 // Currency constant - must match Square merchant account currency
 // Square merchant is configured with USD
@@ -34,16 +35,18 @@ export function withoutCosts<
 }
 
 /**
- * The only Square location a new item for this product is sold at, or
- * undefined when it is sold everywhere.
+ * The only Square location a new item is sold at: its one store's, or
+ * undefined when it is sold everywhere (no store).
  */
-function onlySquareLocation(soldAtAllLocations: boolean, squareLocationId?: string | null): string | undefined {
-  if (soldAtAllLocations) return undefined;
-  if (!squareLocationId) {
+function onlySquareLocation(soldOnlyAt: { squareId: string | null } | null): string | undefined {
+  if (!soldOnlyAt) return undefined;
+  if (!soldOnlyAt.squareId) {
     throw new BadRequestException('El producto se vende solo en esta sucursal, y la sucursal no está en Square');
   }
-  return squareLocationId;
+  return soldOnlyAt.squareId;
 }
+
+const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 
 export interface CreateProductInput {
   name: string;
@@ -99,8 +102,16 @@ export interface UpdatePriceInput {
   applyToAllLocations?: boolean; // If true, update price at all Square locations
 }
 
+type CreatedProduct = Prisma.ProductGetPayload<{
+  include: { catalogMappings: { include: { location: true } }; inventories: true };
+}>;
+
+type PricedProduct = Prisma.ProductGetPayload<{
+  include: { category: true; catalogMappings: { include: { location: true } }; inventories: true };
+}> & { sellingPrice: number; currency: string; totalInventory: number; averageCost: number | null; hasSquareSync: boolean };
+
 export interface ProductResult {
-  product: any;
+  product: CreatedProduct | null;
   squareSynced: boolean;
   squareItemId?: string;
   squareVariationId?: string;
@@ -109,7 +120,7 @@ export interface ProductResult {
 }
 
 export interface PriceUpdateResult {
-  product: any;
+  product: PricedProduct | null;
   previousPrice: number | null;
   newPrice: number;
   squareSynced: boolean;
@@ -187,23 +198,27 @@ export class ProductsService {
   /**
    * Create a new product and optionally sync to Square
    */
+  /** The product a retried create already made under its clientRequestId, if any. */
+  private async replayCreate({ clientRequestId, locationId }: CreateProductInput): Promise<ProductResult | null> {
+    if (!clientRequestId) return null;
+    const replayed = await this.prisma.product.findUnique({
+      where: { id: clientRequestId },
+      include: { catalogMappings: { include: { location: true } }, inventories: true },
+    });
+    if (!replayed) return null;
+    const mapping = preferredMapping(replayed.catalogMappings, locationId);
+    return {
+      product: replayed,
+      squareSynced: mapping ? isSquareMapping(mapping) : false,
+      squareVariationId: mapping && isSquareMapping(mapping) ? mapping.squareVariationId : undefined,
+      inventoryCreated: replayed.inventories.length > 0,
+      message: `Producto "${replayed.name}" ya creado`,
+    };
+  }
+
   async createProduct(input: CreateProductInput): Promise<ProductResult> {
-    if (input.clientRequestId) {
-      const replayed = await this.prisma.product.findUnique({
-        where: { id: input.clientRequestId },
-        include: { catalogMappings: { include: { location: true } }, inventories: true },
-      });
-      if (replayed) {
-        const mapping = preferredMapping(replayed.catalogMappings, input.locationId);
-        return {
-          product: replayed,
-          squareSynced: mapping ? isSquareMapping(mapping) : false,
-          squareVariationId: mapping && isSquareMapping(mapping) ? mapping.squareVariationId : undefined,
-          inventoryCreated: replayed.inventories.length > 0,
-          message: `Product "${replayed.name}" already created`,
-        };
-      }
-    }
+    const replayed = await this.replayCreate(input);
+    if (replayed) return replayed;
 
     const {
       name,
@@ -303,7 +318,7 @@ export class ProductsService {
           sku: trimmedSku,
           description,
           sellingPrice,
-          onlyAtSquareLocationId: onlySquareLocation(soldAtAllLocations, location.squareId),
+          onlyAtSquareLocationId: onlySquareLocation(soldAtAllLocations ? null : location),
         });
         squareItemId = squareResult.itemId;
         squareVariationId = squareResult.variationId;
@@ -345,7 +360,7 @@ export class ProductsService {
             manualPresentation: manualPresentation?.trim() || null,
             looseProductId: looseProductId || null,
             searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
-            soldAtAllLocations,
+            soldOnlyAtLocationId: soldAtAllLocations ? null : locationId,
           },
         });
 
@@ -402,6 +417,9 @@ export class ProductsService {
           this.logger.error(`[PRODUCT] Failed to delete Square item ${squareItemId} after a failed create: ${deleteError}`),
         );
       }
+      // The same retry arriving twice at once: the other request saved it first.
+      const replayedRace = isUniqueViolation(error) ? await this.replayCreate(input) : null;
+      if (replayedRace) return replayedRace;
       throw error;
     }
 
@@ -435,8 +453,8 @@ export class ProductsService {
       squareVariationId,
       inventoryCreated,
       message: squareSynced
-        ? `Product "${resolvedName}" created and synced to Square`
-        : `Product "${resolvedName}" created locally (Square sync ${syncToSquare ? `failed: ${squareError}` : 'disabled'})`,
+        ? `Producto "${resolvedName}" creado y enviado a Square`
+        : `Producto "${resolvedName}" creado solo en la app (${syncToSquare ? `Square no lo aceptó: ${squareError}` : 'sin enviar a Square'})`,
     };
   }
 
@@ -549,7 +567,7 @@ export class ProductsService {
         locationId,
       },
       include: {
-        product: true,
+        product: { include: { soldOnlyAtLocation: true } },
         location: true,
       },
     });
@@ -560,17 +578,12 @@ export class ProductsService {
 
     this.logger.log(`[SYNC] Found ${localMappings.length} unsynced products`);
 
-    const location = await this.prisma.location.findUnique({
-      where: { id: locationId },
-    });
-
     const results: Array<{ productId: string; name: string; success: boolean; error?: string }> = [];
     let synced = 0;
     let failed = 0;
 
     for (const mapping of localMappings) {
       const product = mapping.product;
-      const price = this.fromCents(Number(mapping.priceCents)) || 0;
 
       try {
         const existingVariationId = await findSquareVariationId(this.prisma, product.id, locationId);
@@ -582,12 +595,15 @@ export class ProductsService {
           continue;
         }
 
+        if (mapping.priceCents === null) {
+          throw new BadRequestException('No tiene precio de venta: ponle precio antes de enviarlo a Square');
+        }
         const squareResult = await this.createProductInSquare({
           name: product.name,
           sku: product.sku || undefined,
           description: product.squareDescription || undefined,
-          sellingPrice: price,
-          onlyAtSquareLocationId: onlySquareLocation(product.soldAtAllLocations, location?.squareId),
+          sellingPrice: Number(mapping.priceCents) / 100,
+          onlyAtSquareLocationId: onlySquareLocation(product.soldOnlyAtLocation),
           productId: product.id,
         });
 
@@ -693,9 +709,7 @@ export class ProductsService {
     }
 
     const itemId = catalogObject.id;
-    const itemData = (catalogObject as any).itemData;
-    const variations = itemData?.variations || [];
-    const variationId = variations[0]?.id;
+    const variationId = catalogObject.type === 'ITEM' ? catalogObject.itemData?.variations?.[0]?.id : undefined;
 
     if (!itemId || !variationId) {
       throw new Error('Failed to get item/variation IDs from Square response');
@@ -746,7 +760,7 @@ export class ProductsService {
 
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
-      include: { catalogMappings: { orderBy: { createdAt: 'desc' } } },
+      include: { catalogMappings: { orderBy: { createdAt: 'desc' } }, soldOnlyAtLocation: true },
     });
 
     if (!product) {
@@ -771,7 +785,7 @@ export class ProductsService {
       syncToSquare &&
       (squareVariationId
         ? applyToAllLocations || !!location?.squareId
-        : !!placeholder && (product.soldAtAllLocations || !!location?.squareId));
+        : !!placeholder && (!product.soldOnlyAtLocation || !!product.soldOnlyAtLocation.squareId));
     if (reachesSquare) {
       try {
         if (squareVariationId) {
@@ -783,7 +797,7 @@ export class ProductsService {
             sku: product.sku || undefined,
             description: product.squareDescription || undefined,
             sellingPrice,
-            onlyAtSquareLocationId: onlySquareLocation(product.soldAtAllLocations, location?.squareId),
+            onlyAtSquareLocationId: onlySquareLocation(product.soldOnlyAtLocation),
             productId,
           });
           squareVariationId = squareResult.variationId;
@@ -924,10 +938,8 @@ export class ProductsService {
    */
   private async resolveParentItemId(variationId: string): Promise<string> {
     const client = this.getSquareClient();
-    const retrieveResponse = await client.catalog.object.get({ objectId: variationId });
-    const currentObject = retrieveResponse.object;
-    const variationData = (currentObject as any)?.itemVariationData;
-    const parentItemId = variationData?.itemId;
+    const { object } = await client.catalog.object.get({ objectId: variationId });
+    const parentItemId = object?.type === 'ITEM_VARIATION' ? object.itemVariationData?.itemId : undefined;
     if (!parentItemId) {
       throw new Error(`Could not resolve parent item for Square variation ${variationId}`);
     }
@@ -950,50 +962,22 @@ export class ProductsService {
   }
 
   /**
-   * Renames the parent ITEM's display name in Square. Mirrors
-   * updatePriceInSquare's fetch-preserve-upsert shape: CatalogObject upsert
-   * is a full-object replace, and CatalogItem.variations is required
-   * ("an item must have at least one variation"), so the current itemData
-   * (including its nested variations) is spread back untouched and only
-   * `name` is overridden — never build the object from scratch here.
+   * Renames the parent ITEM in Square. Upsert replaces the whole object, so
+   * the item goes back as Square returned it (variations, images, custom
+   * attributes, where it is sold) with only its name changed.
    */
   async renameProductInSquare(variationId: string, newName: string): Promise<void> {
     const client = this.getSquareClient();
     const parentItemId = await this.resolveParentItemId(variationId);
 
-    const retrieveResponse = await client.catalog.object.get({ objectId: parentItemId });
-    const currentObject = retrieveResponse.object;
-    if (!currentObject) {
+    const { object } = await client.catalog.object.get({ objectId: parentItemId });
+    if (object?.type !== 'ITEM' || !object.itemData) {
       throw new Error(`Item ${parentItemId} not found in Square`);
-    }
-
-    const itemData = (currentObject as any).itemData;
-    if (!itemData) {
-      throw new Error(`Invalid item data for ${parentItemId}`);
-    }
-
-    const upsertObject: any = {
-      type: 'ITEM',
-      id: parentItemId,
-      version: currentObject.version,
-      itemData: { ...itemData, name: newName },
-    };
-
-    // Preserve item-level location settings — same fields/logic as
-    // updatePriceInSquare preserves at the variation level.
-    if (currentObject.presentAtAllLocations !== undefined) {
-      upsertObject.presentAtAllLocations = currentObject.presentAtAllLocations;
-    }
-    if (currentObject.presentAtLocationIds) {
-      upsertObject.presentAtLocationIds = currentObject.presentAtLocationIds;
-    }
-    if (currentObject.absentAtLocationIds) {
-      upsertObject.absentAtLocationIds = currentObject.absentAtLocationIds;
     }
 
     await client.catalog.object.upsert({
       idempotencyKey: randomUUID(),
-      object: upsertObject,
+      object: { ...object, itemData: { ...object.itemData, name: newName } },
     });
     this.logger.log(`[PRODUCT] Renamed Square item ${parentItemId} (via variation ${variationId}) to "${newName}"`);
   }
@@ -1103,8 +1087,7 @@ export class ProductsService {
       );
     }
 
-    const variationData = (variationObject as any).itemVariationData;
-    const parentItemId = variationData?.itemId;
+    const parentItemId = variationObject.type === 'ITEM_VARIATION' ? variationObject.itemVariationData?.itemId : undefined;
     if (!parentItemId) {
       throw new Error(
         `Cannot determine parent item for variation ${squareVariationId}`,
@@ -1138,8 +1121,7 @@ export class ProductsService {
 
     const catalogImage = response.image;
     const imageId = catalogImage?.id || '';
-    const imageUrl =
-      (catalogImage as any)?.imageData?.url || null;
+    const imageUrl = (catalogImage?.type === 'IMAGE' && catalogImage.imageData?.url) || null;
 
     return { imageId, imageUrl };
   }
@@ -1174,7 +1156,7 @@ export class ProductsService {
     const exact = options?.exact ?? false;
     const skip = (page - 1) * limit;
 
-    // Common include block (shared between count and findMany)
+    // What each listed product carries: category, mappings (for its price) and the location's batches
     const includeBlock = {
       category: true,
       catalogMappings: {
@@ -1224,6 +1206,8 @@ export class ProductsService {
     if (rankedIds) {
       where = { id: { in: rankedIds.slice(skip, skip + limit) } };
     }
+    // Ranked ids are already limited to the location's products, in SQL.
+    where = { AND: [where, soldAt(locationId)] };
 
     // Fetch total count and page of products in parallel
     const [totalCount, products] = await Promise.all([
@@ -1337,6 +1321,10 @@ export class ProductsService {
       FROM "Product" p
       LEFT JOIN inv ON inv."productId" = p.id
       LEFT JOIN mapping m ON m."productId" = p.id
+      -- Stocked merchandise this location sells: not Yastás services, not discontinued, not another store's one-store product
+      WHERE p."tracksInventory"
+        AND NOT p."isDiscontinued"
+        AND (p."soldOnlyAtLocationId" IS NULL OR p."soldOnlyAtLocationId" = ${locationId})
     `);
 
     const row = stats[0];

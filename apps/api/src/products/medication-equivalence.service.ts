@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { rankEquivalents, type EquivalenceCandidate } from './medication-equivalence';
-import { CATALOG_PRODUCT_INCLUDE, toProductView, type CatalogProductView } from './catalog-product-view';
+import { CATALOG_PRODUCT_INCLUDE, soldAt, toProductView, type CatalogProductView } from './catalog-product-view';
 
 @Injectable()
 export class MedicationEquivalenceService {
@@ -13,14 +13,20 @@ export class MedicationEquivalenceService {
       where: { id: productId },
       select: { id: true, medicationDefinitionId: true },
     });
-    if (!product?.medicationDefinitionId) return [];
+    if (!product) return [];
+    return (await this.findEquivalentsOf([product], locationId)).get(product.id) ?? [];
+  }
+
+  /** Each product's equivalents, ranked as above, from one query for all of them. */
+  async findEquivalentsOf(
+    products: { id: string; medicationDefinitionId: string | null }[],
+    locationId?: string,
+  ): Promise<Map<string, CatalogProductView[]>> {
+    const definitionIds = [...new Set(products.map((p) => p.medicationDefinitionId).filter((id): id is string => !!id))];
+    if (definitionIds.length === 0) return new Map();
 
     const candidates = await this.prisma.product.findMany({
-      where: {
-        medicationDefinitionId: product.medicationDefinitionId,
-        id: { not: productId },
-        isDiscontinued: false,
-      },
+      where: { AND: [{ medicationDefinitionId: { in: definitionIds }, isDiscontinued: false }, soldAt(locationId)] },
       include: CATALOG_PRODUCT_INCLUDE(locationId),
     });
 
@@ -32,8 +38,7 @@ export class MedicationEquivalenceService {
       inStock: v.inStock,
       price: v.price,
     }));
-
     const byId = new Map(views.map((v) => [v.id, v]));
-    return rankEquivalents(product, equivalenceInput).map((c) => byId.get(c.id)!);
+    return new Map(products.map((p) => [p.id, rankEquivalents(p, equivalenceInput).map((c) => byId.get(c.id)!)]));
   }
 }

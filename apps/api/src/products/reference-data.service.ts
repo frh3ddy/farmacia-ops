@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { stripAccents } from '../inventory-migration/category-classifier';
+import { stripAccents } from '../common/strip-accents';
 import { PrismaService } from '../prisma/prisma.service';
 import referenceData from './pharmacy-reference-data.json';
 
