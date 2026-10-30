@@ -10,7 +10,14 @@ vi.mock("../../lib/apiFetch", () => ({
       return {
         data: [
           { id: "l-1", description: "crema roja", quantity: 2, amount: "30", sale: { createdAt: "2026-10-27T18:00:00Z", location: { id: "loc-1", name: "Oriente" } } },
-          { id: "l-2", description: null, quantity: 1, amount: "16", sale: { createdAt: "2026-10-21T01:55:00Z", location: { id: "loc-1", name: "Oriente" } } },
+          {
+            id: "l-2",
+            description: null,
+            quantity: 1,
+            amount: "16",
+            sale: { createdAt: "2026-10-21T01:55:00Z", location: { id: "loc-1", name: "Oriente" } },
+            matchError: { productId: "p-crema", error: "Crema no tiene costo", failedAt: "2026-10-28T10:00:00Z" },
+          },
         ],
       };
     if (path.startsWith("/products?search=")) return { data: [{ id: "p-crema", name: "Crema Roja 30 g", sku: null, quantity: 5, looseProductId: null }] };
@@ -32,5 +39,10 @@ describe("UnmatchedLinesScreen", () => {
     const posts = vi.mocked(apiFetch).mock.calls.filter(([path]) => path === "/api/sales/unmatched-lines/l-1/match");
     expect(posts.map(([, init]) => JSON.parse(init!.body as string))).toEqual([{ productId: "p-crema" }]);
     expect(screen.getByText("Sin descripción")).toBeTruthy();
+  });
+
+  it("says why a match the worker gave up on didn't go through", async () => {
+    render(<UnmatchedLinesScreen />);
+    expect(await screen.findByText("No se pudo asignar: Crema no tiene costo")).toBeTruthy();
   });
 });

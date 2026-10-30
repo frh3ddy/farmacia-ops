@@ -270,20 +270,34 @@ test('a customer returns one of two jarabes', async () => {
   const returns = await prisma.saleReturn.findMany({ where: { saleId: sale.id }, include: { items: { include: { adjustment: { include: { createdBatch: true } } } } } });
   const item = returns[0]?.items[0];
   expect({
-    returns: returns.map((r) => [r.returnedBy, r.reason, r.revenue.toString(), r.cost.toString()]),
+    // paid back in cash outside Square, so the cash drawer can be squared
+    returns: returns.map((r) => [r.returnedBy, r.reason, r.revenue.toString(), r.cost.toString(), r.cashRefunded?.toString()]),
     // one unit back at the item's average sold cost (22 / 2), as the newest batch
     restocked: item && [item.quantity, item.adjustment.type, item.adjustment.createdBatch?.quantity, item.adjustment.createdBatch?.unitCost.toString()],
+    // a return counts in its own month: the sale stays as sold
     sale: [after.totalRevenue.toString(), after.totalCost.toString(), after.grossProfit.toString()],
     books: booksMismatches(await loadBooks(prisma)),
   }).toEqual({
-    returns: [['emp-cajera', 'Caducidad cercana', '45', '11']],
+    returns: [['emp-cajera', 'Caducidad cercana', '45', '11', '45']],
     restocked: [1, 'RETURN', 1, '11'],
-    sale: [String(Number(sale.totalRevenue) - 45), String(Number(sale.totalCost) - 11), String(Number(sale.grossProfit) - 34)],
+    sale: [sale.totalRevenue.toString(), sale.totalCost.toString(), sale.grossProfit.toString()],
     books: [],
   });
 
   // Only one jarabe is left to return.
-  await expect(processReturnJob(returnJob(2, 'r-2'))).rejects.toThrow(SaleValidationError);
+  await expect(processReturnJob(returnJob(2, 'r-2'))).rejects.toThrow(new SaleValidationError('Solo quedan 1 de Jarabe por devolver'));
+});
+
+test('a return listing the same item twice', async () => {
+  const prisma = getPrisma();
+  // p-1's other jarabe is the only one left.
+  const sale = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-1' }, include: { items: { include: { product: true } } } });
+  const jarabe = sale.items.find((i) => i.product.name === 'Jarabe')!;
+  const twice = { saleItemId: jarabe.id, quantity: 1 };
+  const job = { id: 'r-twice', name: 'record-return', data: { saleId: sale.id, items: [twice, twice], returnedBy: 'emp-owner', clientRequestId: 'r-twice' } } as unknown as Job;
+
+  await expect(processReturnJob(job)).rejects.toThrow(new SaleValidationError('Solo quedan 1 de Jarabe por devolver'));
+  expect(await prisma.saleReturn.count({ where: { clientRequestId: 'r-twice' } })).toBe(0);
 });
 
 test('a return puts the units back in Square, once, retrying when Square fails', async () => {
@@ -355,16 +369,16 @@ test('an exchange where the customer pays the difference', async () => {
   const back = await prisma.saleReturn.findUniqueOrThrow({ where: { clientRequestId: 'square-return-line:rli-1' }, include: { items: { include: { adjustment: true } } } });
   expect({
     newSale: [p5.totalRevenue.toString(), p5.totalCost.toString()],
-    // the jarabe comes off p-1 at its sold price and cost (22 / 2)
-    original: [Number(p1.totalRevenue) - Number(p1After.totalRevenue), Number(p1.totalCost) - Number(p1After.totalCost)],
-    back: back.items.map((i) => [i.quantity, i.adjustment.type, i.adjustment.squareSynced]),
+    // the jarabe comes back at its sold price and cost (22 / 2); p-1 stays as sold, and Square paid it back
+    original: [p1After.totalRevenue.toString(), p1After.totalCost.toString()],
+    back: [back.revenue.toString(), back.cost.toString(), back.cashRefunded, ...back.items.map((i) => [i.quantity, i.adjustment.type, i.adjustment.squareSynced])],
     // Square restocked it itself
     squareCalls: batchCreateChanges.mock.calls.length,
     books: booksMismatches(await loadBooks(prisma)),
   }).toEqual({
     newSale: ['60', '20'],
-    original: [45, 11],
-    back: [[1, 'RETURN', true]],
+    original: [p1.totalRevenue.toString(), p1.totalCost.toString()],
+    back: ['45', '11', null, [1, 'RETURN', true]],
     squareCalls: 0,
     books: [],
   });
@@ -390,17 +404,17 @@ test('a Square refund: a matched and an unmatched custom amount back, and an exc
   const returns = await prisma.saleReturn.findMany({ where: { saleId: p4.id }, include: { items: true }, orderBy: { revenue: 'asc' } });
   const exchange = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'rf-1' } });
   expect({
-    returns: returns.map((r) => [r.reason, r.revenue.toString(), r.cost.toString(), r.items.length]),
+    returns: returns.map((r) => [r.reason, r.revenue.toString(), r.cost.toString(), r.cashRefunded, r.items.length]),
     original: [p4After.totalRevenue.toString(), p4After.totalCost.toString()],
     exchange: [exchange.totalRevenue.toString(), exchange.totalCost.toString()],
     books: booksMismatches(await loadBooks(prisma)),
   }).toEqual({
     // the matched crema goes back to stock; the unmatched $16 only takes revenue back
     returns: [
-      ['Cambio de producto', '15', '6', 1],
-      ['Cambio de producto', '16', '0', 0],
+      ['Cambio de producto', '15', '6', null, 1],
+      ['Cambio de producto', '16', '0', null, 0],
     ],
-    original: ['15', '6'],
+    original: [p4.totalRevenue.toString(), p4.totalCost.toString()],
     exchange: ['20', '20'],
     books: [],
   });
@@ -420,17 +434,16 @@ test('an amount-only refund, a refund still pending, and a return of a sale neve
   await processRefundJob(refundJob({ id: 'rf-4', order_id: 'ro-4', payment_id: 'p-old', amount: 900 }));
 
   const after = await prisma.sale.findUniqueOrThrow({ where: { id: p5.id } });
+  const returns = await prisma.saleReturn.findMany({ where: { saleId: p5.id } });
   expect({
-    revenue: Number(p5.totalRevenue) - Number(after.totalRevenue),
-    cost: Number(p5.totalCost) - Number(after.totalCost),
-    returns: await prisma.saleReturn.count({ where: { saleId: p5.id } }),
+    sale: after.totalRevenue.toString(),
+    returns: returns.map((r) => [r.revenue.toString(), r.cost.toString(), r.cashRefunded]),
     unknown: await prisma.saleReturn.count({ where: { clientRequestId: 'square-return-line:rli-4' } }),
-  }).toEqual({ revenue: 5, cost: 0, returns: 1, unknown: 0 });
+  }).toEqual({ sale: p5.totalRevenue.toString(), returns: [['5', '0', null]], unknown: 0 });
 });
 
 test('a Square refund repeating a line already returned, and a line with no uid', async () => {
   const prisma = getPrisma();
-  // Both p-1 jarabes are back (one by hand, one in the exchange); p-4's matched crema has 1 left.
   const p4 = await prisma.sale.findUniqueOrThrow({ where: { squareId: 'p-4' } });
   getOrder.mockResolvedValue({
     order: {
@@ -453,8 +466,8 @@ test('a Square refund repeating a line already returned, and a line with no uid'
     jarabe: await prisma.saleReturn.count({ where: { clientRequestId: 'square-return-line:rli-5' } }),
     noUid: await prisma.saleReturn.count({ where: { clientRequestId: 'square-return-line:undefined' } }),
     // the rest of the refund is still taken back
-    crema: Number(p4.totalRevenue) - Number((await prisma.sale.findUniqueOrThrow({ where: { id: p4.id } })).totalRevenue),
-  }).toEqual({ jarabe: 0, noUid: 0, crema: 15 });
+    crema: (await prisma.saleReturn.findUnique({ where: { clientRequestId: 'square-return-line:rli-6' } }))?.revenue.toString(),
+  }).toEqual({ jarabe: 0, noUid: 0, crema: '15' });
 });
 
 test("a return's Square item, with a local_ placeholder mapping beside the real one", async () => {

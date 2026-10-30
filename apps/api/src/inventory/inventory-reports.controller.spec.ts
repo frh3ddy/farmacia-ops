@@ -15,8 +15,8 @@ function setup() {
     getAdjustmentImpactReport: vi.fn().mockResolvedValue({ summary: {} }),
     getReceivingSummaryReport: vi.fn().mockResolvedValue({ summary: {} }),
     getProfitAndLossReport: vi.fn().mockResolvedValue({
-      revenue: { sales: '100000', yastasServiceRevenue: '3000', total: '103000' },
-      costOfGoodsSold: { productCosts: '60000', total: '60000' },
+      revenue: { sales: '100000', returns: '2000', netSales: '98000', yastasServiceRevenue: '3000', total: '101000' },
+      costOfGoodsSold: { productCosts: '61000', returns: '1000', total: '60000' },
       operatingExpenses: { total: '500', byType: [{ type: 'PAYROLL', amount: '500' }], shrinkage: '0' },
       netProfit: { amount: '1000', marginPercent: '20.00' },
     }),
@@ -66,10 +66,10 @@ describe('InventoryReportsController.getDashboardSummary', () => {
     const { data } = await controller.getDashboardSummary(requestAs('OWNER'));
 
     assert({
-      given: 'an owner and a P&L with sales 100000, cost 60000 and Yastás 3000',
-      should: 'carry them in netProfit next to the amount',
+      given: 'an owner and a P&L with sales 100000, returns 2000, net cost 60000 and Yastás 3000',
+      should: 'carry net sales (what net profit is computed from) and the returns behind them in netProfit',
       actual: (data as any).netProfit,
-      expected: { amount: '1000', marginPercent: '20.00', yastasServiceRevenue: '3000', salesRevenue: '100000', costOfSales: '60000' },
+      expected: { amount: '1000', marginPercent: '20.00', yastasServiceRevenue: '3000', salesRevenue: '98000', salesReturns: '2000', costOfSales: '60000' },
     });
   });
 });
