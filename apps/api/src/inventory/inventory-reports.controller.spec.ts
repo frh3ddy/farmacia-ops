@@ -74,6 +74,58 @@ describe('InventoryReportsController.getDashboardSummary', () => {
   });
 });
 
+describe('InventoryReportsController.getDashboardSummary for a cashier', () => {
+  // Same policy as withoutCosts on products: a cashier sees stock, sales and
+  // counts, nothing the pharmacy paid.
+  function withFigures() {
+    const { reports, controller } = setup();
+    reports.getCOGSReport.mockResolvedValue({ summary: { totalRevenue: '100000', totalCOGS: '60000', grossProfit: '40000', grossMarginPercent: '40.00', totalUnitsSold: 420, totalSales: 152 } });
+    reports.getInventoryValuationReport.mockResolvedValue({
+      summary: { totalUnits: 3800, totalValue: '250000', totalProducts: 610, averageCostPerUnit: '65.79' },
+      agingSummary: { under30Days: { units: 1000, value: '60000' } },
+    });
+    reports.getAdjustmentImpactReport.mockResolvedValue({ summary: { totalAdjustments: 7, totalLoss: '2000', totalGain: '150', netImpact: '-1850' } });
+    reports.getReceivingSummaryReport.mockResolvedValue({ summary: { totalReceivings: 12, totalQuantity: 900, totalCost: '58000' } });
+    return controller;
+  }
+  const fieldsOf = (data: any) => ({
+    sales: Object.keys(data.sales),
+    inventory: Object.keys(data.inventory),
+    adjustments: Object.keys(data.adjustments),
+    receivings: Object.keys(data.receivings),
+  });
+
+  test('a cashier', async () => {
+    const { data } = await withFigures().getDashboardSummary(requestAs('CASHIER'));
+    assert({
+      given: 'a cashier opening the dashboard',
+      should: 'carry sales, stock and counts, and no cost, gross profit, inventory value or aging value',
+      actual: fieldsOf(data),
+      expected: {
+        sales: ['totalRevenue', 'totalUnitsSold', 'totalSales'],
+        inventory: ['totalUnits', 'totalProducts'],
+        adjustments: ['totalAdjustments'],
+        receivings: ['totalReceivings', 'totalQuantity'],
+      },
+    });
+  });
+
+  test('a manager', async () => {
+    const { data } = await withFigures().getDashboardSummary(requestAs('MANAGER'));
+    assert({
+      given: 'a manager opening the dashboard',
+      should: 'keep every cost field',
+      actual: fieldsOf(data),
+      expected: {
+        sales: ['totalRevenue', 'totalCOGS', 'grossProfit', 'grossMarginPercent', 'totalUnitsSold', 'totalSales'],
+        inventory: ['totalUnits', 'totalValue', 'totalProducts', 'averageCostPerUnit', 'aging'],
+        adjustments: ['totalAdjustments', 'totalLoss', 'totalGain', 'netImpact'],
+        receivings: ['totalReceivings', 'totalQuantity', 'totalCost'],
+      },
+    });
+  });
+});
+
 describe('InventoryReportsController.getBatchDetail', () => {
   test('a batch by id', async () => {
     const outcomeAt = (locationId: string) => {

@@ -14,6 +14,28 @@ import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess
 
 const PROFIT_LOSS_ROLES: EmployeeRole[] = ['OWNER', 'ACCOUNTANT'];
 
+/**
+ * A dashboard as a cashier sees it — like withoutCosts on products: sales,
+ * stock and counts, nothing the pharmacy paid (cost of sales, gross profit,
+ * inventory value, aging value, adjustments and receivings valued at cost).
+ */
+export function dashboardWithoutCosts<
+  T extends {
+    sales: { totalRevenue: unknown; totalUnitsSold: unknown; totalSales: unknown };
+    inventory: { totalUnits: unknown; totalProducts: unknown };
+    adjustments: { totalAdjustments: unknown };
+    receivings: { totalReceivings: unknown; totalQuantity: unknown };
+  },
+>({ sales, inventory, adjustments, receivings, ...rest }: T) {
+  return {
+    ...rest,
+    sales: { totalRevenue: sales.totalRevenue, totalUnitsSold: sales.totalUnitsSold, totalSales: sales.totalSales },
+    inventory: { totalUnits: inventory.totalUnits, totalProducts: inventory.totalProducts },
+    adjustments: { totalAdjustments: adjustments.totalAdjustments },
+    receivings: { totalReceivings: receivings.totalReceivings, totalQuantity: receivings.totalQuantity },
+  };
+}
+
 @Controller('inventory/reports')
 @UseGuards(AuthGuard, LocationGuard)
 export class InventoryReportsController {
@@ -220,9 +242,7 @@ export class InventoryReportsController {
         : undefined,
     ]);
 
-    return {
-      success: true,
-      data: {
+    const data = {
         period: { startDate: parsedStartDate, endDate: parsedEndDate },
         locationId: targetLocationId,
         sales: {
@@ -270,7 +290,11 @@ export class InventoryReportsController {
             costOfSales: profitLoss.costOfGoodsSold.total,
           },
         }),
-      },
+    };
+
+    return {
+      success: true,
+      data: req.currentLocation.role === 'CASHIER' ? dashboardWithoutCosts(data) : data,
     };
   }
 
