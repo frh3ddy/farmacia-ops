@@ -19,7 +19,7 @@ function routesForManagerAtCentroCashierAtNorte() {
       data: { total: 10, outOfStock: 1, lowStock: 2, lowMargin: 3, synced: 9, local: 1 },
     })),
   };
-  const controller = new ProductsController(service as any, {} as any, {} as any, {} as any);
+  const controller = new ProductsController(service as any, {} as any, {} as any, {} as any, {} as any);
   const centro = { locationId: 'centro', role: 'MANAGER', isActive: true };
   const norte = { locationId: 'norte', role: 'CASHIER', isActive: true };
   const req = { currentLocation: centro, accessibleLocations: [centro, norte] } as any;

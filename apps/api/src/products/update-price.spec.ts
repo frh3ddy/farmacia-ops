@@ -27,7 +27,7 @@ describe('ProductsService.updatePrice', () => {
 /** The controller over a recorded service, for an employee at Centro with `role`. */
 function priceRouteAs(role: string) {
   const updatePrice = vi.fn().mockResolvedValue({ product: null, previousPrice: 30, newPrice: 40, squareSynced: true, message: 'ok' });
-  const controller = new ProductsController({ updatePrice } as any, {} as any, {} as any, {} as any);
+  const controller = new ProductsController({ updatePrice } as any, {} as any, {} as any, {} as any, {} as any);
   const req = { currentLocation: { locationId: 'centro', role } } as any;
   const send = (body: object) => controller.updatePrice('p1', { sellingPrice: 40, ...body } as any, req).then(
     () => 200,

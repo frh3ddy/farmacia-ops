@@ -19,7 +19,7 @@ function productRoutesAs(role: string) {
     getProduct: vi.fn(async () => ({ success: true, data: product() })),
     getProducts: vi.fn(async () => ({ success: true, data: [product()], count: 1 })),
   };
-  const controller = new ProductsController(service as any, {} as any, {} as any, {} as any);
+  const controller = new ProductsController(service as any, {} as any, {} as any, {} as any, {} as any);
   const req = { currentLocation: { locationId: 'centro', role } } as any;
   return {
     detail: async (): Promise<unknown> => (await controller.getProduct('p1', '', req)).data,

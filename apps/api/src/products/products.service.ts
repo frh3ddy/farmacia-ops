@@ -162,6 +162,70 @@ function assertWordList(value: unknown, label: string): asserts value is string[
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The stock and margin chips over the product list (expiring and at-risk come from aging). */
+export const PRODUCT_LIST_FILTERS = ['outOfStock', 'lowStock', 'inStock', 'lowMargin'] as const;
+export type ProductListFilter = (typeof PRODUCT_LIST_FILTERS)[number];
+
+/**
+ * One row per stocked product this location sells (not Yastás services, not
+ * discontinued, not another store's one-store product), with its stock and
+ * whether its margin is under 10%. The counts and the filtered list both read it,
+ * so a chip's count is always the length of its list.
+ */
+function catalogRowsSql(locationId: string): Prisma.Sql {
+  return Prisma.sql`
+    WITH inv AS (
+      SELECT "productId",
+             SUM(quantity) AS qty,
+             SUM(quantity * "unitCost") AS total_cost
+      FROM "Inventory"
+      WHERE "locationId" = ${locationId}
+      GROUP BY "productId"
+    ),
+    -- Same mapping preference as preferredMapping (square-sync.ts): real Square
+    -- items before placeholders, then the location's, the global one, any other;
+    -- another location's placeholder never counts
+    mapping AS (
+      SELECT DISTINCT ON ("productId") "productId", "priceCents", "squareVariationId", "locationId"
+      FROM "CatalogMapping"
+      WHERE "squareVariationId" NOT LIKE 'local_%' OR "locationId" = ${locationId} OR "locationId" IS NULL
+      ORDER BY "productId",
+               "squareVariationId" LIKE 'local_%',
+               "locationId" IS DISTINCT FROM ${locationId},
+               "locationId" IS NOT NULL,
+               "createdAt" DESC
+    )
+    SELECT
+      p.id,
+      p."createdAt",
+      COALESCE(inv.qty, 0) AS qty,
+      COALESCE(
+        m."priceCents" IS NOT NULL
+          AND inv.qty IS NOT NULL
+          AND inv.qty > 0
+          AND (m."priceCents" / 100.0 - (inv.total_cost / inv.qty))
+              / NULLIF(m."priceCents" / 100.0, 0) * 100 < 10,
+        false
+      ) AS low_margin,
+      m."squareVariationId" AS square_variation_id,
+      m."locationId" AS mapping_location_id
+    FROM "Product" p
+    LEFT JOIN inv ON inv."productId" = p.id
+    LEFT JOIN mapping m ON m."productId" = p.id
+    WHERE p."tracksInventory"
+      AND NOT p."isDiscontinued"
+      AND (p."soldOnlyAtLocationId" IS NULL OR p."soldOnlyAtLocationId" = ${locationId})
+  `;
+}
+
+/** Which catalog rows each filter keeps (thresholds mirror the iOS app). */
+const FILTER_SQL: Record<ProductListFilter, Prisma.Sql> = {
+  outOfStock: Prisma.sql`qty <= 0`,
+  lowStock: Prisma.sql`qty > 0 AND qty < 10`,
+  inStock: Prisma.sql`qty >= 10`,
+  lowMargin: Prisma.sql`low_margin`,
+};
+
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
@@ -1148,7 +1212,16 @@ export class ProductsService {
    */
   async getProducts(
     locationId?: string,
-    options?: { page?: number; limit?: number; search?: string; exact?: boolean },
+    options?: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      exact?: boolean;
+      /** Only products matching a stock/margin chip (same rows the counts use). */
+      filter?: ProductListFilter;
+      /** Only these products, in this order (e.g. what the aging service flagged). */
+      onlyIds?: string[];
+    },
   ) {
     const page = options?.page ?? 1;
     const limit = options?.limit ?? 50;
@@ -1201,6 +1274,13 @@ export class ProductsService {
       }
     } else if (search) {
       rankedIds = await this.findSearchMatchIds(search, locationId);
+    }
+
+    // A chip narrows the list (and a search within it) to the products it counts.
+    const narrowIds = exact ? null : await this.findNarrowingIds(locationId, options?.filter, options?.onlyIds);
+    if (narrowIds) {
+      const keep = new Set(narrowIds);
+      rankedIds = rankedIds ? rankedIds.filter((id) => keep.has(id)) : narrowIds;
     }
 
     if (rankedIds) {
@@ -1261,6 +1341,31 @@ export class ProductsService {
   }
 
   /**
+   * Ids a chip limits the list to, in list order, or null for no chip: a
+   * stock/margin filter (newest first, like the unfiltered list) or a given set
+   * of ids (kept in that order, limited to products sold at the location).
+   */
+  private async findNarrowingIds(locationId: string | undefined, filter?: ProductListFilter, onlyIds?: string[]) {
+    if (filter) {
+      if (!locationId) throw new BadRequestException('Location ID is required to filter');
+      const rows = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        WITH catalog AS (${catalogRowsSql(locationId)})
+        SELECT id FROM catalog WHERE ${FILTER_SQL[filter]} ORDER BY "createdAt" DESC
+      `);
+      return rows.map((r) => r.id);
+    }
+    if (onlyIds) {
+      const found = await this.prisma.product.findMany({
+        where: { AND: [{ id: { in: onlyIds } }, soldAt(locationId)] },
+        select: { id: true },
+      });
+      const present = new Set(found.map((p) => p.id));
+      return onlyIds.filter((id) => present.has(id));
+    }
+    return null;
+  }
+
+  /**
    * Lightweight stock/margin alert counts for a location (Dashboard alerts).
    * Uses SQL aggregates + window functions instead of transferring full product
    * rows. Thresholds mirror the iOS app: outOfStock qty<=0, lowStock 1-9,
@@ -1282,49 +1387,17 @@ export class ProductsService {
         local: bigint;
       }>
     >(Prisma.sql`
-      WITH inv AS (
-        SELECT "productId",
-               SUM(quantity) AS qty,
-               SUM(quantity * "unitCost") AS total_cost
-        FROM "Inventory"
-        WHERE "locationId" = ${locationId}
-        GROUP BY "productId"
-      ),
-      -- Same mapping preference as preferredMapping (square-sync.ts): real Square
-      -- items before placeholders, then the location's, the global one, any other;
-      -- another location's placeholder never counts
-      mapping AS (
-        SELECT DISTINCT ON ("productId") "productId", "priceCents", "squareVariationId", "locationId"
-        FROM "CatalogMapping"
-        WHERE "squareVariationId" NOT LIKE 'local_%' OR "locationId" = ${locationId} OR "locationId" IS NULL
-        ORDER BY "productId",
-                 "squareVariationId" LIKE 'local_%',
-                 "locationId" IS DISTINCT FROM ${locationId},
-                 "locationId" IS NOT NULL,
-                 "createdAt" DESC
-      )
+      WITH catalog AS (${catalogRowsSql(locationId)})
       SELECT
         COUNT(*)::bigint AS total,
-        COUNT(*) FILTER (WHERE COALESCE(inv.qty, 0) <= 0)::bigint AS out_of_stock,
-        COUNT(*) FILTER (WHERE COALESCE(inv.qty, 0) > 0 AND COALESCE(inv.qty, 0) < 10)::bigint AS low_stock,
-        COUNT(*) FILTER (
-          WHERE m."priceCents" IS NOT NULL
-            AND inv.qty IS NOT NULL
-            AND inv.qty > 0
-            AND (m."priceCents" / 100.0 - (inv.total_cost / inv.qty))
-                / NULLIF(m."priceCents" / 100.0, 0) * 100 < 10
-        )::bigint AS low_margin,
-        COUNT(*) FILTER (WHERE m."squareVariationId" IS NOT NULL AND NOT m."squareVariationId" LIKE 'local_%')::bigint AS synced,
+        COUNT(*) FILTER (WHERE ${FILTER_SQL.outOfStock})::bigint AS out_of_stock,
+        COUNT(*) FILTER (WHERE ${FILTER_SQL.lowStock})::bigint AS low_stock,
+        COUNT(*) FILTER (WHERE ${FILTER_SQL.lowMargin})::bigint AS low_margin,
+        COUNT(*) FILTER (WHERE square_variation_id IS NOT NULL AND NOT square_variation_id LIKE 'local_%')::bigint AS synced,
         -- Must match what syncUnsyncedProducts can push: location-scoped local_ mappings only.
         -- Unmapped products have no price to send, so they are not "pending sync".
-        COUNT(*) FILTER (WHERE m."locationId" IS NOT NULL AND m."squareVariationId" LIKE 'local_%')::bigint AS local
-      FROM "Product" p
-      LEFT JOIN inv ON inv."productId" = p.id
-      LEFT JOIN mapping m ON m."productId" = p.id
-      -- Stocked merchandise this location sells: not Yastás services, not discontinued, not another store's one-store product
-      WHERE p."tracksInventory"
-        AND NOT p."isDiscontinued"
-        AND (p."soldOnlyAtLocationId" IS NULL OR p."soldOnlyAtLocationId" = ${locationId})
+        COUNT(*) FILTER (WHERE mapping_location_id IS NOT NULL AND square_variation_id LIKE 'local_%')::bigint AS local
+      FROM catalog
     `);
 
     const row = stats[0];
