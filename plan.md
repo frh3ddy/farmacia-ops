@@ -17,3 +17,4 @@
 - ✅ [Product Price and Access Safety](tasks/product-price-and-access-safety-epic.md) — a failed Square price change is refused; the role at the store acted on; bad create input gets a 400
 - ✅ [Product Lists and Square Cleanup](tasks/product-lists-and-square-cleanup-epic.md) — one-store products only at their store; bounded catalog search; counts without Yastás; rename keeps the item; small fixes
 - ✅ [Sale Returns](tasks/sale-returns-epic.md) — a return never exceeds what was sold; returns count in their own month; cash note for hand returns; failed returns and matches shown
+- ✅ [Catalog Sync Migration](tasks/catalog-sync-migration-epic.md) — catalog sync owner-only and refused after cutover; Yastás mappings keep their employee; archived Square items skipped; errors and naming cleanup
