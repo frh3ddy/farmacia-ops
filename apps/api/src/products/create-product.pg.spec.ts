@@ -88,6 +88,44 @@ describe('ProductsService.createProduct (Postgres)', () => {
     });
   });
 
+  test('references, fixed values and true/false fields that are not valid', async () => {
+    const { products, square } = productsWithSquare();
+    const labName = `Lab-${Math.random()}`;
+    const medication = { name: 'Paracetamol', form: 'TABLET', route: 'ORAL', strength: '500 mg', activeIngredients: [{ name: `Activo-${labName}` }] };
+    const statuses = [];
+    for (const input of [
+      { categoryId: 'no-such-category' },
+      { labId: 'no-such-lab' },
+      { medicationDefinitionId: 'no-such-definition' },
+      { looseProductId: 'no-such-product' },
+      { medicationType: 'HOMEOPATHIC' },
+      { primaryPackaging: 'CRATE' },
+      { secondaryPackaging: 'CRATE' },
+      { medication: { ...medication, form: 'POTION' } },
+      { medication: { ...medication, route: 'TELEPATHIC' } },
+      { medication: { ...medication, activeIngredients: [{ name: '' }] } },
+      { requiresPrescription: 'yes' },
+      { isControlled: 1 },
+      { syncToSquare: 'no' },
+      { soldAtAllLocations: 'no' },
+      { sku: 7501234567890 },
+    ] as any[]) {
+      statuses.push(await statusOf(create(products, { labName, medication, ...input })));
+    }
+
+    assert({
+      given: 'a missing category, laboratory, definition or loose product, an unknown type, packaging, form or route, a nameless ingredient, a non-boolean flag, and a numeric SKU',
+      should: 'refuse each with a 400 before creating anything in Square or the database',
+      actual: [
+        statuses,
+        square.catalog.object.upsert.mock.calls.length,
+        await prisma.laboratory.count({ where: { name: labName } }),
+        await prisma.activeIngredient.count({ where: { name: `Activo-${labName}` } }),
+      ],
+      expected: [Array(15).fill(400), 0, 0, 0],
+    });
+  });
+
   test('a SKU with spaces around it', async () => {
     const { products, square } = productsWithSquare();
     const sku = `SKU-${Math.random()}`;
@@ -164,12 +202,12 @@ describe('ProductsService.createProduct (Postgres)', () => {
       actual: [
         presence(everywhere),
         presence(toy),
-        (await prisma.product.findFirst({ where: { name: toy } }))?.soldAtAllLocations,
+        (await prisma.product.findFirst({ where: { name: toy } }))?.soldOnlyAtLocationId,
       ],
       expected: [
         [[undefined, undefined, undefined, undefined]],
         [[false, ['SQ-CENTRO'], false, ['SQ-CENTRO']]],
-        false,
+        centro,
       ],
     });
   });
@@ -203,6 +241,23 @@ describe('ProductsService.createProduct (Postgres)', () => {
     });
   });
 
+  test('the same retry sent twice at once', async () => {
+    const { products, square } = productsWithSquare();
+    const clientRequestId = randomUUID();
+    const name = `Doble-${Math.random()}`;
+    const [first, second] = await Promise.all([
+      create(products, { name, clientRequestId }),
+      create(products, { name, clientRequestId }),
+    ]);
+
+    assert({
+      given: 'two creates with one clientRequestId arriving together',
+      should: "answer both with the one product, and delete the Square item the losing request made",
+      actual: [first.product?.id, second.product?.id, await productsNamed(name), square.catalog.batchDelete.mock.calls.length],
+      expected: [clientRequestId, clientRequestId, 1, square.catalog.object.upsert.mock.calls.length - 1],
+    });
+  });
+
   test('a name with spaces around it', async () => {
     const { products } = productsWithSquare();
     const result = await create(products, { name: '  Gel  ' });
@@ -211,7 +266,7 @@ describe('ProductsService.createProduct (Postgres)', () => {
       given: 'a name with spaces around it',
       should: 'report the name the product was saved under',
       actual: result.message,
-      expected: 'Product "Gel" created and synced to Square',
+      expected: 'Producto "Gel" creado y enviado a Square',
     });
   });
 });

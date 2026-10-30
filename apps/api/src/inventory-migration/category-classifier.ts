@@ -3,6 +3,7 @@
  * between the cutover extraction flow and the standalone
  * scripts/classify-product-categories.ts maintenance script.
  */
+import { stripAccents } from '../common/strip-accents';
 import { PrismaClient } from '@prisma/client';
 
 export const CATEGORY_NAMES = [
@@ -54,10 +55,6 @@ const RULES: Array<{ category: CategoryName; pattern: RegExp }> = [
   // in Medicina just for carrying a unit.
   { category: 'Medicina', pattern: /\d+\s?(mg|mcg|ml|g)\b/i },
 ];
-
-export function stripAccents(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
-}
 
 export function classifyProductName(rawName: string): CategoryName {
   const name = stripAccents(rawName.toLowerCase());

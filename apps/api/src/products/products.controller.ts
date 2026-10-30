@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts } from './products.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
@@ -38,13 +39,33 @@ interface UpdatePriceDto {
 // The buffer is sent directly to Square and the Square-hosted URL is stored.
 const productImageMemoryStorage = memoryStorage();
 
-const imageFileFilter = (_req: any, file: any, cb: any) => {
+const imageFileFilter: MulterOptions['fileFilter'] = (_req, file, cb) => {
   if (file.mimetype.startsWith('image/')) {
     cb(null, true);
   } else {
     cb(new HttpException('Solo se permiten imágenes', HttpStatus.BAD_REQUEST), false);
   }
 };
+
+/**
+ * Role checks use the role at the current store, so a non-owner may only act
+ * there: a manager here who is a cashier elsewhere can't act as a manager elsewhere.
+ */
+function assertActingAtOwnStore(req: GuardedRequest, locationId: string): void {
+  if (req.currentLocation?.role !== 'OWNER' && locationId !== req.currentLocation?.locationId) {
+    throw new HttpException(
+      { success: false, message: 'Solo el dueño puede hacer esto en otras sucursales' },
+      HttpStatus.FORBIDDEN,
+    );
+  }
+}
+
+/** Whether the reader is a cashier at the store being read (an owner never is). */
+function isCashierAt(req: GuardedRequest, locationId?: string): boolean {
+  if (req.currentLocation?.role === 'OWNER') return false;
+  const role = req.accessibleLocations?.find((a) => a.locationId === locationId && a.isActive)?.role ?? req.currentLocation?.role;
+  return role === 'CASHIER';
+}
 
 @Controller('products')
 @UseGuards(AuthGuard, LocationGuard)
@@ -74,11 +95,9 @@ export class ProductsController {
       );
     }
 
-    const result = await this.productsService.createProduct({
-      ...body,
-      locationId,
-      syncToSquare: body.syncToSquare !== false, // Default true
-    });
+    assertActingAtOwnStore(req, locationId);
+
+    const result = await this.productsService.createProduct({ ...body, locationId });
 
     return {
       success: true,
@@ -105,6 +124,7 @@ export class ProductsController {
     if (!locationId) {
       throw new BadRequestException('Location ID is required');
     }
+    assertActingAtOwnStore(req, locationId);
 
     const result = await this.productsService.syncUnsyncedProducts(locationId);
     return {
@@ -240,7 +260,7 @@ export class ProductsController {
       search: search?.trim() || undefined,
       exact: exact === 'true',
     });
-    return req.currentLocation?.role === 'CASHIER' ? { ...result, data: result.data.map(withoutCosts) } : result;
+    return isCashierAt(req, targetLocationId) ? { ...result, data: result.data.map(withoutCosts) } : result;
   }
 
   /**
@@ -368,7 +388,7 @@ export class ProductsController {
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProduct(id, targetLocationId);
-    return req.currentLocation?.role === 'CASHIER' ? { ...result, data: withoutCosts(result.data) } : result;
+    return isCashierAt(req, targetLocationId) ? { ...result, data: withoutCosts(result.data) } : result;
   }
 
   /**
@@ -383,13 +403,6 @@ export class ProductsController {
     @Body() body: UpdatePriceDto,
     @Req() req: GuardedRequest,
   ) {
-    if (body.sellingPrice === undefined || body.sellingPrice === null) {
-      throw new HttpException(
-        { success: false, message: 'El precio de venta es obligatorio' },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
     const locationId = body.locationId || req.currentLocation?.locationId;
     if (!locationId) {
       throw new HttpException(
@@ -397,12 +410,13 @@ export class ProductsController {
         HttpStatus.BAD_REQUEST,
       );
     }
-    if (req.currentLocation?.role !== 'OWNER' && (body.applyToAllLocations === true || locationId !== req.currentLocation?.locationId)) {
+    if (body.applyToAllLocations === true && req.currentLocation?.role !== 'OWNER') {
       throw new HttpException(
         { success: false, message: 'Solo el dueño puede cambiar el precio de otras sucursales' },
         HttpStatus.FORBIDDEN,
       );
     }
+    assertActingAtOwnStore(req, locationId);
 
     const input: UpdatePriceInput = {
       productId: id,
