@@ -26,6 +26,13 @@ interface CreateAdjustmentInput {
   clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
 }
 
+/** A count correction by the total counted on the shelf; the server derives the change. */
+type CountedCorrectionInput = Omit<CreateAdjustmentInput, 'type' | 'quantity'> & {
+  type: 'COUNT_CORRECTION';
+  countedQuantity: number;
+  quantity?: number; // Ignored: a client's change was computed from a stock snapshot
+};
+
 interface AdjustmentResult {
   adjustment: {
     id: string;
@@ -171,7 +178,11 @@ export class InventoryAdjustmentService {
    * Given the caller's transaction `tx`, everything runs inside it and Square
    * isn't called: the caller syncs (`retrySquareSync(id)`) once its transaction commits.
    */
-  async createAdjustment(input: CreateAdjustmentInput, tx?: Prisma.TransactionClient): Promise<AdjustmentResult> {
+  async createAdjustment(input: CreateAdjustmentInput | CountedCorrectionInput, tx?: Prisma.TransactionClient): Promise<AdjustmentResult> {
+    if ('countedQuantity' in input && input.countedQuantity != null) {
+      return this.createCountedCorrection(input, tx);
+    }
+    input = input as CreateAdjustmentInput;
     const db = tx ?? this.prisma;
     this.logger.log(`[ADJUSTMENT] Creating ${input.type} adjustment for product ${input.productId} at location ${input.locationId}, qty: ${input.quantity}`);
 
@@ -251,6 +262,35 @@ export class InventoryAdjustmentService {
       }
       throw error;
     }
+  }
+
+  /**
+   * The change is the counted total minus the stock on hand now, not a client's
+   * snapshot of it. Replays are matched first: once the first copy applied,
+   * stock already equals the count.
+   */
+  private async createCountedCorrection(input: CountedCorrectionInput, tx?: Prisma.TransactionClient): Promise<AdjustmentResult> {
+    const { countedQuantity, quantity: _ignored, ...rest } = input;
+    if (!Number.isInteger(countedQuantity) || countedQuantity < 0) {
+      throw new BadRequestException('El conteo debe ser un número entero de cero o más');
+    }
+    if (rest.clientRequestId) {
+      const existing = await this.findByClientRequestId(rest);
+      if (existing) return existing;
+    }
+
+    // ponytail: stock is read just before the write, not under a lock — a sale
+    // landing in that gap (milliseconds) skews the result by its quantity.
+    // Lock the batches (SELECT … FOR UPDATE) if counts during busy hours drift.
+    const onHand = await (tx ?? this.prisma).inventory.aggregate({
+      where: { productId: rest.productId, locationId: rest.locationId, quantity: { gt: 0 } },
+      _sum: { quantity: true },
+    });
+    const change = countedQuantity - (onHand._sum.quantity ?? 0);
+    if (change === 0) {
+      throw new BadRequestException('El conteo coincide con el inventario actual; no hay nada que ajustar');
+    }
+    return this.createAdjustment({ ...rest, quantity: change }, tx);
   }
 
   // --------------------------------------------------------------------------
@@ -514,7 +554,7 @@ export class InventoryAdjustmentService {
     return tx ? fn(tx) : this.prisma.$transaction(fn);
   }
 
-  private async findByClientRequestId(input: CreateAdjustmentInput): Promise<AdjustmentResult | null> {
+  private async findByClientRequestId(input: Omit<CreateAdjustmentInput, 'quantity'> & { quantity?: number }): Promise<AdjustmentResult | null> {
     const existing = await this.prisma.inventoryAdjustment.findUnique({
       where: { clientRequestId: input.clientRequestId },
       include: { createdBatch: true, consumptions: true },
@@ -525,7 +565,8 @@ export class InventoryAdjustmentService {
     const sameRequest = existing.locationId === input.locationId
       && existing.productId === input.productId
       && existing.type === input.type
-      && existing.quantity === input.quantity;
+      // A counted correction's change is derived, so it has none to compare.
+      && (input.quantity === undefined || existing.quantity === input.quantity);
     if (!sameRequest) {
       throw new ConflictException('This clientRequestId was already used for a different adjustment');
     }

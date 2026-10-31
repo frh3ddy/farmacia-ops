@@ -31,6 +31,7 @@ interface CreateAdjustmentDto {
   effectiveDate?: string;
   syncToSquare?: boolean; // If true, also update Square inventory
   clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
+  countedQuantity?: number; // COUNT_CORRECTION only: the shelf total; the server derives the change
 }
 
 // ============================================================================
@@ -53,7 +54,8 @@ export class InventoryAdjustmentController {
 
     const locationId = body.locationId || currentLocation.locationId;
 
-    if (!body.productId || !body.type || body.quantity === undefined) {
+    const counted = body.type === AdjustmentType.COUNT_CORRECTION && body.countedQuantity != null;
+    if (!body.productId || !body.type || (body.quantity === undefined && !counted)) {
       throw new HttpException(
         { success: false, message: 'Missing required fields: productId, type, quantity' },
         HttpStatus.BAD_REQUEST
@@ -69,11 +71,9 @@ export class InventoryAdjustmentController {
 
     const effectiveDate = parseDateParam(body.effectiveDate, 'effectiveDate');
 
-    const result = await this.adjustmentService.createAdjustment({
+    const common = {
       locationId,
       productId: body.productId,
-      type: body.type,
-      quantity: body.quantity,
       reason: body.reason,
       notes: body.notes,
       unitCost: body.unitCost,
@@ -81,9 +81,12 @@ export class InventoryAdjustmentController {
       adjustedBy: currentEmployee.id,
       syncToSquare: body.syncToSquare,
       clientRequestId: body.clientRequestId,
-    });
+    };
+    const result = await this.adjustmentService.createAdjustment(counted
+      ? { ...common, type: AdjustmentType.COUNT_CORRECTION, countedQuantity: body.countedQuantity! }
+      : { ...common, type: body.type, quantity: body.quantity });
 
-    let message = `Adjustment created successfully: ${body.type} ${Math.abs(body.quantity)} units`;
+    let message = `Adjustment created successfully: ${body.type} ${Math.abs(counted ? result.adjustment.quantity : body.quantity)} units`;
     if (result.squareSync) {
       message += result.squareSync.synced 
         ? ' (synced to Square)' 

@@ -60,6 +60,29 @@ describe('InventoryAdjustmentController.createAdjustment', () => {
   });
 });
 
+describe('InventoryAdjustmentController.recordCountCorrection', () => {
+  test('a counted total', async () => {
+    const service = { createAdjustment: vi.fn().mockResolvedValue({ adjustment: { quantity: -3 } }) };
+    const controller = new InventoryAdjustmentController(service as any);
+    const body = { locationId: 'centro', productId: 'p1', countedQuantity: 12 };
+
+    const response = await controller.recordCountCorrection(body as any, managerRequest());
+
+    assert({
+      given: 'a count correction carrying only the counted total',
+      should: 'pass the counted total to the service',
+      actual: service.createAdjustment.mock.calls[0]?.[0]?.countedQuantity,
+      expected: 12,
+    });
+    assert({
+      given: 'the change the server derived',
+      should: 'report that change, not the missing client quantity',
+      actual: response.message,
+      expected: 'Adjustment created successfully: COUNT_CORRECTION 3 units',
+    });
+  });
+});
+
 describe('InventoryAdjustmentController.getAdjustmentsByLocation', () => {
   const controllerWithList = () => {
     const service = { getAdjustmentsByLocation: vi.fn().mockResolvedValue([]) };
