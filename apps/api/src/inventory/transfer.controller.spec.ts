@@ -109,3 +109,19 @@ describe('TransferController.getTransfers', () => {
     });
   });
 });
+
+describe('TransferController.retrySquareSync', () => {
+  test('a retry Square refuses again', async () => {
+    const transferService = { retrySquareSync: vi.fn().mockResolvedValue({ synced: false, error: 'Product not mapped to Square catalog' }) };
+    const controller = new TransferController(transferService as any);
+
+    const { message, data } = await controller.retrySquareSync('t1');
+
+    assert({
+      given: 'a transfer retry for a product missing from the Square catalog',
+      should: 'answer with the short Spanish reason in the message and data',
+      actual: [message, data.error],
+      expected: ['No se sincronizó con Square: El producto no está en el catálogo de Square', 'El producto no está en el catálogo de Square'],
+    });
+  });
+});

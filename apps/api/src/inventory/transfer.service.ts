@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { listLimit } from './list-limit';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { assertCutOver } from './cutover-gate';
+import { assertSoldAtLocation } from './sold-at-location';
 import { buildTransferLines, resolveQuantityReceived } from './transfer';
 import { SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
@@ -130,6 +131,7 @@ export class TransferService {
     if (!product) throw new NotFoundException(`Product ${input.productId} not found`);
     if (!fromLocation) throw new NotFoundException(`Location ${input.fromLocationId} not found`);
     if (!toLocation) throw new NotFoundException(`Location ${input.toLocationId} not found`);
+    assertSoldAtLocation(product, input.toLocationId);
     // The origin is checked by its TRANSFER_OUT adjustment; the destination would
     // otherwise receive stock its cutover will count again.
     await assertCutOver(this.prisma, input.toLocationId);

@@ -66,6 +66,21 @@ describe('TransferService (Postgres, Square recorded)', () => {
     });
   });
 
+  test('shipping a product the destination does not sell', async () => {
+    const { transfers, productId } = await transferSetup();
+    await prisma.product.update({ where: { id: productId }, data: { soldOnlyAtLocationId: centro } });
+
+    const response = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 })
+      .then(() => undefined, (e) => e.getResponse?.());
+
+    assert({
+      given: 'a transfer of a product sold only at the origin',
+      should: 'refuse it before taking any stock from the origin',
+      actual: [response?.code, (await prisma.inventory.aggregate({ where: { productId }, _sum: { quantity: true } }))._sum.quantity],
+      expected: ['PRODUCT_NOT_SOLD_AT_LOCATION', 10],
+    });
+  });
+
   test('shipping a quantity that is not a whole number', async () => {
     const { transfers, productId } = await transferSetup();
 
