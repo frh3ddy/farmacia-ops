@@ -6,6 +6,7 @@ import { SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
 import { findSquareVariationId, sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
+import { assertSoldAtLocation } from './sold-at-location';
 import { listLimit } from './list-limit';
 
 // ============================================================================
@@ -242,6 +243,7 @@ export class InventoryAdjustmentService {
       if (input.quantity < 0) {
         return await this.processNegativeAdjustment(input, tx);
       }
+      assertSoldAtLocation(product, input.locationId);
 
       const currentInventory = await db.inventory.aggregate({
         where: {

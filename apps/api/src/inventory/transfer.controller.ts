@@ -2,6 +2,7 @@ import { Controller, Post, Get, Body, Param, Query, Req, UseGuards, HttpExceptio
 import { TransferStatus } from '@prisma/client';
 import { TransferService } from './transfer.service';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { readableSync, squareSyncReason } from '../square/square-sync-reason';
 
 interface ShipTransferDto {
   productId: string;
@@ -87,8 +88,8 @@ export class TransferController {
     const result = await this.transferService.retrySquareSync(id);
     return {
       success: result.synced,
-      message: result.synced ? 'Successfully synced to Square' : `Square sync failed: ${result.error}`,
-      data: result,
+      message: result.synced ? 'Sincronizado con Square' : `No se sincronizó con Square: ${squareSyncReason(result.error)}`,
+      data: readableSync(result),
     };
   }
 

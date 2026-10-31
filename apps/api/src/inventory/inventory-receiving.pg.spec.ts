@@ -185,3 +185,41 @@ describe('InventoryReceivingService.getReceivingsByProduct (Postgres)', () => {
     });
   });
 });
+
+describe('InventoryReceivingService.receiveInventory where the product is sold (Postgres)', () => {
+  async function cutOverStore(name: string) {
+    const { id } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name } });
+    await prisma.cutoverLock.create({ data: { locationId: id, cutoverDate: new Date('2026-09-01') } });
+    return id;
+  }
+
+  test('a product sold only at another store', async () => {
+    const soldAt = await cutOverStore('Centro');
+    const here = await cutOverStore('Norte');
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}`, soldOnlyAtLocationId: soldAt } });
+
+    const response = await service.receiveInventory({ locationId: here, productId, quantity: 1, unitCost: 8 })
+      .then(() => undefined, (e) => e.getResponse?.());
+
+    assert({
+      given: 'stock received at a store that does not sell the product',
+      should: 'refuse it with a code the app can show, and record nothing',
+      actual: [response?.code, await prisma.inventory.count({ where: { productId } })],
+      expected: ['PRODUCT_NOT_SOLD_AT_LOCATION', 0],
+    });
+  });
+
+  test('a product sold only at this store', async () => {
+    const here = await cutOverStore('Sur');
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}`, soldOnlyAtLocationId: here } });
+
+    await service.receiveInventory({ locationId: here, productId, quantity: 3, unitCost: 2 });
+
+    assert({
+      given: 'stock received at the one store that sells the product',
+      should: 'add it as a batch',
+      actual: (await prisma.inventory.aggregate({ where: { productId }, _sum: { quantity: true } }))._sum.quantity,
+      expected: 3,
+    });
+  });
+});

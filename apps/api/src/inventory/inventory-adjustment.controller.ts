@@ -15,6 +15,19 @@ import { AdjustmentType } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 import { USER_ADJUSTMENT_TYPES } from './adjustment-types';
 import { parseDateParam } from './business-date';
+import { readableSync, squareSyncNote, squareSyncReason } from '../square/square-sync-reason';
+
+/** Adjustment types as staff call them, for messages. */
+const ADJUSTMENT_LABELS: Partial<Record<AdjustmentType, string>> = {
+  DAMAGE: 'Daño',
+  THEFT: 'Robo',
+  EXPIRED: 'Vencido',
+  COUNT_CORRECTION: 'Corrección de conteo',
+  FOUND: 'Encontrado',
+  RETURN: 'Devolución',
+  WRITE_OFF: 'Baja',
+  OTHER: 'Otro',
+};
 
 // ============================================================================
 // DTOs
@@ -86,17 +99,14 @@ export class InventoryAdjustmentController {
       ? { ...common, type: AdjustmentType.COUNT_CORRECTION, countedQuantity: body.countedQuantity! }
       : { ...common, type: body.type, quantity: body.quantity });
 
-    let message = `Adjustment created successfully: ${body.type} ${Math.abs(counted ? result.adjustment.quantity : body.quantity)} units`;
-    if (result.squareSync) {
-      message += result.squareSync.synced 
-        ? ' (synced to Square)' 
-        : ` (Square sync failed: ${result.squareSync.error})`;
-    }
+    const units = Math.abs(counted ? result.adjustment.quantity : body.quantity);
+    const type = ADJUSTMENT_LABELS[counted ? AdjustmentType.COUNT_CORRECTION : body.type] ?? body.type;
+    const message = `Ajuste registrado: ${type}, ${units} unidades${squareSyncNote(result.squareSync)}`;
 
     return {
       success: true,
       message,
-      data: result,
+      data: { ...result, squareSync: result.squareSync && readableSync(result.squareSync) },
     };
   }
 
@@ -266,9 +276,9 @@ export class InventoryAdjustmentController {
     return {
       success: result.synced,
       message: result.synced
-        ? 'Successfully synced to Square'
-        : `Square sync failed: ${result.error}`,
-      data: result,
+        ? 'Sincronizado con Square'
+        : `No se sincronizó con Square: ${squareSyncReason(result.error)}`,
+      data: readableSync(result),
     };
   }
 }

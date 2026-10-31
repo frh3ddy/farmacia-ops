@@ -229,6 +229,47 @@ describe('InventoryAdjustmentService.createAdjustment (Postgres)', () => {
   });
 });
 
+describe('InventoryAdjustmentService.createAdjustment where the product is sold (Postgres)', () => {
+  /** A cut-over store, so the cutover gate doesn't decide these tests. */
+  async function otherStore() {
+    const { id } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Norte' } });
+    await prisma.cutoverLock.create({ data: { locationId: id, cutoverDate: new Date('2026-09-01') } });
+    return id;
+  }
+
+  test('stock found for a product sold only at another store', async () => {
+    const elsewhere = await otherStore();
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}`, soldOnlyAtLocationId: elsewhere } });
+
+    const response = await service
+      .createAdjustment({ locationId, productId, type: 'FOUND', quantity: 2, unitCost: 1 })
+      .then(() => undefined, (error) => error.getResponse?.());
+
+    assert({
+      given: 'found stock at a store that does not sell the product',
+      should: 'refuse it with a code the app can show',
+      actual: [response?.code, await prisma.inventory.count({ where: { productId } })],
+      expected: ['PRODUCT_NOT_SOLD_AT_LOCATION', 0],
+    });
+  });
+
+  test('stray stock removed at a store that does not sell the product', async () => {
+    const elsewhere = await otherStore();
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}`, soldOnlyAtLocationId: elsewhere } });
+    // Stock that got here before the guard existed.
+    await prisma.inventory.create({ data: { productId, locationId, quantity: 1, unitCost: 8, receivedAt: new Date('2026-10-01') } });
+
+    await service.createAdjustment({ locationId, productId, type: 'DAMAGE', quantity: -1 });
+
+    assert({
+      given: 'a damage write-off of stock at a store that does not sell the product',
+      should: 'still remove it, so stray stock can be cleaned up',
+      actual: (await prisma.inventory.aggregate({ where: { productId, locationId }, _sum: { quantity: true } }))._sum.quantity,
+      expected: 0,
+    });
+  });
+});
+
 describe('InventoryAdjustmentService count correction by counted total (Postgres)', () => {
   const stockOf = async (productId: string) =>
     (await prisma.inventory.aggregate({ where: { productId, locationId }, _sum: { quantity: true } }))._sum.quantity;

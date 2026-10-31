@@ -15,6 +15,7 @@ import { InventoryReceivingService } from './inventory-receiving.service';
 import { parseBusinessDate, parseDateParam } from './business-date';
 import { ProductsService } from '../products/products.service';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { readableSync, squareSyncNote, squareSyncReason } from '../square/square-sync-reason';
 
 // ============================================================================
 // DTOs
@@ -117,12 +118,7 @@ export class InventoryReceivingController {
       clientRequestId: body.clientRequestId,
     });
 
-    let message = `Received ${body.quantity} units successfully`;
-    if (result.squareSync) {
-      message += result.squareSync.synced
-        ? ' (synced to Square)'
-        : ` (Square sync failed: ${result.squareSync.error})`;
-    }
+    let message = `Se recibieron ${body.quantity} unidades${squareSyncNote(result.squareSync)}`;
 
     let priceUpdate = null;
     // 0 or missing means no price change; anything else updatePrice validates.
@@ -139,13 +135,13 @@ export class InventoryReceivingController {
           newPrice: priceResult.newPrice,
           squareSynced: priceResult.squareSynced,
         };
-        message += priceResult.squareSynced 
-          ? ` | Price updated to $${body.sellingPrice} (synced to Square)`
-          : ` | Price updated to $${body.sellingPrice} locally`;
+        message += priceResult.squareSynced
+          ? ` | Precio actualizado a $${body.sellingPrice} (sincronizado con Square)`
+          : ` | Precio actualizado a $${body.sellingPrice} solo en la app`;
         this.logger.log(`[RECEIVING] Price updated for product ${body.productId}: $${body.sellingPrice} (squareSynced: ${priceResult.squareSynced})`);
       } catch (priceError) {
         this.logger.error(`[RECEIVING] Failed to update price: ${priceError}`);
-        message += ` | Price update failed: ${getErrorMessage(priceError)}`;
+        message += ` | No se actualizó el precio: ${getErrorMessage(priceError)}`;
         priceUpdate = { error: getErrorMessage(priceError) };
       }
     }
@@ -168,6 +164,7 @@ export class InventoryReceivingController {
       message,
       data: {
         ...result,
+        squareSync: result.squareSync && readableSync(result.squareSync),
         priceUpdate,
         product: updatedProduct,
       },
@@ -274,9 +271,9 @@ export class InventoryReceivingController {
     return {
       success: result.synced,
       message: result.synced
-        ? 'Successfully synced to Square'
-        : `Square sync failed: ${result.error}`,
-      data: result,
+        ? 'Sincronizado con Square'
+        : `No se sincronizó con Square: ${squareSyncReason(result.error)}`,
+      data: readableSync(result),
     };
   }
 }

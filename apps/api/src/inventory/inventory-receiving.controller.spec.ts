@@ -37,6 +37,26 @@ describe('InventoryReceivingController.getReceiving', () => {
 });
 
 describe('InventoryReceivingController.receiveInventory', () => {
+  test('a receiving whose Square sync failed', async () => {
+    const raw = 'Status code: 404\nBody: { "errors": [ { "code": "NOT_FOUND", "detail": "This merchant does not have a location with the ID `X`." } ] }';
+    const service = { receiveInventory: vi.fn().mockResolvedValue({ receiving: { id: 'r1' }, squareSync: { synced: false, error: raw } }) };
+    const products = new ProductsService({} as any);
+    vi.spyOn(products, 'getProduct').mockResolvedValue({ data: null } as any);
+    const controller = new InventoryReceivingController(service as any, products);
+
+    const { message, data } = await controller.receiveInventory({ productId: 'p1', quantity: 1, unitCost: 8 } as any, managerRequest());
+
+    assert({
+      given: 'a receiving saved but refused by Square with its raw 404 body',
+      should: 'answer in Spanish with the short reason, never the raw body',
+      actual: [message, data.squareSync?.error],
+      expected: [
+        'Se recibieron 1 unidades — no se sincronizó con Square: Square no reconoce esta tienda. Puedes reintentar desde el historial.',
+        'Square no reconoce esta tienda',
+      ],
+    });
+  });
+
   test('a receiving sent with a price that is not a number', async () => {
     const service = { receiveInventory: vi.fn().mockResolvedValue({ receiving: { id: 'r1' } }) };
     const prisma = { product: { findUnique: vi.fn() } };
@@ -54,6 +74,22 @@ describe('InventoryReceivingController.receiveInventory', () => {
       should: 'record the receiving and report the price as not updated',
       actual: [service.receiveInventory.mock.calls.length, typeof data.priceUpdate?.error, prisma.product.findUnique.mock.calls.length],
       expected: [1, 'string', 0],
+    });
+  });
+});
+
+describe('InventoryReceivingController.retrySquareSync', () => {
+  test('a retry Square refuses again', async () => {
+    const service = { retrySquareSync: vi.fn().mockResolvedValue({ synced: false, error: 'fetch failed' }) };
+    const controller = new InventoryReceivingController(service as any, new ProductsService({} as any));
+
+    const { message, data } = await controller.retrySquareSync('r1');
+
+    assert({
+      given: 'a retry that still could not reach Square',
+      should: 'answer with the short Spanish reason in both the message and the data the app reads',
+      actual: [message, data.error],
+      expected: ['No se sincronizó con Square: No se pudo conectar con Square; reintenta más tarde', 'No se pudo conectar con Square; reintenta más tarde'],
     });
   });
 });

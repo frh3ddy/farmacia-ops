@@ -78,7 +78,7 @@ describe('InventoryAdjustmentController.recordCountCorrection', () => {
       given: 'the change the server derived',
       should: 'report that change, not the missing client quantity',
       actual: response.message,
-      expected: 'Adjustment created successfully: COUNT_CORRECTION 3 units',
+      expected: 'Ajuste registrado: Corrección de conteo, 3 unidades',
     });
   });
 });
@@ -151,6 +151,44 @@ describe('InventoryAdjustmentController.getAdjustment', () => {
       should: 'return it',
       actual: await outcome(controller.getAdjustment('a1', ownerRequest())),
       expected: 'done',
+    });
+  });
+});
+
+describe('InventoryAdjustmentController Square sync messages', () => {
+  test('found stock saved but not synced to Square', async () => {
+    const service = {
+      createAdjustment: vi.fn().mockResolvedValue({ adjustment: { quantity: 2 }, squareSync: { synced: false, error: 'fetch failed' } }),
+    };
+    const controller = new InventoryAdjustmentController(service as any);
+
+    const { message, data } = await controller.createAdjustment(
+      { locationId: 'centro', productId: 'p1', type: 'FOUND', quantity: 2, unitCost: 5 } as any,
+      managerRequest(),
+    );
+
+    assert({
+      given: 'found stock that Square could not be reached for',
+      should: 'answer in Spanish, naming the type in Spanish, with the short reason',
+      actual: [message, data.squareSync?.error],
+      expected: [
+        'Ajuste registrado: Encontrado, 2 unidades — no se sincronizó con Square: No se pudo conectar con Square; reintenta más tarde. Puedes reintentar desde el historial.',
+        'No se pudo conectar con Square; reintenta más tarde',
+      ],
+    });
+  });
+
+  test('a retry Square refuses again', async () => {
+    const service = { retrySquareSync: vi.fn().mockResolvedValue({ synced: false, error: 'Location not linked to Square' }) };
+    const controller = new InventoryAdjustmentController(service as any);
+
+    const { message, data } = await controller.retrySquareSync('a1');
+
+    assert({
+      given: 'a retry for a store not linked to Square',
+      should: 'answer with the short Spanish reason in the message and data',
+      actual: [message, data.error],
+      expected: ['No se sincronizó con Square: La tienda no está conectada a Square', 'La tienda no está conectada a Square'],
     });
   });
 });

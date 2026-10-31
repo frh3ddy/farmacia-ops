@@ -6,6 +6,7 @@ import { SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
 import { findSquareVariationId, sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
+import { assertSoldAtLocation } from './sold-at-location';
 
 // ============================================================================
 // Types
@@ -175,6 +176,7 @@ export class InventoryReceivingService {
     if (!product) {
       throw new NotFoundException(`Product ${input.productId} not found`);
     }
+    assertSoldAtLocation(product, input.locationId);
 
     const location = await this.prisma.location.findUnique({
       where: { id: input.locationId },
