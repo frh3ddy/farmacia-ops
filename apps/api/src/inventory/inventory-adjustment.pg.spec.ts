@@ -214,6 +214,71 @@ describe('InventoryAdjustmentService.createAdjustment (Postgres)', () => {
   });
 });
 
+describe('InventoryAdjustmentService count correction by counted total (Postgres)', () => {
+  const stockOf = async (productId: string) =>
+    (await prisma.inventory.aggregate({ where: { productId, locationId }, _sum: { quantity: true } }))._sum.quantity;
+
+  test('a count below the stock on hand', async () => {
+    const { productId } = await productWithBatches([
+      { quantity: 10, unitCost: 5, receivedAt: '2026-10-20' },
+      { quantity: 5, unitCost: 2, receivedAt: '2026-10-01' },
+    ]);
+
+    const result = await service.createAdjustment({ locationId, productId, type: 'COUNT_CORRECTION', countedQuantity: 12 });
+
+    assert({
+      given: 'stock of 15 and a counted total of 12',
+      should: 'remove 3 units FIFO, leaving 12',
+      actual: [result.adjustment.quantity, await stockOf(productId)],
+      expected: [-3, 12],
+    });
+  });
+
+  test('a stale change sent alongside the counted total', async () => {
+    const { productId } = await productWithBatches([{ quantity: 15, unitCost: 2, receivedAt: '2026-10-01' }]);
+
+    // The app computed +5 from a snapshot of 10; stock has since become 15.
+    await service.createAdjustment({ locationId, productId, type: 'COUNT_CORRECTION', quantity: 5, countedQuantity: 17 });
+
+    assert({
+      given: 'a counted total of 17 and a stale quantity of +5',
+      should: 'set stock to the counted total, ignoring the stale quantity',
+      actual: await stockOf(productId),
+      expected: 17,
+    });
+  });
+
+  test('a count matching the stock on hand', async () => {
+    const { productId } = await productWithBatches([{ quantity: 15, unitCost: 2, receivedAt: '2026-10-01' }]);
+
+    const error = await service
+      .createAdjustment({ locationId, productId, type: 'COUNT_CORRECTION', countedQuantity: 15 })
+      .then(() => undefined, (e: Error) => e.message);
+
+    assert({
+      given: 'a counted total equal to the stock on hand',
+      should: 'refuse it and leave stock unchanged',
+      actual: [error, await stockOf(productId)],
+      expected: ['El conteo coincide con el inventario actual; no hay nada que ajustar', 15],
+    });
+  });
+
+  test('the same counted request sent twice', async () => {
+    const { productId } = await productWithBatches([{ quantity: 15, unitCost: 2, receivedAt: '2026-10-01' }]);
+    const request = { locationId, productId, type: 'COUNT_CORRECTION' as const, countedQuantity: 12, clientRequestId: `cc-${Math.random()}` };
+
+    const first = await service.createAdjustment(request);
+    const replay = await service.createAdjustment(request);
+
+    assert({
+      given: 'an offline replay of a count correction',
+      should: 'return the first adjustment without applying it again',
+      actual: [replay.adjustment.id, await stockOf(productId)],
+      expected: [first.adjustment.id, 12],
+    });
+  });
+});
+
 describe('InventoryAdjustmentService Square sync (Postgres)', () => {
   /** The service with Square's inventory call recorded; `errors` makes Square reject it. */
   async function syncedProduct(errors?: Array<{ code: string; detail: string }>) {

@@ -92,6 +92,22 @@ describe('createAdjustment input', () => {
   });
 });
 
+describe('createAdjustment counted total', () => {
+  test('a counted total below zero or not whole', async () => {
+    const rejected = 'El conteo debe ser un número entero de cero o más';
+    assert({
+      given: 'a counted total of -1, 2.5 or text',
+      should: 'refuse it before touching the database',
+      actual: [
+        await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'COUNT_CORRECTION', countedQuantity: -1 })),
+        await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'COUNT_CORRECTION', countedQuantity: 2.5 })),
+        await errorOf(() => noDatabase().createAdjustment({ ...base, type: 'COUNT_CORRECTION', countedQuantity: '7' as any })),
+      ],
+      expected: Array(3).fill(rejected),
+    });
+  });
+});
+
 describe('createAdjustment replay', () => {
   test('the same request arriving twice at once', async () => {
     const winner = {
