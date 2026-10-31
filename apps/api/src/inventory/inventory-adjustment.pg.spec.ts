@@ -182,6 +182,21 @@ describe('InventoryAdjustmentService.createAdjustment (Postgres)', () => {
     });
   });
 
+  test('stock added to a product with no cost on record', async () => {
+    const { productId } = await productWithBatches([]);
+
+    const response = await service
+      .createAdjustment({ locationId, productId, type: 'FOUND', quantity: 5 })
+      .then(() => undefined, (error) => error.getResponse?.());
+
+    assert({
+      given: 'found stock with no unit cost for a product never costed',
+      should: 'refuse it with a code the app can act on (it then asks for the cost)',
+      actual: { code: response?.code, message: response?.message },
+      expected: { code: 'UNIT_COST_REQUIRED', message: 'Indica el costo unitario: este producto no tiene un costo anterior registrado.' },
+    });
+  });
+
   test('a free item added at zero cost', async () => {
     // A costed batch exists, so a lookup would have found $4.
     const { productId } = await productWithBatches([{ quantity: 1, unitCost: 4, receivedAt: '2026-10-01' }]);
