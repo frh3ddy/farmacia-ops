@@ -238,6 +238,9 @@ export interface MigrationResult {
   skippedItems?: number; // Count of items that were SKIPPED and excluded from migration
   isComplete?: boolean;
   canContinue?: boolean;
+  /** Products left without opening stock; the store isn't locked until the owner confirms them. */
+  leftOut?: { productId: string; productName: string | null; locationId: string; reason: string }[];
+  needsConfirmation?: boolean;
 }
 
 export interface CutoverLock {

@@ -12,7 +12,7 @@ vi.mock("../apiFetch", () => ({
 vi.mock("./api", () => ({
   fetchAllSuppliers: vi.fn().mockResolvedValue([]),
   fetchCategories: vi.fn().mockResolvedValue([]),
-  fetchInProgressSessions: vi.fn().mockResolvedValue([]),
+  fetchOpenAndFinishedSessions: vi.fn().mockResolvedValue([]),
   extractCosts: vi.fn(),
   discardItem: vi.fn().mockResolvedValue({ success: true }),
 }));

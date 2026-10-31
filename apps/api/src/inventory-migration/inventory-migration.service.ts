@@ -62,6 +62,19 @@ export function latestApprovedByProduct<T extends { productId: string; migration
  * at the same location: skipping is about that location's stock, and the
  * product may well be on the shelf elsewhere.
  */
+/** A product a cutover left without opening stock, and why. */
+type LeftOutItem = { productId: string; productName: string | null; locationId: string; reason: string };
+
+/** What a cutover keeps between batches: the items done (`locationId:variationId`) and those left out. */
+type CutoverBatchState = { locationIds: string[]; extractionSessionId?: string | null; done?: string[]; leftOut?: LeftOutItem[] };
+
+/** Another call already took this batch. */
+class ConcurrentBatchError extends Error {
+  constructor() {
+    super('Este bloque ya se está migrando en otra solicitud');
+  }
+}
+
 export function decisionsToCarryOver<T extends { productId: string; cutoverId: string; migrationStatus: string }>(
   history: T[],
   sameLocationCutoverIds: Set<string>,
@@ -1277,13 +1290,11 @@ export class InventoryMigrationService {
     };
   }
 
-  // Helper for determineUnitCost (Unchanged logic, just ensure no N+1 calls if possible)
-  // ... (keeping determineUnitCost as is, but it's called inside the loop in executeInventoryMigration. 
-  // We will optimize the CALLER instead of this function).
-
   /**
-   * Main migration function
-   * OPTIMIZED: Separated API calls from Transaction
+   * One batch of a store's one-time migration: opening stock at the store's
+   * Square count and approved cost for the next items this cutover hasn't done.
+   * The last batch retires discontinued products and locks the store (see
+   * finishCutover). Safe to call again after a failure or twice at once.
    */
   async executeInventoryMigration(
     input: CutoverInput,
@@ -1291,6 +1302,7 @@ export class InventoryMigrationService {
     batchSize?: number | null,
     cutoverId?: string | null,
     extractionSessionId?: string | null,
+    options: { confirmLeftOut?: boolean } = {},
   ): Promise<MigrationResult> {
     // 1. Validation & Setup
     const validation = await this.validateCutoverInput(input);
@@ -1315,9 +1327,18 @@ export class InventoryMigrationService {
       }
     }
 
-    let cutoverRecord = cutoverId
+    const state = (cutover: { batchState: Prisma.JsonValue }) => (cutover.batchState ?? {}) as CutoverBatchState;
+    // A new start for a store and session that already has an unfinished
+    // cutover continues it, so a failed or abandoned run never starts over.
+    const unfinished = !cutoverId && extractionSessionId
+      ? await this.prisma.cutover.findFirst({
+          where: { status: { not: 'COMPLETED' }, batchState: { path: ['extractionSessionId'], equals: extractionSessionId } },
+          orderBy: { createdAt: 'desc' },
+        })
+      : null;
+    const cutoverRecord = cutoverId
       ? await this.prisma.cutover.findUnique({ where: { id: cutoverId } })
-      : await this.prisma.cutover.create({
+      : unfinished ?? await this.prisma.cutover.create({
           data: {
             cutoverDate: input.cutoverDate,
             costBasis: input.costBasis,
@@ -1328,81 +1349,52 @@ export class InventoryMigrationService {
             batchSize: batchSize || null,
             currentBatch: 0,
             processedItems: 0,
-            batchState: {
-              locationIds: input.locationIds,
-              extractionSessionId: extractionSessionId || null,
-            } as any
-          }
+            batchState: { locationIds: input.locationIds, extractionSessionId: extractionSessionId || null, done: [], leftOut: [] } satisfies CutoverBatchState,
+          },
         });
 
     if (!cutoverRecord) throw new CutoverValidationError('Cutover not found', []);
     if (cutoverRecord.status === 'COMPLETED') throw new CutoverValidationError('Cutover already completed', []);
+    const batchState = state(cutoverRecord);
+    const done = new Set(batchState.done ?? []);
+    const leftOut = batchState.leftOut ?? [];
 
-    // 2. Get SKIPPED product IDs to exclude from migration
-      // CostApproval rows are written during the review phase (approve/discard/
-      // mark-discontinued) keyed by the extraction session's id — no Cutover row
-      // exists yet at that point. Read that same id back from batchState (stashed
-      // above on first call, already present on continuation calls) rather than
-      // this Cutover row's own freshly-generated id, or every discard/discontinue
-      // silently fails to exclude the item from migration.
-      const sessionCutoverId = ((cutoverRecord as any).batchState as any)?.extractionSessionId || extractionSessionId || cutoverRecord.id;
-      const skippedApprovals = await this.prisma.costApproval.findMany({
-        where: {
-          cutoverId: sessionCutoverId,
-          migrationStatus: 'SKIPPED',
-        },
-        select: { productId: true },
-      });
+    // CostApproval rows are written during the review phase keyed by the
+    // extraction session's id — no Cutover row exists yet then — so read that id
+    // back from batchState, not this Cutover row's own id.
+    const sessionCutoverId = batchState.extractionSessionId || extractionSessionId || cutoverRecord.id;
+    const skippedApprovals = await this.prisma.costApproval.findMany({
+      where: { cutoverId: sessionCutoverId, migrationStatus: 'SKIPPED' },
+      select: { productId: true },
+    });
     const skippedProductIds = new Set(skippedApprovals.map(a => a.productId));
 
-    // 2. Fetch Square Inventory (Cached/Snapshot)
-    // Optimization: Don't fetch everything if we are deep in batches. 
-    // Ideally, we'd persist the square snapshot. 
-    // For now, we fetch, but we optimize the loop.
-    const itemsToProcess: any[] = [];
-    // We assume processedProductIds tracks what we've done.
-    // For large datasets, persisting `itemsToProcess` to a temp table is better, 
-    // but assuming reasonable inventory (<10k), memory is fine.
-    
-    // Single batched lookup instead of one findUnique per location (N+1).
-    const batchLocations = await this.prisma.location.findMany({
-      where: { id: { in: input.locationIds } },
-    });
+    // 2. The store's items, and which of them this cutover hasn't done yet.
+    // Done items are tracked by identity, not by position: products deleted or
+    // mapped during the run can't make a batch skip or repeat one.
+    const batchLocations = await this.prisma.location.findMany({ where: { id: { in: input.locationIds } } });
     const batchLocationById = new Map(batchLocations.map((loc) => [loc.id, loc]));
+    const itemsToProcess = (await this.getCutoverItemsForLocations(input.locationIds, batchLocationById)).map((merged) => ({
+      key: `${merged.locationId}:${merged.catalogObjectId}`,
+      locationId: merged.locationId,
+      squareInventoryItem: {
+        catalogObjectId: merged.catalogObjectId,
+        locationId: batchLocationById.get(merged.locationId)!.squareId!,
+        quantity: merged.quantity,
+        catalogObject: null,
+      },
+    }));
+    const remaining = itemsToProcess.filter((item) => !done.has(item.key));
 
-    const mergedItems = await this.getCutoverItemsForLocations(input.locationIds, batchLocationById);
-    for (const merged of mergedItems) {
-      const location = batchLocationById.get(merged.locationId)!;
-      itemsToProcess.push({
-        locationId: merged.locationId,
-        squareInventoryItem: {
-          catalogObjectId: merged.catalogObjectId,
-          locationId: location.squareId!,
-          quantity: merged.quantity,
-          catalogObject: null,
-        },
-      });
-    }
-
-    // 3. Determine Batch
-    if (!cutoverRecord.totalItems) {
-      await this.prisma.cutover.update({
-         where: { id: cutoverRecord.id }, 
-         data: { totalItems: itemsToProcess.length } 
-      });
-    }
-
-    const effectiveBatchSize = batchSize || itemsToProcess.length;
+    const effectiveBatchSize = batchSize || remaining.length || 1;
     const currentBatch = cutoverRecord.currentBatch || 0;
-    const start = currentBatch * effectiveBatchSize;
-    const batchItems = itemsToProcess.slice(start, start + effectiveBatchSize);
+    const batchItems = remaining.slice(0, effectiveBatchSize);
 
-    // Initial Result Object
     const result: MigrationResult = {
       cutoverId: cutoverRecord.id,
       cutoverDate: input.cutoverDate,
       locationsProcessed: 0,
-      productsProcessed: cutoverRecord.processedItems || 0,
+      productsProcessed: done.size,
       openingBalancesCreated: 0,
       errors: [],
       warnings: [],
@@ -1410,155 +1402,121 @@ export class InventoryMigrationService {
       completedBy: input.ownerApprovedBy || null,
       batchSize: effectiveBatchSize,
       currentBatch,
-      totalBatches: Math.ceil(itemsToProcess.length / effectiveBatchSize),
-      processedItems: cutoverRecord.processedItems || 0,
-      totalItems: itemsToProcess.length,
+      totalBatches: currentBatch + Math.ceil(remaining.length / effectiveBatchSize),
+      processedItems: done.size,
+      totalItems: done.size + remaining.length,
       skippedItems: skippedProductIds.size,
       isComplete: false,
       canContinue: false,
+      leftOut,
     };
 
-    if (batchItems.length === 0) {
-      // Finalize
-      await this.prisma.cutover.update({
-        where: { id: cutoverRecord.id },
-        data: { status: 'COMPLETED', completedAt: new Date(), result: result as any }
-      });
-      await this.enableCutoverLock(input.cutoverDate, input.locationIds, this.prisma);
-      result.isComplete = true;
-      return result;
-    }
+    if (batchItems.length === 0) return this.finishCutover(cutoverRecord.id, input, result, itemsToProcess, options);
 
-    // 4. PRE-FETCH DATA (Avoid API/DB in transaction)
-    
-    // A. Resolve Product IDs
-    // OPTIMIZATION: Use batchResolveProductsFromSquareVariations
+    // 3. Resolve products and costs before the transaction (Square and DB reads).
     const itemsByLocation = new Map<string, string[]>();
     for (const item of batchItems) {
       if (!itemsByLocation.has(item.locationId)) itemsByLocation.set(item.locationId, []);
       itemsByLocation.get(item.locationId)!.push(item.squareInventoryItem.catalogObjectId);
     }
-    
     const variationToProductMap = new Map<string, string>();
     for (const [locId, vars] of itemsByLocation) {
-       const map = await this.catalogMapper.batchResolveProductsFromSquareVariations(vars, locId);
-       map.forEach((pid, vid) => variationToProductMap.set(vid, pid));
+      const map = await this.catalogMapper.batchResolveProductsFromSquareVariations(vars, locId);
+      map.forEach((pid, vid) => variationToProductMap.set(vid, pid));
     }
+    const resolvedBatch = batchItems.map((item) => ({ ...item, productId: variationToProductMap.get(item.squareInventoryItem.catalogObjectId) }));
+    const nonSkippedBatch = resolvedBatch.filter((item) => item.productId && !skippedProductIds.has(item.productId));
 
-    const resolvedBatch = batchItems.map(item => {
-        const pid = variationToProductMap.get(item.squareInventoryItem.catalogObjectId);
-        return { ...item, productId: pid };
-    });
+    const uniquePids = [...new Set(nonSkippedBatch.map((i) => i.productId))] as string[];
+    const products = await this.prisma.product.findMany({ where: { id: { in: uniquePids } } });
+    const productMap = new Map(products.map((p) => [p.id, p]));
 
-    // Filter out SKIPPED items before processing
-    // Also filter out unresolved items (productId is undefined)
-    const nonSkippedBatch = resolvedBatch.filter(item => item.productId && !skippedProductIds.has(item.productId));
-
-    const uniquePids = [...new Set(nonSkippedBatch.map(i => i.productId))] as string[];
-
-    // B. Bulk Fetch Products
-    const products = await this.prisma.product.findMany({
-      where: { id: { in: uniquePids } }
-    });
-    const productMap = new Map(products.map(p => [p.id, p]));
-
-    // C. Bulk Fetch API Data (Cost Basis = DESCRIPTION only)
     const catalogDataMap = new Map();
     if (input.costBasis === 'DESCRIPTION') {
-      const pidsNeedingInfo = products.filter(p => !p.squareProductName).map(p => p.id);
+      const pidsNeedingInfo = products.filter((p) => !p.squareProductName).map((p) => p.id);
       const itemsNeedingFetch = resolvedBatch
-        .filter(i => i.productId && pidsNeedingInfo.includes(i.productId))
-        .map(i => i.squareInventoryItem.catalogObjectId);
-
-      // OPTIMIZATION: Use batchFetchSquareCatalogObjects
+        .filter((i) => i.productId && pidsNeedingInfo.includes(i.productId))
+        .map((i) => i.squareInventoryItem.catalogObjectId);
       if (itemsNeedingFetch.length > 0) {
         try {
-            const batchResults = await this.squareInventory.batchFetchSquareCatalogObjects(itemsNeedingFetch);
-            for (const [vid, data] of batchResults) {
-                catalogDataMap.set(vid, data);
-            }
-        } catch(e) {
-            this.logger.warn(`[CATALOG_FETCH_ERROR] Failed to batch fetch variations in migration:`, e);
+          const batchResults = await this.squareInventory.batchFetchSquareCatalogObjects(itemsNeedingFetch);
+          for (const [vid, data] of batchResults) catalogDataMap.set(vid, data);
+        } catch (e) {
+          this.logger.warn(`[CATALOG_FETCH_ERROR] Failed to batch fetch variations in migration:`, e);
         }
       }
     }
 
-    // D. Pre-calculate Unit Costs (Avoid DB/CPU in transaction)
-    // We calculate costs NOW. If manual input is needed, we fail fast or collect errors.
-    const calculatedCosts = new Map<string, Prisma.Decimal>(); // Key: `${locationId}:${productId}`
-
+    const calculatedCosts = new Map<string, Prisma.Decimal>(); // `${locationId}:${productId}`
+    const costErrors = new Map<string, string>();
     for (const item of nonSkippedBatch) {
       const p = productMap.get(item.productId!);
-      if (!p) continue; // Will be handled in transaction error logic
-
-      // Determine names (using pre-fetched catalog data)
+      if (!p) continue;
       let pName = p.squareProductName || p.squareVariationName || p.name;
       let pDesc = p.squareDescription || null;
-      
       const catData = catalogDataMap.get(item.squareInventoryItem.catalogObjectId);
       if (catData) {
-         pName = this.normalizeSquareProductName(catData.productName, catData.itemVariationData?.name, pName);
-         pDesc = catData.productDescription || pDesc;
+        pName = this.normalizeSquareProductName(catData.productName, catData.itemVariationData?.name, pName);
+        pDesc = catData.productDescription || pDesc;
       }
-
-      // Determine Cost
-      // Note: determineUnitCost might still do DB calls for AVERAGE_COST. 
-      // If costBasis is AVERAGE_COST, we should pre-fetch SupplierProducts too. 
-      // For brevity, assuming other bases or low volume of avg cost.
+      const key = `${item.locationId}:${item.productId}`;
       try {
         const cost = await this.determineUnitCost(
           item.productId!, item.locationId, input.costBasis,
           item.squareInventoryItem.catalogObjectId,
-          pName, approvedCostsMap.get(item.productId!), null, pDesc
+          pName, approvedCostsMap.get(item.productId!), null, pDesc,
         );
-        if (cost) calculatedCosts.set(`${item.locationId}:${item.productId}`, cost);
-      } catch (e) {}
+        if (cost) calculatedCosts.set(key, cost);
+      } catch (e) {
+        costErrors.set(key, e instanceof Error ? e.message : String(e));
+      }
     }
 
-    // 5. TRANSACTION (Write Only)
+    // 4. Write the batch, and mark its items done in the same transaction.
+    const newLeftOut: LeftOutItem[] = [];
     try {
       await this.prisma.$transaction(async (tx) => {
-        // OPTIMIZATION: Batch Insert Opening Balances
-        const itemsToInsert: OpeningBalanceItem[] = [];
+        // Claim the batch first: a second call for the same batch waits on this
+        // row, then finds the cursor moved and inserts nothing.
+        const { count } = await tx.cutover.updateMany({
+          where: { id: cutoverRecord.id, currentBatch },
+          data: {
+            status: 'IN_PROGRESS',
+            currentBatch: currentBatch + 1,
+            processedItems: done.size + batchItems.length,
+            totalItems: done.size + remaining.length,
+          },
+        });
+        if (count === 0) throw new ConcurrentBatchError();
 
+        const itemsToInsert: OpeningBalanceItem[] = [];
         for (const item of nonSkippedBatch) {
           const product = productMap.get(item.productId!);
           if (!product) {
-            result.errors.push({
-               productId: item.productId!, locationId: item.locationId, errorType: 'DATABASE_ERROR',
-               message: `Product ${item.productId} does not exist`, canProceed: false
-            });
+            newLeftOut.push({ productId: item.productId!, productName: null, locationId: item.locationId, reason: 'El producto ya no existe' });
+            continue;
+          }
+          const key = `${item.locationId}:${item.productId}`;
+          const unitCost = calculatedCosts.get(key);
+          if (!unitCost) {
+            newLeftOut.push({ productId: product.id, productName: product.name, locationId: item.locationId, reason: costErrors.get(key) ?? 'Sin costo aprobado' });
             continue;
           }
 
-          const unitCost = calculatedCosts.get(`${item.locationId}:${item.productId}`);
-          if (!unitCost) {
-             result.errors.push({
-               productId: item.productId, productName: product.name, locationId: item.locationId,
-               errorType: 'MISSING_COST', message: 'Missing cost', canProceed: false
-             });
-             continue;
-          }
-
-          // Update Product Metadata if needed (from pre-fetched data)
           if (catalogDataMap.has(item.squareInventoryItem.catalogObjectId)) {
-             const catData = catalogDataMap.get(item.squareInventoryItem.catalogObjectId);
-             const normName = this.normalizeSquareProductName(catData.productName, catData.itemVariationData?.name, product.name);
-             await tx.product.update({
-               where: { id: item.productId },
-               data: {
-                 squareProductName: normName,
-                 squareDescription: catData.productDescription || product.squareDescription,
-                 squareVariationName: catData.itemVariationData?.name || product.squareVariationName,
-                 squareDataSyncedAt: new Date()
-               }
-             });
+            const catData = catalogDataMap.get(item.squareInventoryItem.catalogObjectId);
+            await tx.product.update({
+              where: { id: item.productId },
+              data: {
+                squareProductName: this.normalizeSquareProductName(catData.productName, catData.itemVariationData?.name, product.name),
+                squareDescription: catData.productDescription || product.squareDescription,
+                squareVariationName: catData.itemVariationData?.name || product.squareVariationName,
+                squareDataSyncedAt: new Date(),
+              },
+            });
           }
 
-          // Normalize negative quantities to 0 and track warnings
           const originalQuantity = item.squareInventoryItem.quantity;
-          const normalizedQuantity = Math.max(0, originalQuantity);
-          
           if (originalQuantity < 0) {
             result.warnings.push({
               productId: item.productId,
@@ -1567,111 +1525,130 @@ export class InventoryMigrationService {
               message: `Quantity was negative (${originalQuantity}), normalized to 0`,
             });
           }
-
-          // Prepare for Batch Create
           itemsToInsert.push({
-             productId: item.productId!,
-             locationId: item.locationId,
-             quantity: normalizedQuantity,
-             unitCost,
-             receivedAt: input.cutoverDate,
-             source: 'OPENING_BALANCE',
-             costSource: input.costBasis
+            productId: item.productId!,
+            locationId: item.locationId,
+            quantity: Math.max(0, originalQuantity),
+            unitCost,
+            receivedAt: input.cutoverDate,
+            source: 'OPENING_BALANCE',
+            costSource: input.costBasis,
           });
         }
-        
-        // Execute Batch Insert
+
         if (itemsToInsert.length > 0) {
-             // Inventory has no unique key, so skipDuplicates can't dedupe — the
-             // batch cursor advancing in this same transaction (below) is what
-             // keeps a retried batch from inserting opening balances twice.
-             await tx.inventory.createMany({
-                 data: itemsToInsert.map(i => ({
-                     productId: i.productId,
-                     locationId: i.locationId,
-                     quantity: i.quantity,
-                     unitCost: i.unitCost,
-                     receivedAt: i.receivedAt,
-                     source: i.source,
-                     costSource: i.costSource
-                 })),
-                 skipDuplicates: true
-             });
-             
-             result.openingBalancesCreated += itemsToInsert.length;
-             result.productsProcessed += itemsToInsert.length;
+          await tx.inventory.createMany({
+            data: itemsToInsert.map((i) => ({
+              productId: i.productId,
+              locationId: i.locationId,
+              quantity: i.quantity,
+              unitCost: i.unitCost,
+              receivedAt: i.receivedAt,
+              source: i.source,
+              costSource: i.costSource,
+              migrationId: cutoverRecord.id,
+            })),
+          });
+          result.openingBalancesCreated += itemsToInsert.length;
+          result.productsProcessed += itemsToInsert.length;
         }
 
         await tx.cutover.update({
           where: { id: cutoverRecord.id },
           data: {
-            currentBatch: currentBatch + 1,
-            processedItems: (cutoverRecord.processedItems || 0) + batchItems.length,
+            batchState: {
+              ...batchState,
+              locationIds: input.locationIds,
+              done: [...done, ...batchItems.map((i) => i.key)],
+              leftOut: [...leftOut, ...newLeftOut],
+            } satisfies CutoverBatchState,
           },
         });
-      }, { timeout: 30000 }); // Increase timeout for batch write
-
-      // 5b. Best-effort: retire any newly-discontinued products' Square
-      // catalog items, then remove them from Products entirely. These were
-      // already excluded from nonSkippedBatch (and therefore from the
-      // inventory insert above) via isDiscontinued — this performs the
-      // deferred Square-side deletion and, only once Square confirms it,
-      // deletes the local Product row too. Never blocks or fails the
-      // migration; on Square failure the Product row (and its
-      // isDiscontinued flag) is left as-is so it's retried on the next
-      // migration run instead of desyncing from a still-live Square item.
-      const resolvedBatchPids = [...new Set(resolvedBatch.map(i => i.productId).filter(Boolean))] as string[];
-      if (resolvedBatchPids.length > 0) {
-        const discontinuedProducts = await this.prisma.product.findMany({
-          where: { id: { in: resolvedBatchPids }, isDiscontinued: true },
-          select: { id: true },
-        });
-        const discontinuedIds = new Set(discontinuedProducts.map(p => p.id));
-        for (const item of resolvedBatch) {
-          if (item.productId && discontinuedIds.has(item.productId)) {
-            this.finalizeDiscontinuedProductDeletion(item.productId, item.squareInventoryItem.catalogObjectId).catch(e =>
-              this.logger.error(`[SQUARE_DELETE] Unexpected error finalizing discontinued product ${item.productId}: ${e}`),
-            );
-          }
-        }
-      }
-
-      // 6. Update Cutover Record
-      const isLastBatch = currentBatch + 1 >= result.totalBatches!;
-      const newProcessed = (cutoverRecord.processedItems || 0) + batchItems.length;
-
-      await this.prisma.cutover.update({
-        where: { id: cutoverRecord.id },
-        data: {
-          status: isLastBatch ? 'COMPLETED' : 'IN_PROGRESS',
-          currentBatch: currentBatch + 1,
-          processedItems: newProcessed,
-          completedAt: isLastBatch ? new Date() : null,
-          result: result as any,
-          batchState: {
-            locationIds: input.locationIds,
-          } as any
-        }
-      });
-
-      result.processedItems = newProcessed;
-      result.currentBatch = currentBatch + 1;
-      result.isComplete = isLastBatch;
-      result.canContinue = !isLastBatch;
-
-      if (isLastBatch) {
-        await this.enableCutoverLock(input.cutoverDate, input.locationIds, this.prisma);
-      }
-
+      }, { timeout: 30000 });
     } catch (error) {
-       await this.prisma.cutover.update({
-         where: { id: cutoverRecord.id },
-         data: { status: 'FAILED', result: result as any }
-       });
-       throw error;
+      // A concurrent call already took this batch; the cutover itself is fine.
+      if (!(error instanceof ConcurrentBatchError)) {
+        await this.prisma.cutover.update({ where: { id: cutoverRecord.id }, data: { status: 'FAILED', result: result as any } });
+      }
+      throw error;
     }
 
+    result.leftOut = [...leftOut, ...newLeftOut];
+    result.processedItems = done.size + batchItems.length;
+    result.currentBatch = currentBatch + 1;
+    if (batchItems.length < remaining.length) {
+      result.canContinue = true;
+      await this.prisma.cutover.update({ where: { id: cutoverRecord.id }, data: { result: result as any } });
+      return result;
+    }
+    return this.finishCutover(cutoverRecord.id, input, result, itemsToProcess, options);
+  }
+
+  /**
+   * After the last batch: retire the products marked no longer for sale, then
+   * lock the store — unless products were left without opening stock, which
+   * the owner must see and confirm first.
+   */
+  private async finishCutover(
+    cutoverId: string,
+    input: CutoverInput,
+    result: MigrationResult,
+    items: { locationId: string; squareInventoryItem: { catalogObjectId: string } }[],
+    options: { confirmLeftOut?: boolean },
+  ): Promise<MigrationResult> {
+    if (result.leftOut?.length && !options.confirmLeftOut) {
+      result.needsConfirmation = true;
+      await this.prisma.cutover.update({ where: { id: cutoverId }, data: { status: 'IN_PROGRESS', result: result as any } });
+      return result;
+    }
+
+    await this.retireDiscontinuedProducts(items, result);
+
+    await this.prisma.cutover.update({
+      where: { id: cutoverId },
+      data: { status: 'COMPLETED', completedAt: new Date(), result: result as any },
+    });
+    await this.enableCutoverLock(input.cutoverDate, input.locationIds, this.prisma);
+    result.needsConfirmation = false;
+    result.isComplete = true;
+    result.canContinue = false;
     return result;
+  }
+
+  /**
+   * Retires in Square the store's products marked no longer for sale (only
+   * their own variations; see ProductsService.retireVariations), then deletes
+   * each one whose variations are all gone. A Square failure keeps the product
+   * and is reported in the result.
+   */
+  private async retireDiscontinuedProducts(items: { squareInventoryItem: { catalogObjectId: string } }[], result: MigrationResult): Promise<void> {
+    const variationIds = [...new Set(items.map((i) => i.squareInventoryItem.catalogObjectId))];
+    const discontinued = await this.prisma.product.findMany({
+      where: { isDiscontinued: true, catalogMappings: { some: { squareVariationId: { in: variationIds } } } },
+      select: { id: true, name: true, catalogMappings: { select: { squareVariationId: true } } },
+    });
+    if (discontinued.length === 0) return;
+
+    const variationsOf = (p: (typeof discontinued)[number]) =>
+      [...new Set(p.catalogMappings.map((m) => m.squareVariationId).filter((v) => !v.startsWith('local_')))];
+    let retired = new Set<string>();
+    try {
+      retired = await this.productsService.retireVariations(discontinued.flatMap(variationsOf));
+    } catch (e) {
+      this.logger.warn(`[SQUARE_DELETE] Failed to retire discontinued variations: ${e}`);
+    }
+
+    for (const product of discontinued) {
+      if (variationsOf(product).every((v) => retired.has(v))) {
+        await this.deleteDiscontinuedProduct(product.id);
+      } else {
+        result.warnings.push({
+          productId: product.id,
+          productName: product.name,
+          message: 'No se pudo borrar de Square; el producto sigue marcado como descontinuado',
+        });
+      }
+    }
   }
 
   
@@ -1739,11 +1716,11 @@ export class InventoryMigrationService {
     }
   }
 
-  async continueBatchMigration(cutoverId: string, approvedCosts: any[]) {
-      // Implementation calling executeInventoryMigration
+  /** The next batch of a cutover; a failed one continues from the items still without stock. */
+  async continueBatchMigration(cutoverId: string, approvedCosts: { productId: string; cost: Prisma.Decimal }[], options: { confirmLeftOut?: boolean } = {}) {
       const cutoverRecord = await this.prisma.cutover.findUnique({ where: { id: cutoverId } });
       if (!cutoverRecord) throw new CutoverValidationError('Cutover not found', []);
-      if (cutoverRecord.status !== 'IN_PROGRESS') throw new CutoverValidationError('Invalid cutover state', []);
+      if (cutoverRecord.status === 'COMPLETED') throw new CutoverValidationError('Cutover already completed', []);
       
       const batchState = (cutoverRecord as any).batchState as any;
       const locationIds = batchState?.locationIds || [];
@@ -1764,7 +1741,7 @@ export class InventoryMigrationService {
           ownerApprovedBy: cutoverRecord.ownerApprovedBy,
           approvedCosts: null
       };
-      return this.executeInventoryMigration(input, approvedCosts, (cutoverRecord as any).batchSize, cutoverId);
+      return this.executeInventoryMigration(input, approvedCosts, cutoverRecord.batchSize, cutoverId, null, options);
   }
 
   async enableCutoverLock(cutoverDate: Date, locationIds: string[], tx: any): Promise<CutoverLock> {
@@ -2091,26 +2068,12 @@ export class InventoryMigrationService {
   }
 
   /**
-   * Deletes a discontinued product's Square catalog item, and only if that
-   * succeeds, deletes the local Product row (and everything referencing it
-   * via ON DELETE RESTRICT — CatalogMapping cascades on its own). Order
-   * matters: deleting Product first and Square second would let a Square
-   * failure leave the item still live in Square while gone locally, so a
-   * future catalog sync would silently resurrect it with the discontinued
-   * flag lost.
-   *
-   * A product with stock or sales history (at a location already cut over)
-   * is kept, still discontinued: deleting it would erase batches, sales and
-   * their costs from the books. With its Square item gone, nothing revives it.
+   * Deletes a discontinued product once its Square variations are retired
+   * (CatalogMapping cascades). A product with stock or sales history is kept,
+   * still discontinued: deleting it would erase batches, sales and their costs
+   * from the books. With its Square variations gone, nothing revives it.
    */
-  private async finalizeDiscontinuedProductDeletion(productId: string, catalogObjectId: string): Promise<void> {
-    try {
-      await this.productsService.deleteCatalogItem(catalogObjectId);
-    } catch (e) {
-      this.logger.warn(`[SQUARE_DELETE] Failed to delete catalog object for product ${productId}: ${e}`);
-      return;
-    }
-
+  private async deleteDiscontinuedProduct(productId: string): Promise<void> {
     const history = await Promise.all([
       this.prisma.inventory.count({ where: { productId } }),
       this.prisma.saleItem.count({ where: { productId } }),
@@ -2119,7 +2082,7 @@ export class InventoryMigrationService {
       this.prisma.transfer.count({ where: { productId } }),
     ]);
     if (history.some((count) => count > 0)) {
-      this.logger.log(`[SQUARE_DELETE] Deleted Square catalog item; kept discontinued Product ${productId} for its history`);
+      this.logger.log(`[SQUARE_DELETE] Kept discontinued Product ${productId} for its history`);
       return;
     }
 
@@ -2130,7 +2093,7 @@ export class InventoryMigrationService {
       this.prisma.placement.deleteMany({ where: { productId } }),
       this.prisma.product.delete({ where: { id: productId } }),
     ]);
-    this.logger.log(`[SQUARE_DELETE] Deleted Square catalog item and local Product ${productId}`);
+    this.logger.log(`[SQUARE_DELETE] Deleted discontinued Product ${productId}`);
   }
 
   async restoreItem(

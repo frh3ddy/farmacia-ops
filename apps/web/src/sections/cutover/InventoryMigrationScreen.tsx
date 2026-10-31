@@ -23,7 +23,7 @@ export function InventoryMigrationScreen() {
       {wizard.phase === "configuring" && <ConfigurationPhase wizard={wizard} />}
       {(wizard.phase === "extracting" || wizard.phase === "reviewing") && <ExtractionPhase wizard={wizard} />}
       {wizard.phase === "migrating" && <MigrationPhase migrationResult={wizard.migrationResult} />}
-      {wizard.phase === "reporting" && wizard.reportData && <ReportPhase reportData={wizard.reportData} />}
+      {wizard.phase === "reporting" && wizard.reportData && <ReportPhase reportData={wizard.reportData} onConfirmLeftOut={wizard.confirmLeftOut} />}
 
       <ConfirmDialog
         open={wizard.confirmingMigration}

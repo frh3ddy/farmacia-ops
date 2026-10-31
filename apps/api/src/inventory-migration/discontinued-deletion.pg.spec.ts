@@ -20,36 +20,28 @@ beforeAll(async () => {
 
 afterAll(() => stop?.());
 
-/** The service with Square's catalog delete recorded instead of sent. */
+/** The local deletion that follows retiring a product's Square variations (see cutover-migration.pg.spec.ts). */
 function migrationService() {
-  const deleteCatalogItem = vi.fn().mockResolvedValue(undefined);
-  const products = { deleteCatalogItem };
-  const service = new InventoryMigrationService(prisma, {} as any, {} as any, {} as any, {} as any, products as any);
-  const finalize = (productId: string) => service['finalizeDiscontinuedProductDeletion'](productId, `sq-${productId}`);
-  return { finalize, deleteCatalogItem };
+  const service = new InventoryMigrationService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any);
+  const finalize = (productId: string) => service['deleteDiscontinuedProduct'](productId);
+  return { finalize };
 }
 
 const discontinuedProduct = () =>
   prisma.product.create({ data: { name: `P-${Math.random()}`, isDiscontinued: true } });
 
-describe('finalizeDiscontinuedProductDeletion', () => {
+describe('deleteDiscontinuedProduct', () => {
   test('a product with stock history at a location already cut over', async () => {
     const product = await discontinuedProduct();
     const adjustments = new InventoryAdjustmentService(prisma);
     await adjustments.createAdjustment({ locationId, productId: product.id, type: 'FOUND', quantity: 5, unitCost: 2 });
     await adjustments.createAdjustment({ locationId, productId: product.id, type: 'DAMAGE', quantity: -2 });
-    const { finalize, deleteCatalogItem } = migrationService();
+    const { finalize } = migrationService();
 
     await finalize(product.id);
 
     assert({
       given: 'a discontinued product with batches, adjustments and consumption history',
-      should: 'retire it in Square',
-      actual: deleteCatalogItem.mock.calls.length,
-      expected: 1,
-    });
-    assert({
-      given: 'its history',
       should: 'keep the product, still discontinued, with its stock and history intact',
       actual: [
         (await prisma.product.findUnique({ where: { id: product.id } }))?.isDiscontinued,

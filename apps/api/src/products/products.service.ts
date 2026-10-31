@@ -1011,18 +1011,48 @@ export class ProductsService {
   }
 
   /**
-   * Permanently retires a catalog item in Square. `variationId` is an
-   * ITEM_VARIATION catalog object ID (what inventory rows store) — this
-   * resolves its parent ITEM id and deletes that, since BatchDeleteCatalogObjects
-   * cascades to all of an ITEM's variations, and deleting only a variation
-   * would leave the parent item and any sibling variations intact.
+   * Retires discontinued variations in Square. Deleting an item deletes all its
+   * variations, so a whole item goes only when every variation on it is being
+   * retired; otherwise just those variations, and siblings still for sale stay.
+   * Returns the variation ids now gone from Square (including ones already gone).
    */
-  async deleteCatalogItem(variationId: string): Promise<void> {
+  async retireVariations(variationIds: string[]): Promise<Set<string>> {
     const client = this.getSquareClient();
-    const parentItemId = await this.resolveParentItemId(variationId);
+    const retiring = new Set(variationIds);
+    const found = new Map<string, string>(); // variation -> its item
+    const itemVariations = new Map<string, string[]>();
+    for (let i = 0; i < variationIds.length; i += 1000) {
+      const { objects = [], relatedObjects = [] } = await client.catalog.batchGet({ objectIds: variationIds.slice(i, i + 1000), includeRelatedObjects: true });
+      for (const o of objects) if (o.type === 'ITEM_VARIATION' && o.id && o.itemVariationData?.itemId) found.set(o.id, o.itemVariationData.itemId);
+      for (const o of relatedObjects) {
+        if (o.type === 'ITEM' && o.id) itemVariations.set(o.id, (o.itemData?.variations ?? []).flatMap((v) => (v.id ? [v.id] : [])));
+      }
+    }
 
-    await client.catalog.batchDelete({ objectIds: [parentItemId] });
-    this.logger.log(`[PRODUCT] Deleted Square catalog item ${parentItemId} (via variation ${variationId})`);
+    const retired = new Set(variationIds.filter((v) => !found.has(v))); // not in Square any more
+    const deletions: { objectId: string; covers: string[] }[] = [];
+    const wholeItems = new Set<string>();
+    for (const [variationId, itemId] of found) {
+      const siblings = itemVariations.get(itemId) ?? [variationId];
+      if (siblings.every((v) => retiring.has(v))) {
+        if (!wholeItems.has(itemId)) deletions.push({ objectId: itemId, covers: siblings.filter((v) => found.has(v)) });
+        wholeItems.add(itemId);
+      } else {
+        deletions.push({ objectId: variationId, covers: [variationId] });
+      }
+    }
+
+    for (let i = 0; i < deletions.length; i += 200) {
+      const chunk = deletions.slice(i, i + 200);
+      try {
+        await client.catalog.batchDelete({ objectIds: chunk.map((d) => d.objectId) });
+        for (const d of chunk) d.covers.forEach((v) => retired.add(v));
+      } catch (error) {
+        this.logger.warn(`[PRODUCT] Failed to retire ${chunk.length} Square catalog objects: ${error}`);
+      }
+    }
+    this.logger.log(`[PRODUCT] Retired ${retired.size} of ${variationIds.length} Square variations`);
+    return retired;
   }
 
   /**

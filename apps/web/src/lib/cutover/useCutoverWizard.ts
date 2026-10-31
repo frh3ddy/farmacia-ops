@@ -189,7 +189,7 @@ export function useCutoverWizard() {
     if (new Date(cutoverDate) > new Date()) return setError("La fecha de corte no puede ser futura");
     if (batchSize < 10 || batchSize > 500) return setError("Los productos por bloque deben estar entre 10 y 500");
 
-    const sessions = await api.fetchInProgressSessions(selectedLocationId);
+    const sessions = await api.fetchOpenAndFinishedSessions(selectedLocationId);
     if (sessions.length > 0) {
       setExistingSessions(sessions);
       setShowSessionSelector(true);
@@ -222,6 +222,19 @@ export function useCutoverWizard() {
       }
     },
     [runExtractCosts]
+  );
+
+  /** Migrate from a finished session: its approved costs, after the usual confirmation. */
+  const handleMigrateSession = useCallback(
+    (sessionId: string) => {
+      const session = existingSessions.find(s => s.id === sessionId);
+      setShowSessionSelector(false);
+      setExtractionSessionId(sessionId);
+      setCurrentCutoverId(null);
+      if (session?.locationIds?.length) setSelectedLocationId(session.locationIds[0]);
+      setConfirmingMigration(true);
+    },
+    [existingSessions]
   );
 
   // --- Item actions ---
@@ -590,7 +603,7 @@ export function useCutoverWizard() {
       const result = await api.continueCutover(id);
       setMigrationResult(result);
       if (result.cutoverId && result.cutoverId !== id) setCurrentCutoverId(result.cutoverId);
-      if (result.isComplete) {
+      if (result.isComplete || result.needsConfirmation) {
         setReportData(result);
         setPhase("reporting");
       } else {
@@ -600,6 +613,20 @@ export function useCutoverWizard() {
       setError(err instanceof ApiError ? err.message : "No se pudo continuar la migración");
     }
   }, []);
+
+  /** The owner goes ahead without the products left out: the store is locked. */
+  const confirmLeftOut = useCallback(async () => {
+    if (!reportData?.cutoverId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setReportData(await api.continueCutover(reportData.cutoverId, true));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo bloquear la sucursal");
+    } finally {
+      setLoading(false);
+    }
+  }, [reportData]);
 
   const groupedResults = {
     extracting: extractionResults.filter(r => r.migrationStatus !== "SKIPPED" && r.migrationStatus !== "APPROVED"),
@@ -665,6 +692,8 @@ export function useCutoverWizard() {
     handleStartExtraction,
     handleStartNewExtraction,
     handleResumeSession,
+    handleMigrateSession,
+    confirmLeftOut,
     handleContinueBatch,
     handleDiscardItem,
     handleRestoreItem,

@@ -16,7 +16,49 @@ function exportErrorsToCSV(reportData: MigrationResult) {
   URL.revokeObjectURL(url);
 }
 
-export function ReportPhase({ reportData }: { reportData: MigrationResult }) {
+/**
+ * The migration's end. Products left without opening stock come first: the
+ * store is locked only once the owner confirms going ahead without them.
+ */
+export function ReportPhase({ reportData, onConfirmLeftOut }: { reportData: MigrationResult; onConfirmLeftOut?: () => void }) {
+  if (reportData.needsConfirmation) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4">
+        <div className="rounded-md border border-(--color-warning) bg-(--color-surface-raised) p-6">
+          <h2 className="text-xl font-bold text-(--color-ink)">Productos sin existencia inicial ({reportData.leftOut?.length ?? 0})</h2>
+          <p className="mt-2 text-sm text-(--color-ink-secondary)">
+            Estos productos no recibieron existencia en la migración. La sucursal aún no está bloqueada. Si sigues, tendrán que
+            entrar por una recepción o un ajuste.
+          </p>
+        </div>
+        <div className="overflow-x-auto rounded-md border border-(--color-border-standard)">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-(--color-border-standard) bg-(--color-surface)">
+                <th className="px-4 py-2 text-left font-medium text-(--color-ink-secondary)">Producto</th>
+                <th className="px-4 py-2 text-left font-medium text-(--color-ink-secondary)">Motivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reportData.leftOut?.map(item => (
+                <tr key={`${item.locationId}:${item.productId}`} className="border-b border-(--color-border-subtle) last:border-b-0">
+                  <td className="px-4 py-2 text-(--color-ink)">{item.productName ?? item.productId}</td>
+                  <td className="px-4 py-2 text-(--color-ink-secondary)">{item.reason}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button
+          onClick={onConfirmLeftOut}
+          className="rounded-sm bg-(--color-accent) px-4 py-2 text-sm font-medium text-(--color-accent-contrast) hover:bg-(--color-accent-hover)"
+        >
+          Bloquear la sucursal sin estos productos
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="rounded-md border border-(--color-success) bg-(--color-success-bg) p-6">

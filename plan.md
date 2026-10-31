@@ -19,3 +19,4 @@
 - ✅ [Sale Returns](tasks/sale-returns-epic.md) — a return never exceeds what was sold; returns count in their own month; cash note for hand returns; failed returns and matches shown
 - ✅ [Sale Returns Access](tasks/sale-returns-access-epic.md) — returns and pending lines checked by the role at that store; cash per day by store id and whole days; return body checked; small fixes
 - ✅ [Catalog Sync Migration](tasks/catalog-sync-migration-epic.md) — catalog sync owner-only and refused after cutover; Yastás mappings keep their employee; archived Square items skipped; errors and naming cleanup
+- ✅ [Cutover Migration Safety](tasks/cutover-migration-safety-epic.md) — each item migrated once (no positional cursor), failed runs resume, discontinued items deleted safely in Square, no lock with products left out, owner only from the finished session; go-live runbook

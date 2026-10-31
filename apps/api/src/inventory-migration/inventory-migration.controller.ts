@@ -926,13 +926,16 @@ export class InventoryMigrationController {
     }
   }
 
+  // A cutover locks a store for good: the owner's call.
   @Post()
+  @Roles('OWNER')
   @HttpCode(HttpStatus.OK)
   async cutover(@Body() body: InitiateCutoverRequest, @Req() req: GuardedRequest) {
     return this.initiateCutover(body, req);
   }
 
   @Post('initiate')
+  @Roles('OWNER')
   async initiateCutover(@Body() body: InitiateCutoverRequest, @Req() req: GuardedRequest) {
     const currentEmployee = req.employee;
     const cutoverDate = this.parseDate(body.cutoverDate);
@@ -986,8 +989,10 @@ export class InventoryMigrationController {
     }
   }
 
+  /** The next batch; `confirmLeftOut` locks the store although products were left without stock. */
   @Post('continue')
-  async continueCutover(@Body() body: { cutoverId: string }) {
+  @Roles('OWNER')
+  async continueCutover(@Body() body: { cutoverId: string; confirmLeftOut?: boolean }) {
     if (!body.cutoverId || typeof body.cutoverId !== 'string' || body.cutoverId.trim() === '') {      throw new BadRequestException('cutoverId is required and must be a non-empty string');
     }
     const cutoverRecord = await this.prisma.cutover.findUnique({
@@ -1014,10 +1019,9 @@ export class InventoryMigrationController {
     }
 
     try {
-      const migrationResult = await this.migrationService.continueBatchMigration(
-        body.cutoverId,
-        approvedCosts,
-      );
+      const migrationResult = await this.migrationService.continueBatchMigration(body.cutoverId, approvedCosts, {
+        confirmLeftOut: body.confirmLeftOut === true,
+      });
 
       return {
         success: true,

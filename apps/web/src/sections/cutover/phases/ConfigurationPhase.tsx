@@ -31,6 +31,7 @@ export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
     showSessionSelector,
     existingSessions,
     handleResumeSession,
+    handleMigrateSession,
     handleStartNewExtraction,
     setShowSessionSelector,
   } = wizard;
@@ -139,6 +140,7 @@ export function ConfigurationPhase({ wizard }: ConfigurationPhaseProps) {
         sessions={existingSessions}
         currentBatchSize={batchSize}
         onResume={handleResumeSession}
+        onMigrate={handleMigrateSession}
         onStartNew={handleStartNewExtraction}
         onClose={() => setShowSessionSelector(false)}
       />
