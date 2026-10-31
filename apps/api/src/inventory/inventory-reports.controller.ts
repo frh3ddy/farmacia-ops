@@ -277,6 +277,8 @@ export class InventoryReportsController {
             total: profitLoss.operatingExpenses.total,
             byType: profitLoss.operatingExpenses.byType,
             shrinkage: profitLoss.operatingExpenses.shrinkage,
+            shrinkageLosses: profitLoss.operatingExpenses.shrinkageLosses,
+            shrinkageRecovered: profitLoss.operatingExpenses.shrinkageRecovered,
           },
           // Net Profit (after all expenses), with the P&L lines behind it so a client
           // can show rows that add up: net profit includes Yastás service revenue (which
