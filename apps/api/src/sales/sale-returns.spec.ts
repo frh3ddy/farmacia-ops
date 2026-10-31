@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { assert } from 'riteway/vitest';
 import { SaleReturnsController } from './sale-returns.controller';
 import { ROLES_KEY } from '../auth/guards/auth.guard';
+import { businessDay } from '../inventory/business-date';
 
 // A sale at Centro: 2 jarabes, one already returned.
 const sale = { id: 's-1', locationId: 'centro', items: [{ id: 'si-jarabe', quantity: 2, returns: [{ quantity: 1 }], product: { name: 'Jarabe' } }] };
@@ -37,7 +38,7 @@ describe('recording a return', () => {
 
   test('refusals', async () => {
     assert({
-      given: 'another location, a missing sale, more than is left, the same item twice, an item not on the sale, no items, or no request key',
+      given: 'another location, a missing sale, more than is left, the same item twice, an item not on the sale, no items, no request key, or a key or reason that is not short text',
       should: 'refuse without queueing',
       actual: [
         await record({ request: cashier('norte') }),
@@ -47,6 +48,9 @@ describe('recording a return', () => {
         await record({ payload: body([{ saleItemId: 'si-other', quantity: 1 }]) }),
         await record({ payload: body([]) }),
         await record({ payload: body([{ saleItemId: 'si-jarabe', quantity: 1 }], { clientRequestId: undefined }) }),
+        await record({ payload: body([{ saleItemId: 'si-jarabe', quantity: 1 }], { clientRequestId: 42 }) }),
+        await record({ payload: body([{ saleItemId: 'si-jarabe', quantity: 1 }], { reason: { text: 'x' } }) }),
+        await record({ payload: body([{ saleItemId: 'si-jarabe', quantity: 1 }], { reason: 'x'.repeat(501) }) }),
       ],
       expected: [
         [403, 'No tienes acceso a esta sucursal'],
@@ -56,6 +60,9 @@ describe('recording a return', () => {
         [400, 'Ese artículo no es de esta venta'],
         [400, 'Elige al menos un artículo para devolver'],
         [400, 'clientRequestId is required'],
+        [400, 'clientRequestId is required'],
+        [400, 'El motivo debe ser texto de hasta 500 caracteres'],
+        [400, 'El motivo debe ser texto de hasta 500 caracteres'],
       ],
     });
   });
@@ -94,47 +101,98 @@ describe('recent sales to return from', () => {
 
 describe('the returns history', () => {
   const owner = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] };
+  // A manager at Centro who is a cashier at Norte.
+  const manager = {
+    currentLocation: { locationId: 'centro', role: 'MANAGER' },
+    accessibleLocations: [
+      { locationId: 'centro', role: 'MANAGER', isActive: true },
+      { locationId: 'norte', role: 'CASHIER', isActive: true },
+    ],
+  };
   const at = (iso: string) => new Date(iso);
-  // Two returns by hand at Centro on Oct 30 (Mexico City), one the night before, and one Square paid back.
+  const store = (id: string) => ({ location: { id, name: 'Centro' } });
+  // At one Centro: two returns by hand on Oct 30 (Mexico City) and one the night before; another store also named Centro.
   const handReturns = [
-    { returnedAt: at('2026-10-30T15:00:00Z'), cashRefunded: new Prisma.Decimal(45), sale: { location: { name: 'Centro' } } },
-    { returnedAt: at('2026-10-31T05:00:00Z'), cashRefunded: new Prisma.Decimal(15.5), sale: { location: { name: 'Centro' } } },
-    { returnedAt: at('2026-10-30T05:00:00Z'), cashRefunded: new Prisma.Decimal(20), sale: { location: { name: 'Centro' } } },
+    { returnedAt: at('2026-10-30T15:00:00Z'), cashRefunded: new Prisma.Decimal(45), sale: store('centro') },
+    { returnedAt: at('2026-10-31T05:00:00Z'), cashRefunded: new Prisma.Decimal(15.5), sale: store('centro') },
+    { returnedAt: at('2026-10-30T05:00:00Z'), cashRefunded: new Prisma.Decimal(20), sale: store('centro') },
+    { returnedAt: at('2026-10-30T16:00:00Z'), cashRefunded: new Prisma.Decimal(7), sale: store('centro-2') },
   ];
   const failedJobs = [
     { id: 'j-1', data: { saleId: 's-1', clientRequestId: 'req-ok', items: [] }, failedReason: 'Square is down', finishedOn: 1 },
     { id: 'j-2', data: { saleId: 's-2', clientRequestId: 'req-lost', items: [{ saleItemId: 'si-1', quantity: 1 }], reason: 'Roto' }, failedReason: 'Sale validation error: Solo quedan 0 de Jarabe por devolver', finishedOn: 2 },
+    { id: 'j-3', data: { saleId: 's-norte', clientRequestId: 'req-norte', items: [] }, failedReason: 'boom' },
   ];
-  const history = async () => {
+  const saleLocations: Record<string, string> = { 's-1': 'centro', 's-2': 'centro', 's-norte': 'norte' };
+  const history = async ({ request = owner as object, locationId = undefined as string | undefined, jobs = failedJobs } = {}) => {
+    const queries: any[] = [];
     const prisma = {
       saleReturn: {
-        // only req-ok was recorded: its Square sync failed afterwards, which the history already shows
-        findMany: async (args: any) => (args.where?.clientRequestId ? [{ clientRequestId: 'req-ok' }] : args.where?.cashRefunded ? handReturns : []),
+        findMany: async (args: any) => {
+          queries.push(args.where);
+          // only req-ok was recorded: its Square sync failed afterwards, which the history already shows
+          return args.where?.clientRequestId ? [{ clientRequestId: 'req-ok' }] : args.where?.cashRefunded ? handReturns : [];
+        },
       },
+      sale: { findMany: async ({ where }: any) => where.id.in.filter((id: string) => saleLocations[id] === where.locationId).map((id: string) => ({ id })) },
       employee: { findMany: async () => [] },
     };
-    const controller = new SaleReturnsController(prisma as any, { failedJobs: async (name: string) => (name === 'record-return' ? failedJobs : []) } as any);
-    return (await controller.list(owner as any, undefined)) as any;
+    const controller = new SaleReturnsController(prisma as any, { failedJobs: async (name: string) => (name === 'record-return' ? jobs : []) } as any);
+    try {
+      return { ...((await controller.list(request as any, locationId)) as any), queries };
+    } catch (error) {
+      return error instanceof HttpException ? [error.getStatus(), (error.getResponse() as { message: string }).message] : error;
+    }
   };
 
   test('cash paid back by day', async () => {
+    const { cashByDay, queries } = (await history()) as any;
+    const since = queries.find((w: any) => w.cashRefunded).returnedAt.gte as Date;
     assert({
-      given: 'returns by hand on two Mexico City days at one store',
-      should: 'total the cash paid back per day and store, newest day first',
-      actual: (await history()).cashByDay,
-      expected: [
-        { day: '2026-10-30', location: 'Centro', cash: '60.5' },
-        { day: '2026-10-29', location: 'Centro', cash: '20' },
-      ],
+      given: 'returns by hand on two Mexico City days at a store, and at another store with the same name',
+      should: 'total the cash paid back per day and store, newest day first, from the start of the oldest day',
+      actual: { cashByDay, startsAtMidnight: businessDay(since) !== businessDay(new Date(since.getTime() - 1)) },
+      expected: {
+        cashByDay: [
+          { day: '2026-10-30', location: 'Centro', cash: '60.5' },
+          { day: '2026-10-30', location: 'Centro', cash: '7' },
+          { day: '2026-10-29', location: 'Centro', cash: '20' },
+        ],
+        startsAtMidnight: true,
+      },
     });
   });
 
   test('returns the worker gave up on', async () => {
     assert({
-      given: 'a failed return job never recorded, and one recorded whose Square sync failed',
-      should: 'list only the one never recorded, with its reason in Spanish',
-      actual: (await history()).failed,
-      expected: [{ jobId: 'j-2', saleId: 's-2', items: [{ saleItemId: 'si-1', quantity: 1 }], reason: 'Roto', error: 'Solo quedan 0 de Jarabe por devolver', failedAt: new Date(2) }],
+      given: 'a failed return job never recorded, one recorded whose Square sync failed, and one with no finish time',
+      should: 'list the ones never recorded, with the reason in Spanish and no made-up date',
+      actual: ((await history()) as any).failed,
+      expected: [
+        { jobId: 'j-2', saleId: 's-2', items: [{ saleItemId: 'si-1', quantity: 1 }], reason: 'Roto', error: 'Solo quedan 0 de Jarabe por devolver', failedAt: new Date(2) },
+        { jobId: 'j-3', saleId: 's-norte', items: [], reason: undefined, error: 'boom', failedAt: null },
+      ],
+    });
+    assert({
+      given: 'a manager at Centro',
+      should: 'list only Centro’s failed returns',
+      actual: ((await history({ request: manager, locationId: 'centro' })) as any).failed.map((f: any) => f.jobId),
+      expected: ['j-2'],
+    });
+    assert({
+      given: 'no failed jobs',
+      should: 'not look up which were recorded',
+      actual: ((await history({ jobs: [] })) as any).queries.filter((w: any) => w.clientRequestId).length,
+      expected: 0,
+    });
+  });
+
+  test('a manager who is a cashier at another store', async () => {
+    assert({
+      given: 'a manager at Centro asking for Norte, where they are a cashier',
+      should: 'refuse, as role checks use the role at the current store',
+      actual: await history({ request: manager, locationId: 'norte' }),
+      expected: [403, 'Solo el dueño puede hacer esto en otras sucursales'],
     });
   });
 });

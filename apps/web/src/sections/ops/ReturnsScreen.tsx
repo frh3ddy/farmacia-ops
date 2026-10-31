@@ -17,7 +17,7 @@ type SaleReturn = {
 type History = {
   data: SaleReturn[];
   cashByDay: { day: string; location: string; cash: string }[];
-  failed: { jobId: string; reason?: string; error: string; failedAt: string }[];
+  failed: { jobId: string; reason?: string; error: string; failedAt: string | null }[];
 };
 
 const left = (item: SaleItem) => item.quantity - item.returns.reduce((n, r) => n + r.quantity, 0);
@@ -175,7 +175,7 @@ export function ReturnsHistoryScreen() {
         <ul className="mb-4 space-y-1 rounded-md border border-(--color-destructive) p-3 text-sm text-(--color-destructive)">
           {failed.map(f => (
             <li key={f.jobId}>
-              {dateTime(f.failedAt)} · No se registró: {f.error}
+              {f.failedAt && `${dateTime(f.failedAt)} · `}No se registró: {f.error}
               {f.reason && ` (${f.reason})`}
             </li>
           ))}

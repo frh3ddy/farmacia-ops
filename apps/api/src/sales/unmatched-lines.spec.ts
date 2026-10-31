@@ -19,6 +19,16 @@ const manager = (locationId: string) => ({
   accessibleLocations: [{ locationId, isActive: true }],
 });
 
+// A manager at Centro who is a cashier at Norte.
+const managerAndCashier = {
+  employee: { id: 'emp-mgr' },
+  currentLocation: { locationId: 'centro', role: 'MANAGER' },
+  accessibleLocations: [
+    { locationId: 'centro', role: 'MANAGER', isActive: true },
+    { locationId: 'norte', role: 'CASHIER', isActive: true },
+  ],
+};
+
 const match = async ({ request = manager('centro'), found = line as object | null, body = { productId: 'crema' } as { productId?: string } } = {}) => {
   const enqueueMatch = vi.fn();
   const prisma = {
@@ -46,7 +56,7 @@ describe('matching a custom-amount line', () => {
 
   test('refusals', async () => {
     assert({
-      given: 'a line at another location, a matched line, a missing line, no product, a product with no stock, a discontinued one, or one sold only at another store',
+      given: 'a line at another location, a matched line, a missing line, no product, a product with no stock, a discontinued one, or one sold only at another store, or a line at a store where the manager is a cashier',
       should: 'refuse without queueing',
       actual: [
         await match({ request: manager('norte') }),
@@ -56,6 +66,7 @@ describe('matching a custom-amount line', () => {
         await match({ body: { productId: 'luz' } }),
         await match({ body: { productId: 'vieja' } }),
         await match({ body: { productId: 'juguete' } }),
+        await match({ request: managerAndCashier, found: { ...line, sale: { locationId: 'norte' } } }),
       ],
       expected: [
         [403, 'No tienes acceso a esta sucursal'],
@@ -65,6 +76,7 @@ describe('matching a custom-amount line', () => {
         [400, 'Pago de luz no tiene existencias'],
         [400, 'Crema vieja está descontinuado'],
         [400, 'Juguete no se vende en esta sucursal'],
+        [403, 'Solo el dueño puede hacer esto en otras sucursales'],
       ],
     });
   });
@@ -90,31 +102,45 @@ describe('matching a custom-amount line', () => {
 });
 
 describe('the pending lines', () => {
-  const pending = async () => {
+  const pending = async ({ request = manager('centro') as object, locationId = 'centro' } = {}) => {
     const findMany = vi.fn(async () => [{ id: 'l-1' }, { id: 'l-2' }]);
     const failedJobs = async () => [
+      { data: { lineId: 'l-2', productId: 'vieja' }, failedReason: 'Sale validation error: Crema vieja falló', finishedOn: 9 },
       { data: { lineId: 'l-2', productId: 'crema' }, failedReason: 'Sale validation error: Crema no tiene costo', finishedOn: 5 },
       { data: { lineId: 'l-9', productId: 'crema' }, failedReason: 'other line', finishedOn: 6 },
     ];
     const controller = new UnmatchedLinesController({ unmatchedSaleLine: { findMany } } as any, { failedJobs } as any);
-    const result = await controller.list(manager('centro') as any, 'centro');
-    const { take, orderBy } = (findMany.mock.calls[0] as any)[0];
-    return { take, orderBy, data: result.data as unknown[] };
+    try {
+      const result = await controller.list(request as any, locationId);
+      const { take, orderBy } = (findMany.mock.calls[0] as any)[0];
+      return { take, orderBy, data: result.data as unknown[] };
+    } catch (error) {
+      return error instanceof HttpException ? [error.getStatus(), (error.getResponse() as { message: string }).message] : error;
+    }
   };
 
   test('a fixed number, newest first, with failed matches', async () => {
     assert({
-      given: 'pending lines, one whose match the worker gave up on',
-      should: 'list at most 200, newest first, showing why that match failed',
+      given: 'pending lines, one whose match the worker gave up on twice',
+      should: 'list at most 200, newest first, showing why its latest match failed',
       actual: await pending(),
       expected: {
         take: 200,
         orderBy: { sale: { createdAt: 'desc' } },
         data: [
           { id: 'l-1', matchError: null },
-          { id: 'l-2', matchError: { productId: 'crema', error: 'Crema no tiene costo', failedAt: new Date(5) } },
+          { id: 'l-2', matchError: { productId: 'vieja', error: 'Crema vieja falló', failedAt: new Date(9) } },
         ],
       },
+    });
+  });
+
+  test('a manager who is a cashier at another store', async () => {
+    assert({
+      given: 'a manager at Centro asking for Norte’s pending lines, where they are a cashier',
+      should: 'refuse',
+      actual: await pending({ request: managerAndCashier, locationId: 'norte' }),
+      expected: [403, 'Solo el dueño puede hacer esto en otras sucursales'],
     });
   });
 });
