@@ -443,6 +443,9 @@ export async function processSaleJob(job: Job): Promise<void> {
   });
 
   // Check if sale with squareId already exists (idempotency)
+  // ponytail: one sale per payment, whole order each time — right only while orders
+  // are paid in one cash payment. Split payments need once-per-order_id and a
+  // COMPLETED-status check (vision.md, Key Constraints).
   debugLog('[DEBUG] Checking for existing sale with squareId:', squareId);
   const existing = await getPrisma().sale.findUnique({
     where: { squareId },
