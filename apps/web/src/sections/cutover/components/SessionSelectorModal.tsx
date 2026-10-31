@@ -5,6 +5,8 @@ type SessionSelectorModalProps = {
   sessions: ExtractionSessionSummary[];
   currentBatchSize: number;
   onResume: (sessionId: string) => void;
+  /** Migrate from a finished session, with the costs approved in it. */
+  onMigrate: (sessionId: string) => void;
   onStartNew: () => void;
   onClose: () => void;
 };
@@ -24,19 +26,44 @@ function projectBatches(session: ExtractionSessionSummary, newBatchSize: number)
 }
 
 // Deliberately not portaled to document.body — see Modal.tsx's comment on why.
-export function SessionSelectorModal({ show, sessions, currentBatchSize, onResume, onStartNew, onClose }: SessionSelectorModalProps) {
+export function SessionSelectorModal({ show, sessions, currentBatchSize, onResume, onMigrate, onStartNew, onClose }: SessionSelectorModalProps) {
   if (!show) return null;
+  const finished = sessions.filter(s => s.status === "COMPLETED");
+  const open = sessions.filter(s => s.status === "IN_PROGRESS");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="max-h-[80vh] w-full max-w-lg overflow-auto rounded-lg border border-(--color-border-emphasis) bg-(--color-surface-raised) p-6">
         <h3 className="mb-4 text-lg font-semibold text-(--color-ink)">¿Continuar una sesión o iniciar una nueva?</h3>
 
-        {sessions.length > 0 && (
+        {finished.length > 0 && (
           <div className="mb-5">
-            <h4 className="mb-2 text-sm font-semibold text-(--color-ink-secondary)">Sesiones en curso ({sessions.length})</h4>
+            <h4 className="mb-2 text-sm font-semibold text-(--color-ink-secondary)">Sesiones terminadas ({finished.length})</h4>
             <div className="max-h-72 overflow-auto rounded-md border border-(--color-border-standard)">
-              {sessions.map(session => {
+              {finished.map(session => (
+                <button
+                  key={session.id}
+                  onClick={() => onMigrate(session.id)}
+                  className="flex w-full items-center justify-between border-b border-(--color-border-subtle) px-4 py-3 text-left last:border-b-0 hover:bg-(--color-surface)"
+                >
+                  <div>
+                    <div className="text-sm font-medium text-(--color-ink)">
+                      Sesión del {new Date(session.createdAt).toLocaleString("es-MX")}
+                    </div>
+                    <div className="mt-0.5 text-xs text-(--color-ink-tertiary)">{session.totalItems} productos revisados · costos listos</div>
+                  </div>
+                  <span className="rounded-sm bg-(--color-accent) px-3 py-1 text-xs font-medium text-(--color-accent-contrast)">Migrar</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {open.length > 0 && (
+          <div className="mb-5">
+            <h4 className="mb-2 text-sm font-semibold text-(--color-ink-secondary)">Sesiones en curso ({open.length})</h4>
+            <div className="max-h-72 overflow-auto rounded-md border border-(--color-border-standard)">
+              {open.map(session => {
                 const projected = projectBatches(session, currentBatchSize);
                 const batchSizeChanged = currentBatchSize && currentBatchSize !== session.batchSize;
                 return (

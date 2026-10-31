@@ -25,10 +25,11 @@ export async function fetchCategories(): Promise<CategoryOption[]> {
   return body.categories;
 }
 
-export async function fetchInProgressSessions(locationId?: string | null): Promise<ExtractionSessionSummary[]> {
+/** A store's sessions to continue (in progress) or migrate from (completed). */
+export async function fetchOpenAndFinishedSessions(locationId?: string | null): Promise<ExtractionSessionSummary[]> {
   const url = locationId ? `${BASE}/extraction-sessions?locationId=${locationId}` : `${BASE}/extraction-sessions`;
   const body = await apiFetch<{ sessions: ExtractionSessionSummary[] }>(url);
-  return body.sessions.filter(s => s.status === "IN_PROGRESS");
+  return body.sessions.filter(s => s.status === "IN_PROGRESS" || s.status === "COMPLETED");
 }
 
 export type ExtractCostsPayload = {
@@ -174,10 +175,10 @@ export async function initiateCutover(payload: InitiateCutoverPayload): Promise<
   return body.result;
 }
 
-export async function continueCutover(cutoverId: string): Promise<MigrationResult> {
+export async function continueCutover(cutoverId: string, confirmLeftOut = false): Promise<MigrationResult> {
   const body = await apiFetch<{ success: boolean; result: MigrationResult; message?: string }>(`${BASE}/continue`, {
     method: "POST",
-    body: JSON.stringify({ cutoverId }),
+    body: JSON.stringify({ cutoverId, confirmLeftOut }),
   });
   return body.result;
 }

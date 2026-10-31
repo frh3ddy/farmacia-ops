@@ -167,6 +167,9 @@ export type MigrationResult = {
   skippedItems?: number;
   isComplete?: boolean;
   canContinue?: boolean;
+  /** Products left without opening stock; the store isn't locked until the owner confirms. */
+  leftOut?: { productId: string; productName: string | null; locationId: string; reason: string }[];
+  needsConfirmation?: boolean;
 };
 
 /** ApiError shape from apiHelpers.jsx's parseApiResponse — used throughout
