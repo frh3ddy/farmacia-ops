@@ -432,7 +432,8 @@ export class ProductsService {
           data: {
             squareVariationId: squareVariationId ?? `local_${productId}`,
             productId,
-            locationId,
+            // No store: sold everywhere, so the worker matches its sales at any store.
+            locationId: soldAtAllLocations ? null : locationId,
             priceCents,
             currency: CURRENCY,
             priceSyncedAt: new Date(),
@@ -624,11 +625,14 @@ export class ProductsService {
   }> {
     this.logger.log(`[SYNC] Starting bulk sync of unsynced products for location ${locationId}`);
 
-    // Find all catalog mappings with local_ prefix for this location
+    // Placeholders for this store, and store-less ones for products sold here
     const localMappings = await this.prisma.catalogMapping.findMany({
       where: {
         squareVariationId: { startsWith: 'local_' },
-        locationId,
+        OR: [
+          { locationId },
+          { locationId: null, product: { OR: [{ soldOnlyAtLocationId: null }, { soldOnlyAtLocationId: locationId }] } },
+        ],
       },
       include: {
         product: { include: { soldOnlyAtLocation: true } },

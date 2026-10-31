@@ -212,6 +212,35 @@ describe('ProductsService.createProduct (Postgres)', () => {
     });
   });
 
+  test('the mapping a Square sale is matched by', async () => {
+    const { products } = productsWithSquare();
+    const everywhere = await create(products, {});
+    const toy = await create(products, { soldAtAllLocations: false });
+    const mappingStores = (productId: string) =>
+      prisma.catalogMapping.findMany({ where: { productId }, select: { locationId: true } }).then((ms) => ms.map((m) => m.locationId));
+
+    assert({
+      given: 'a product sold at every store and one sold only at Centro, both created at Centro',
+      should: 'map the first with no store, so a sale at any store matches it, and the second to Centro',
+      actual: [await mappingStores(everywhere.product!.id), await mappingStores(toy.product!.id)],
+      expected: [[null], [centro]],
+    });
+
+    await products.updatePrice({ productId: everywhere.product!.id, sellingPrice: 45, locationId: norte, syncToSquare: false });
+    const prices = await prisma.catalogMapping.findMany({
+      where: { productId: everywhere.product!.id },
+      orderBy: { createdAt: 'asc' },
+      select: { locationId: true, priceCents: true },
+    });
+
+    assert({
+      given: 'a later price change at Norte only',
+      should: "add Norte's own price and leave the all-stores price as it was",
+      actual: prices.map((p) => [p.locationId, Number(p.priceCents)]),
+      expected: [[null, 3000], [norte, 4500]],
+    });
+  });
+
   test('sold at one store that is not in Square', async () => {
     const { products, square } = productsWithSquare();
     const { id: bodega } = await prisma.location.create({ data: { name: `Bodega-${Math.random()}` } });
