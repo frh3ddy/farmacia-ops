@@ -118,4 +118,34 @@ describe('ProductsService.syncUnsyncedProducts', () => {
       expected: [false, true, 0],
     });
   });
+
+  test('placeholders with no store', async () => {
+    const products = new ProductsService(prisma);
+    const upsert = vi.fn(async ({ object }: any) => ({
+      catalogObject: { type: 'ITEM', id: `ITEM-${object.id}`, itemData: { variations: [{ id: `VAR-${object.itemData.name}` }] } },
+    }));
+    products['squareClient'] = { catalog: { object: { upsert } } } as any;
+    const placeholder = async (data: { name: string; soldOnlyAtLocationId?: string }) => {
+      const product = await prisma.product.create({ data });
+      await prisma.catalogMapping.create({ data: { squareVariationId: `local_${product.id}`, productId: product.id, locationId: null, priceCents: 3000 } });
+      return product;
+    };
+    const everywhere = await placeholder({ name: `Todas-${Math.random()}` });
+    const onlyNorte = await placeholder({ name: `Norte-${Math.random()}`, soldOnlyAtLocationId: norte });
+
+    const result = await products.syncUnsyncedProducts(centro);
+    const variationOf = (productId: string) =>
+      prisma.catalogMapping.findFirst({ where: { productId } }).then((m) => m?.squareVariationId);
+
+    assert({
+      given: 'a placeholder with no store for a product sold everywhere, and one for a product sold only at Norte',
+      should: 'send the first to Square from Centro and leave the second alone',
+      actual: [
+        result.results.map((r) => r.productId).filter((id) => [everywhere.id, onlyNorte.id].includes(id)),
+        await variationOf(everywhere.id),
+        await variationOf(onlyNorte.id),
+      ],
+      expected: [[everywhere.id], `VAR-${everywhere.name}`, `local_${onlyNorte.id}`],
+    });
+  });
 });
