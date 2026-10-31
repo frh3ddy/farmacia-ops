@@ -18,3 +18,4 @@
 - ✅ [Product Lists and Square Cleanup](tasks/product-lists-and-square-cleanup-epic.md) — one-store products only at their store; bounded catalog search; counts without Yastás; rename keeps the item; small fixes
 - ✅ [Sale Returns](tasks/sale-returns-epic.md) — a return never exceeds what was sold; returns count in their own month; cash note for hand returns; failed returns and matches shown
 - ✅ [Sale Returns Access](tasks/sale-returns-access-epic.md) — returns and pending lines checked by the role at that store; cash per day by store id and whole days; return body checked; small fixes
+- ✅ [Catalog Sync Migration](tasks/catalog-sync-migration-epic.md) — catalog sync owner-only and refused after cutover; Yastás mappings keep their employee; archived Square items skipped; errors and naming cleanup
