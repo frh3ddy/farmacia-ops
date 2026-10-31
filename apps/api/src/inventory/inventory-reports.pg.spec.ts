@@ -35,7 +35,7 @@ describe('InventoryReportsService shrinkage', () => {
       ['TRANSFER_OUT', -5],
       ['BREAK_BULK_OUT', -2],
       ['BREAK_BULK_IN', 40],
-      ['FOUND', 3],
+      ['RETURN', 3],
     ]);
 
     const [pnl, impact] = await Promise.all([
@@ -54,6 +54,33 @@ describe('InventoryReportsService shrinkage', () => {
       should: 'leave transfers and break-bulk out of the loss and gain report',
       actual: [impact.summary.totalAdjustments, impact.summary.totalLoss, impact.summary.totalGain],
       expected: [2, '10', '30'],
+    });
+  });
+
+  test('a miscount fixed later, next to stock that was not recovered', async () => {
+    const reports = new InventoryReportsService(prisma);
+    const locationId = await locationWith([
+      ['COUNT_CORRECTION', -5],
+      ['COUNT_CORRECTION', 5],
+      ['THEFT', -2],
+      ['FOUND', 1],
+      ['RETURN', 4],
+      ['AUTO_SALE_COVER', 6],
+    ]);
+
+    const pnl = await reports.getProfitAndLossReport({ locationId });
+
+    assert({
+      given: 'a recount down 5 then up 5, 2 stolen and 1 found, plus a customer return and a sale cover',
+      should: 'net found and recounted-up stock against losses, leaving returns and sale covers out',
+      actual: pnl.operatingExpenses.shrinkage,
+      expected: '10',
+    });
+    assert({
+      given: 'the same adjustments',
+      should: 'report losses and recoveries separately so screens never show a negative merma',
+      actual: [pnl.operatingExpenses.shrinkageLosses, pnl.operatingExpenses.shrinkageRecovered],
+      expected: ['70', '60'],
     });
   });
 });
