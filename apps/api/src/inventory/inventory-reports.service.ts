@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { businessDay } from './business-date';
 import { Prisma } from '@prisma/client';
-import { STOCK_MOVE_TYPES } from './adjustment-types';
+import { SHRINKAGE_RECOVERY_TYPES, STOCK_MOVE_TYPES } from './adjustment-types';
 
 // ============================================================================
 // Types
@@ -946,7 +946,8 @@ export class InventoryReportsService {
       expensesByType.set(expense.type, existing.add(expense.amount));
     }
 
-    // 3. Get Inventory Adjustment Losses (shrinkage)
+    // 3. Net shrinkage: losses minus stock that turned up again (found, recounted up).
+    // Can go negative in a period that recovers more than it loses.
     const adjustmentWhere: Prisma.InventoryAdjustmentWhereInput = {
       ...(locationId && { locationId }),
       ...((startDate || endDate) && {
@@ -955,16 +956,22 @@ export class InventoryReportsService {
           ...(endDate && { lte: endDate }),
         },
       }),
-      quantity: { lt: 0 }, // Only losses
-      type: { notIn: STOCK_MOVE_TYPES },
     };
 
-    const adjustmentLosses = await this.prisma.inventoryAdjustment.aggregate({
-      where: adjustmentWhere,
-      _sum: { totalCost: true },
-    });
+    const [adjustmentLosses, adjustmentRecoveries] = await Promise.all([
+      this.prisma.inventoryAdjustment.aggregate({
+        where: { ...adjustmentWhere, quantity: { lt: 0 }, type: { notIn: STOCK_MOVE_TYPES } },
+        _sum: { totalCost: true },
+      }),
+      this.prisma.inventoryAdjustment.aggregate({
+        where: { ...adjustmentWhere, quantity: { gt: 0 }, type: { in: SHRINKAGE_RECOVERY_TYPES } },
+        _sum: { totalCost: true },
+      }),
+    ]);
 
-    const shrinkage = adjustmentLosses._sum.totalCost || new Prisma.Decimal(0);
+    const shrinkageLosses = adjustmentLosses._sum.totalCost || new Prisma.Decimal(0);
+    const shrinkageRecovered = adjustmentRecoveries._sum.totalCost || new Prisma.Decimal(0);
+    const shrinkage = shrinkageLosses.sub(shrinkageRecovered);
 
     // 3b. Get Yastás settlement revenue — service revenue, zero cost, feeds
     // net profit directly. Explicitly EXCLUDED from COGS/gross-profit/
@@ -1034,7 +1041,9 @@ export class InventoryReportsService {
       },
       operatingExpenses: {
         byType: expenseBreakdown,
-        shrinkage: shrinkage.toString(), // Inventory losses
+        shrinkage: shrinkage.toString(), // net: shrinkageLosses − shrinkageRecovered
+        shrinkageLosses: shrinkageLosses.toString(),
+        shrinkageRecovered: shrinkageRecovered.toString(), // found + recounted up
         total: operatingExpenses.toString(),
       },
       netProfit: {

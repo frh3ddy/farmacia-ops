@@ -22,3 +22,10 @@ export const USER_ADJUSTMENT_TYPES: AdjustmentType[] = [
  * leg elsewhere at the same cost, so loss and gain reports leave them out.
  */
 export const STOCK_MOVE_TYPES: AdjustmentType[] = ['TRANSFER_OUT', 'TRANSFER_IN', 'BREAK_BULK_OUT', 'BREAK_BULK_IN'];
+
+/**
+ * Gains that undo shrinkage: stock written off or miscounted that turned up again.
+ * RETURN (customer stock back) and AUTO_SALE_COVER (stock never received in the
+ * app) are not recovered losses, so they stay out.
+ */
+export const SHRINKAGE_RECOVERY_TYPES: AdjustmentType[] = ['FOUND', 'COUNT_CORRECTION'];

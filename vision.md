@@ -45,6 +45,11 @@ accountant, cashiers), working in Spanish.
 - **Sales must be durable end to end:** a Square webhook is answered 2xx only after
   the event is queued; failed jobs are kept for replay; processing is idempotent
   on Square's `event_id`.
+- **Payments are cash-only, one payment per order.** The worker records a sale per
+  Square payment (keyed on `payment.id`) and takes the whole order's items each time,
+  without checking `payment.status`. Before accepting split payments (cash + card) or
+  a card retried after a decline, change it to record once per `order_id` and only
+  for COMPLETED payments — otherwise one order becomes several sales.
 - **Money and cost paths need tests** (FIFO, COGS, cutover, price/cost writes);
   `npm test` must pass before every push.
 - **Least access by role and location:** every endpoint is authenticated unless it is
