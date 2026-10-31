@@ -434,9 +434,12 @@ export class InventoryAdjustmentService {
     // cost (a looked-up 0 is no cost — only the caller can say an item is free)
     const unitCostValue = input.unitCost ?? ((await this.getLastKnownCost(input.productId, input.locationId, callerTx)) || null);
     if (unitCostValue == null) {
-      throw new BadRequestException(
-        'Indica el costo unitario: este producto no tiene un costo anterior registrado.'
-      );
+      // The code lets the app reveal its cost field instead of matching this text.
+      throw new BadRequestException({
+        success: false,
+        code: 'UNIT_COST_REQUIRED',
+        message: 'Indica el costo unitario: este producto no tiene un costo anterior registrado.',
+      });
     }
     const unitCost = new Prisma.Decimal(unitCostValue);
     const totalCost = unitCost.mul(input.quantity);
