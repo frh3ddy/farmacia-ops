@@ -101,6 +101,8 @@ const line = (catalogObjectId: string, quantity: string, centavos: number, uid =
 test('a sale across two batches, a product short of stock, and a Yastás line', async () => {
   const prisma = getPrisma();
   const location = await prisma.location.create({ data: { squareId: 'SQ-CENTRO', name: 'Centro' } });
+  // Sales are recorded only after the store's cutover.
+  await prisma.cutoverLock.create({ data: { locationId: location.id, cutoverDate: new Date('2026-09-01') } });
   const jarabe = await prisma.product.create({ data: { name: 'Jarabe' } });
   const gasas = await prisma.product.create({ data: { name: 'Gasas' } });
   const service = await prisma.product.create({ data: { name: 'Pago de luz', tracksInventory: false } });
@@ -179,7 +181,8 @@ test('an order with two Yastás lines', async () => {
 });
 
 test('a Yastás payment at a location with no wallet', async () => {
-  await getPrisma().location.create({ data: { squareId: 'SQ-NORTE', name: 'Norte' } });
+  const norte = await getPrisma().location.create({ data: { squareId: 'SQ-NORTE', name: 'Norte' } });
+  await getPrisma().cutoverLock.create({ data: { locationId: norte.id, cutoverDate: new Date('2026-09-01') } });
 
   // A setup problem, not a database failure: it must keep its type.
   await expect(processSaleJob(job([line('v-luz', '1', 25000)], 'p-3', 'SQ-NORTE'))).rejects.toThrow(SaleValidationError);
@@ -484,4 +487,63 @@ test("a return's Square item, with a local_ placeholder mapping beside the real 
     mapped: await findSquareVariationId(prisma, mapped.id, location.id),
     unmapped: await findSquareVariationId(prisma, unmapped.id, location.id),
   }).toEqual({ mapped: 'v-vendas', unmapped: null });
+});
+
+describe('sales and the store cutover', () => {
+  /** What a payment left behind at a store: sales, stock, adjustments and Yastás operations. */
+  const recordedAt = async (squareId: string, paymentId: string) => {
+    const prisma = getPrisma();
+    const location = await prisma.location.findUnique({ where: { squareId } });
+    return {
+      sales: await prisma.sale.count({ where: { squareId: paymentId } }),
+      stock: location ? await prisma.inventory.count({ where: { locationId: location.id } }) : 0,
+      adjustments: location ? await prisma.inventoryAdjustment.count({ where: { locationId: location.id } }) : 0,
+      yastas: await prisma.yastasOperation.count({ where: { squareId: paymentId } }),
+    };
+  };
+  const nothing = { sales: 0, stock: 0, adjustments: 0, yastas: 0 };
+
+  test('a payment at a store with no cutover', async () => {
+    const prisma = getPrisma();
+    const sur = await prisma.location.create({ data: { squareId: 'SQ-SUR', name: 'Sur' } });
+    await prisma.yastasWallet.create({ data: { locationId: sur.id, balance: 1000 } });
+
+    const error = await processSaleJob(job([line('v-jarabe', '1', 2000), line('v-luz', '1', 5000)], 'p-sur', 'SQ-SUR')).catch((e: Error) => e);
+
+    expect({ error: error instanceof SaleValidationError, recorded: await recordedAt('SQ-SUR', 'p-sur') })
+      .toEqual({ error: true, recorded: nothing });
+  });
+
+  test('a payment from a Square location the app does not know', async () => {
+    const error = await processSaleJob(job([line('v-jarabe', '1', 2000)], 'p-unknown', 'SQ-UNKNOWN')).catch((e: Error) => e);
+
+    expect({
+      error: error instanceof SaleValidationError,
+      store: await getPrisma().location.count({ where: { squareId: 'SQ-UNKNOWN' } }),
+      recorded: await recordedAt('SQ-UNKNOWN', 'p-unknown'),
+    }).toEqual({ error: true, store: 0, recorded: nothing });
+  });
+
+  test('a payment dated before the store cutover', async () => {
+    const prisma = getPrisma();
+    const poniente = await prisma.location.create({ data: { squareId: 'SQ-PONIENTE', name: 'Poniente' } });
+    // Counted the day after the payment (2026-10-27): the count already reflects it.
+    await prisma.cutoverLock.create({ data: { locationId: poniente.id, cutoverDate: new Date('2026-10-28') } });
+
+    await processSaleJob(job([line('v-jarabe', '1', 2000)], 'p-poniente', 'SQ-PONIENTE'));
+
+    expect(await recordedAt('SQ-PONIENTE', 'p-poniente')).toEqual(nothing);
+  });
+
+  test('a cutover that covers every store', async () => {
+    const prisma = getPrisma();
+    const oriente = await prisma.location.create({ data: { squareId: 'SQ-ORIENTE', name: 'Oriente' } });
+    const jarabe = await prisma.product.findFirstOrThrow({ where: { name: 'Jarabe' } });
+    await prisma.inventory.create({ data: { productId: jarabe.id, locationId: oriente.id, quantity: 3, unitCost: 10, receivedAt: new Date('2026-09-01') } });
+    await prisma.cutoverLock.create({ data: { locationId: null, cutoverDate: new Date('2026-09-01') } });
+
+    await processSaleJob(job([line('v-jarabe', '1', 2000)], 'p-oriente', 'SQ-ORIENTE'));
+
+    expect((await recordedAt('SQ-ORIENTE', 'p-oriente')).sales).toBe(1);
+  });
 });
