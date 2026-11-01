@@ -6,6 +6,7 @@
  * race's guards here, not the race itself.
  */
 import { readdirSync, readFileSync } from 'fs';
+import { createServer } from 'net';
 import { join } from 'path';
 import { PGlite, type Extension } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
@@ -23,7 +24,7 @@ export async function startPostgres() {
   for (const dir of readdirSync(MIGRATIONS).filter((d) => !d.endsWith('.toml')).sort()) {
     await db.exec(readFileSync(join(MIGRATIONS, dir, 'migration.sql'), 'utf8'));
   }
-  const port = 55_000 + Math.floor(Math.random() * 1_000);
+  const port = await freePort();
   const server = new PGLiteSocketServer({ db, port });
   await server.start();
 
@@ -38,4 +39,16 @@ export async function startPostgres() {
     vi.unstubAllEnvs();
   };
   return { prisma, stop };
+}
+
+/** A port the OS says is free. A random pick from a fixed range let parallel suites collide (EADDRINUSE). */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as { port: number };
+      probe.close(() => resolve(port));
+    });
+  });
 }

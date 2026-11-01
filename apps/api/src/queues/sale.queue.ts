@@ -66,8 +66,19 @@ export class SaleQueue {
   }
 
   /** Jobs of one kind that failed every attempt (kept FAILED_JOB_RETENTION_SECONDS). */
-  async failedJobs(name: 'record-return' | 'match-sale-line') {
+  async failedJobs(name: 'record-return' | 'match-sale-line' | 'process-sale' | 'square-refund') {
     return (await this.queue.getFailed()).filter((job) => job?.name === name);
+  }
+
+  /**
+   * Sends every failed Square sale and refund back to the worker, each with a
+   * fresh set of attempts (e.g. a store's sales refused until its cutover).
+   * The worker records each once, so a replay never doubles a sale.
+   */
+  async replayFailedSales(): Promise<number> {
+    const jobs = (await this.queue.getFailed()).filter((job) => job?.name === 'process-sale' || job?.name === 'square-refund');
+    for (const job of jobs) await job.retry('failed', { resetAttemptsMade: true });
+    return jobs.length;
   }
 
   /** A customer return made by hand; the worker restocks it and records what it gave back. */
