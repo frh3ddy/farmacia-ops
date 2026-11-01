@@ -23,3 +23,4 @@
 - ✅ [Product Mapping for All Stores](tasks/product-mapping-all-stores-epic.md) — a product sold at every store maps to all of them, so its sales at other stores are recorded; the unsynced sweep finds those placeholders
 - ✅ [Counted Correction Lock](tasks/counted-correction-lock-epic.md) — a stock count locks that product's batches at the store, so a sale landing mid-count isn't counted twice
 - ✅ [Remove Stale Docs](tasks/remove-stale-docs-epic.md) — the hand-written design docs from January and the built Yastás brief deleted; the graph and schema are the map
+- ✅ [Sales Only After Cutover](tasks/sales-only-after-cutover-epic.md) — a Square sale at a store not cut over (or an unknown one) fails for replay; one dated before the cutover is skipped
