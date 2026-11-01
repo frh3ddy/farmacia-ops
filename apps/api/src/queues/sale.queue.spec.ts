@@ -66,4 +66,34 @@ describe('SaleQueue', () => {
       expected: [['square-refund', { squareEventId: 'evt-r', payload: event.data }, { jobId: 'evt-r' }]],
     });
   });
+
+  test('replaying failed sales', async () => {
+    const failedJob = (id: string, name: string) => ({ id, name, retry: vi.fn() });
+    const jobs = [
+      failedJob('evt-sale', 'process-sale'),
+      failedJob('evt-refund', 'square-refund'),
+      failedJob('j-return', 'record-return'),
+      failedJob('j-match', 'match-sale-line'),
+      undefined, // getFailed() can list a failed id whose job data is gone
+    ];
+    vi.mocked(Queue).mockImplementationOnce(function (this: any) { this.getFailed = async () => jobs; } as any);
+
+    const replayed = await new SaleQueue().replayFailedSales();
+
+    assert({
+      given: 'failed sale, refund, return and match jobs',
+      should: 'retry only the Square sales and refunds, each with a fresh set of attempts',
+      actual: { replayed, calls: jobs.map((j) => j && [j.id, j.retry.mock.calls]) },
+      expected: {
+        replayed: 2,
+        calls: [
+          ['evt-sale', [['failed', { resetAttemptsMade: true }]]],
+          ['evt-refund', [['failed', { resetAttemptsMade: true }]]],
+          ['j-return', []],
+          ['j-match', []],
+          undefined,
+        ],
+      },
+    });
+  });
 });

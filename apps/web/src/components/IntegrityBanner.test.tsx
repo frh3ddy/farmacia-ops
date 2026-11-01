@@ -11,7 +11,12 @@ vi.mock("../lib/apiFetch", () => ({ ApiError: class extends Error {}, apiFetch: 
 
 const now = new Date("2026-10-27T15:00:00Z");
 const ok = { status: "ok", mismatches: [] };
-const respond = (data: unknown) => vi.mocked(apiFetch).mockResolvedValue({ success: true, data });
+/** The latest run at /inventory/reports/integrity, and the failed sales kept for replay at /api/sales/failed. */
+const respond = (data: unknown, failed: unknown[] = []) =>
+  vi.mocked(apiFetch).mockImplementation(async (path: string) =>
+    path === "/api/sales/failed/replay" ? { success: true, data: { replayed: failed.length } }
+    : path === "/api/sales/failed" ? { success: true, data: failed, count: failed.length }
+    : { success: true, data });
 const run = (checks: object, ranAt = "2026-10-27T09:00:00Z") => ({ ranAt, mismatchCount: 0, checks: { books: ok, sales: ok, fifo: ok, ...checks } });
 
 describe("IntegrityBanner", () => {
@@ -59,6 +64,33 @@ describe("IntegrityBanner", () => {
     render(<IntegrityBanner now={now} />);
 
     expect(await screen.findByText(/sales check couldn't run/)).toBeTruthy();
+  });
+
+  it("lists the failed sales kept for replay and sends them back to the worker", async () => {
+    const failed = { jobId: "evt-1", squareId: "pay-9", error: "Oriente has not finished its cutover; replay this sale once it has", failedAt: "2026-10-27T14:00:00Z" };
+    respond(run({}), [failed]);
+    render(<IntegrityBanner now={now} />);
+
+    expect(await screen.findByText(/1 Square sale failed and is kept for replay/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Show details"));
+    expect(screen.getByText(/pay-9.*has not finished its cutover/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Replay failed sales"));
+
+    expect(await screen.findByText(/Sent 1 sale back to be recorded/)).toBeTruthy();
+    expect(apiFetch).toHaveBeenCalledWith("/api/sales/failed/replay", { method: "POST" });
+  });
+
+  it("says so when the replay doesn't go through, and keeps the button", async () => {
+    respond(run({}), [{ jobId: "evt-1", squareId: "pay-9", error: "x" }]);
+    render(<IntegrityBanner now={now} />);
+    await screen.findByText("Replay failed sales");
+    vi.mocked(apiFetch).mockRejectedValueOnce(new Error("offline"));
+
+    fireEvent.click(screen.getByText("Replay failed sales"));
+
+    expect(await screen.findByText(/Couldn't replay the failed sales/)).toBeTruthy();
+    expect(screen.getByText("Replay failed sales")).toBeTruthy();
   });
 
   it("shows non-owners nothing and doesn't ask the api", () => {
