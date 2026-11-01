@@ -160,6 +160,26 @@ describe('InventoryReceivingService Square sync (Postgres)', () => {
       ],
     });
   });
+
+  test('retrying a receipt never sent to Square', async () => {
+    const batchCreateChanges = vi.fn().mockResolvedValue({ counts: [] });
+    const synced = new InventoryReceivingService(prisma);
+    synced['squareClient'] = { inventory: { batchCreateChanges } } as any;
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Sur' } });
+    await prisma.cutoverLock.create({ data: { locationId, cutoverDate: new Date('2026-09-01') } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    await prisma.catalogMapping.create({ data: { productId, squareVariationId: `v-${productId}` } });
+
+    const { receiving } = await synced.receiveInventory({ locationId, productId, quantity: 3, unitCost: 5, syncToSquare: false });
+    const retried = await synced.retrySquareSync(receiving.id).then(() => 'retried', (e: any) => [e.status, e.message]);
+
+    assert({
+      given: 'a retry of a receipt with no recorded Square failure',
+      should: 'refuse it without calling Square, since it may already be there',
+      actual: [retried, batchCreateChanges.mock.calls.length],
+      expected: [[400, 'Esta recepción no tiene un envío fallido a Square que reintentar'], 0],
+    });
+  });
 });
 
 describe('InventoryReceivingService.getReceivingsByProduct (Postgres)', () => {

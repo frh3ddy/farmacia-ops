@@ -536,6 +536,19 @@ describe('InventoryAdjustmentService Square sync (Postgres)', () => {
       expected: [{ synced: true }, 1],
     });
   });
+
+  test('retrying an adjustment never sent to Square', async () => {
+    const { synced, productId, batchCreateChanges } = await syncedProduct();
+    const { adjustment } = await synced.createAdjustment({ locationId, productId, type: 'FOUND', quantity: 3, unitCost: 2, syncToSquare: false });
+    const retried = await synced.retrySquareSync(adjustment.id).then(() => 'retried', (e: any) => [e.status, e.message]);
+
+    assert({
+      given: 'a retry of an adjustment with no recorded Square failure',
+      should: 'refuse it without calling Square, since it may already be there',
+      actual: [retried, batchCreateChanges.mock.calls.length],
+      expected: [[400, 'Este ajuste no tiene un envío fallido a Square que reintentar'], 0],
+    });
+  });
 });
 
 describe('InventoryAdjustmentService.createAdjustment cutover (Postgres)', () => {

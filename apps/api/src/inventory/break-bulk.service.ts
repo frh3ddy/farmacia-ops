@@ -85,8 +85,8 @@ export class BreakBulkService {
     });
 
     if (input.syncToSquare) {
-      outResult.squareSync = await this.adjustments.retrySquareSync(outResult.adjustment.id);
-      inResult.squareSync = await this.adjustments.retrySquareSync(inResult.adjustment.id);
+      outResult.squareSync = await this.adjustments.syncCommitted(outResult.adjustment.id);
+      inResult.squareSync = await this.adjustments.syncCommitted(inResult.adjustment.id);
     }
 
     this.logger.log(

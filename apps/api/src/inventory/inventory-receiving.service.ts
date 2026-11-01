@@ -503,6 +503,12 @@ export class InventoryReceivingService {
   // --------------------------------------------------------------------------
   // Retry Square sync
   // --------------------------------------------------------------------------
+
+  /**
+   * Resends a receipt whose Square sync failed. Only a recorded failure is
+   * retried, as with transfers: one never sent (or sent before results were
+   * recorded) may already be in Square.
+   */
   async retrySquareSync(receivingId: string): Promise<{ synced: boolean; error?: string }> {
     const receiving = await this.prisma.inventoryReceiving.findUnique({
       where: { id: receivingId },
@@ -514,6 +520,9 @@ export class InventoryReceivingService {
 
     if (receiving.squareSynced) {
       return { synced: true };
+    }
+    if (!receiving.squareSyncError) {
+      throw new BadRequestException('Esta recepción no tiene un envío fallido a Square que reintentar');
     }
     return this.recordSquareSync(receiving);
   }
