@@ -333,6 +333,61 @@ describe('InventoryAdjustmentService count correction by counted total (Postgres
       expected: [first.adjustment.id, 12],
     });
   });
+
+  test('a count with no stock on hand', async () => {
+    const { productId } = await productWithBatches([]);
+
+    const result = await service.createAdjustment({ locationId, productId, type: 'COUNT_CORRECTION', countedQuantity: 4, unitCost: 2 });
+
+    assert({
+      given: 'no stock at the store and a counted total of 4',
+      should: 'add the 4 counted units',
+      actual: [result.adjustment.quantity, await stockOf(productId)],
+      expected: [4, 4],
+    });
+  });
+
+  test('a count while sales may be recorded', async () => {
+    // PGlite can't run a sale concurrently, so this checks the guard: when the
+    // adjustment row is written, the product's batches are row-locked by the
+    // count's own transaction (xmax holds the locker), so a sale's decrement waits.
+    const { productId, batches: [batch] } = await productWithBatches([{ quantity: 10, unitCost: 2, receivedAt: '2026-10-01' }]);
+    const { batches: [otherBatch] } = await productWithBatches([{ quantity: 3, unitCost: 2, receivedAt: '2026-10-01' }]);
+    await prisma.$executeRawUnsafe('CREATE TABLE lock_seen (batch_id text, locked boolean)');
+    await prisma.$executeRawUnsafe(`
+      CREATE FUNCTION see_locks() RETURNS trigger AS $$
+      BEGIN
+        INSERT INTO lock_seen SELECT id, xmax = pg_current_xact_id()::xid FROM "Inventory"
+          WHERE id IN ('${batch.id}', '${otherBatch.id}');
+        RETURN NEW;
+      END $$ LANGUAGE plpgsql;
+    `);
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER see_locks AFTER INSERT ON "InventoryAdjustment"
+      FOR EACH ROW WHEN (NEW."productId" = '${productId}') EXECUTE FUNCTION see_locks();
+    `);
+
+    let seen: Array<{ batch_id: string; locked: boolean }>;
+    try {
+      await service.createAdjustment({ locationId, productId, type: 'COUNT_CORRECTION', countedQuantity: 14 });
+      seen = await prisma.$queryRawUnsafe('SELECT batch_id, locked FROM lock_seen');
+    } finally {
+      await prisma.$executeRawUnsafe('DROP TRIGGER see_locks ON "InventoryAdjustment"; DROP FUNCTION see_locks(); DROP TABLE lock_seen;');
+    }
+
+    assert({
+      given: 'a count being applied',
+      should: "hold the counted product's batches locked until it commits, and leave other products' batches alone",
+      actual: Object.fromEntries(seen.map((s) => [s.batch_id, s.locked])),
+      expected: { [batch.id]: true, [otherBatch.id]: false },
+    });
+    assert({
+      given: 'stock of 10 and a counted total of 14',
+      should: 'leave stock at the count',
+      actual: await stockOf(productId),
+      expected: 14,
+    });
+  });
 });
 
 describe('InventoryAdjustmentService Square sync (Postgres)', () => {
@@ -364,6 +419,20 @@ describe('InventoryAdjustmentService Square sync (Postgres)', () => {
         { synced: true },
         true,
       ],
+    });
+  });
+
+  test('a counted total', async () => {
+    const { synced, productId, sentChange } = await syncedProduct();
+    const { adjustment, squareSync } = await synced.createAdjustment({
+      locationId, productId, type: 'COUNT_CORRECTION', countedQuantity: 7, syncToSquare: true,
+    });
+
+    assert({
+      given: 'a count of 7 against stock of 10, synced to Square',
+      should: 'send the 3-unit change once the count is applied, and record it as synced',
+      actual: [sentChange().quantity, squareSync, (await prisma.inventoryAdjustment.findUniqueOrThrow({ where: { id: adjustment.id } })).squareSynced],
+      expected: ['3', { synced: true }, true],
     });
   });
 

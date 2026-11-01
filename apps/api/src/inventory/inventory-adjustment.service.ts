@@ -207,7 +207,7 @@ export class InventoryAdjustmentService {
     // client-supplied dedup key and return the existing result instead of
     // applying the delta twice.
     if (input.clientRequestId) {
-      const existing = await this.findByClientRequestId(input);
+      const existing = await this.findByClientRequestId(input, db);
       if (existing) {
         this.logger.log(`[ADJUSTMENT] Duplicate clientRequestId ${input.clientRequestId} — returning existing adjustment ${existing.adjustment.id}`);
         return existing;
@@ -281,18 +281,25 @@ export class InventoryAdjustmentService {
       if (existing) return existing;
     }
 
-    // ponytail: stock is read just before the write, not under a lock — a sale
-    // landing in that gap (milliseconds) skews the result by its quantity.
-    // Lock the batches (SELECT … FOR UPDATE) if counts during busy hours drift.
-    const onHand = await (tx ?? this.prisma).inventory.aggregate({
-      where: { productId: rest.productId, locationId: rest.locationId, quantity: { gt: 0 } },
-      _sum: { quantity: true },
+    const result = await this.inTransaction(tx, async (tx) => {
+      // Locks this product's batches at the store until the count commits, so a
+      // sale waits instead of landing between this read and the write, where it
+      // would be counted in the stock read here and again when it decrements.
+      const batches = await tx.$queryRaw<Array<{ quantity: number }>>`
+        SELECT quantity FROM "Inventory"
+        WHERE "productId" = ${rest.productId} AND "locationId" = ${rest.locationId} AND quantity > 0
+        FOR UPDATE`;
+      const change = countedQuantity - batches.reduce((sum, b) => sum + b.quantity, 0);
+      if (change === 0) {
+        throw new BadRequestException('El conteo coincide con el inventario actual; no hay nada que ajustar');
+      }
+      return this.createAdjustment({ ...rest, quantity: change }, tx);
     });
-    const change = countedQuantity - (onHand._sum.quantity ?? 0);
-    if (change === 0) {
-      throw new BadRequestException('El conteo coincide con el inventario actual; no hay nada que ajustar');
+    // Inside a transaction createAdjustment leaves Square to the caller.
+    if (rest.syncToSquare && !tx) {
+      result.squareSync = await this.retrySquareSync(result.adjustment.id);
     }
-    return this.createAdjustment({ ...rest, quantity: change }, tx);
+    return result;
   }
 
   // --------------------------------------------------------------------------
@@ -559,8 +566,8 @@ export class InventoryAdjustmentService {
     return tx ? fn(tx) : this.prisma.$transaction(fn);
   }
 
-  private async findByClientRequestId(input: Omit<CreateAdjustmentInput, 'quantity'> & { quantity?: number }): Promise<AdjustmentResult | null> {
-    const existing = await this.prisma.inventoryAdjustment.findUnique({
+  private async findByClientRequestId(input: Omit<CreateAdjustmentInput, 'quantity'> & { quantity?: number }, db: Prisma.TransactionClient = this.prisma): Promise<AdjustmentResult | null> {
+    const existing = await db.inventoryAdjustment.findUnique({
       where: { clientRequestId: input.clientRequestId },
       include: { createdBatch: true, consumptions: true },
     });
@@ -576,7 +583,7 @@ export class InventoryAdjustmentService {
       throw new ConflictException('This clientRequestId was already used for a different adjustment');
     }
 
-    const currentTotal = await this.prisma.inventory.aggregate({
+    const currentTotal = await db.inventory.aggregate({
       where: { productId: existing.productId, locationId: existing.locationId, quantity: { gt: 0 } },
       _sum: { quantity: true },
     });

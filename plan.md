@@ -21,3 +21,4 @@
 - ✅ [Catalog Sync Migration](tasks/catalog-sync-migration-epic.md) — catalog sync owner-only and refused after cutover; Yastás mappings keep their employee; archived Square items skipped; errors and naming cleanup
 - ✅ [Cutover Migration Safety](tasks/cutover-migration-safety-epic.md) — each item migrated once (no positional cursor), failed runs resume, discontinued items deleted safely in Square, no lock with products left out, owner only from the finished session; go-live runbook
 - ✅ [Product Mapping for All Stores](tasks/product-mapping-all-stores-epic.md) — a product sold at every store maps to all of them, so its sales at other stores are recorded; the unsynced sweep finds those placeholders
+- ✅ [Counted Correction Lock](tasks/counted-correction-lock-epic.md) — a stock count locks that product's batches at the store, so a sale landing mid-count isn't counted twice
