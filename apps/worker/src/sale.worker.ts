@@ -582,25 +582,23 @@ async function recordOrderSale(
   try {
     const result = await getPrisma().$transaction(
       async (tx) => {
-        // Find or create Location based on Square location ID
-        let location = await tx.location.findUnique({
-          where: { squareId: locationId },
-        });
-
+        // Sales are recorded only after the store's cutover. A refused sale fails
+        // the job, which is kept for replay once the store is cut over.
+        const location = await tx.location.findUnique({ where: { squareId: locationId } });
         if (!location) {
-          debugLog('[DEBUG] [TX] Location not found, creating new location with squareId:', locationId);
-          // Fetch location details from Square API if needed, or create with minimal data
-          // For now, create with squareId only - name/address can be updated later
-          location = await tx.location.create({
-            data: {
-              squareId: locationId,
-              name: `Location ${locationId}`, // Temporary name, can be updated via sync
-              isActive: true,
-            },
-          });
-          debugLog('[DEBUG] [TX] Created location:', location.id);
-        } else {
-          debugLog('[DEBUG] [TX] Found existing location:', location.id);
+          throw new SaleValidationError(`Square location ${locationId} is not linked to a store`, { locationId, squareId });
+        }
+        const cutover = await tx.cutoverLock.findFirst({
+          where: { OR: [{ locationId: location.id }, { locationId: null }], isLocked: true },
+          orderBy: { cutoverDate: 'desc' },
+        });
+        if (!cutover) {
+          throw new SaleValidationError(`${location.name} has not finished its cutover; replay this sale once it has`, { locationId, squareId });
+        }
+        // Sold before the opening count, so the count already left it off the shelf.
+        if (createdAt <= cutover.cutoverDate) {
+          console.warn(`[SALE_WORKER] Payment ${squareId} at ${location.name} predates its cutover; nothing recorded`);
+          return { saleId: null, itemCount: 0 };
         }
 
         // Yastás line items never create a Sale/SaleItem — write them to the
