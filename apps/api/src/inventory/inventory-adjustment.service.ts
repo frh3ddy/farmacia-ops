@@ -177,7 +177,7 @@ export class InventoryAdjustmentService {
   // --------------------------------------------------------------------------
   /**
    * Given the caller's transaction `tx`, everything runs inside it and Square
-   * isn't called: the caller syncs (`retrySquareSync(id)`) once its transaction commits.
+   * isn't called: the caller syncs (`syncCommitted(id)`) once its transaction commits.
    */
   async createAdjustment(input: CreateAdjustmentInput | CountedCorrectionInput, tx?: Prisma.TransactionClient): Promise<AdjustmentResult> {
     if ('countedQuantity' in input && input.countedQuantity != null) {
@@ -297,7 +297,7 @@ export class InventoryAdjustmentService {
     });
     // Inside a transaction createAdjustment leaves Square to the caller.
     if (rest.syncToSquare && !tx) {
-      result.squareSync = await this.retrySquareSync(result.adjustment.id);
+      result.squareSync = await this.syncCommitted(result.adjustment.id);
     }
     return result;
   }
@@ -517,6 +517,17 @@ export class InventoryAdjustmentService {
   // --------------------------------------------------------------------------
   // Retry Square sync
   // --------------------------------------------------------------------------
+
+  /** First send of an adjustment committed in a transaction (count correction, break-bulk). */
+  async syncCommitted(adjustmentId: string): Promise<{ synced: boolean; error?: string }> {
+    return this.recordSquareSync(await this.prisma.inventoryAdjustment.findUniqueOrThrow({ where: { id: adjustmentId } }));
+  }
+
+  /**
+   * Resends an adjustment whose Square sync failed. Only a recorded failure is
+   * retried, as with transfers: one never sent (or sent before results were
+   * recorded) may already be in Square.
+   */
   async retrySquareSync(adjustmentId: string): Promise<{ synced: boolean; error?: string }> {
     const adjustment = await this.prisma.inventoryAdjustment.findUnique({
       where: { id: adjustmentId },
@@ -531,6 +542,9 @@ export class InventoryAdjustmentService {
     }
     if (adjustment.type === 'TRANSFER_OUT' || adjustment.type === 'TRANSFER_IN') {
       throw new BadRequestException('Transfer adjustments sync to Square when the transfer is received, not one by one');
+    }
+    if (!adjustment.squareSyncError) {
+      throw new BadRequestException('Este ajuste no tiene un envío fallido a Square que reintentar');
     }
     return this.recordSquareSync(adjustment);
   }
