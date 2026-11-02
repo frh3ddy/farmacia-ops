@@ -15,6 +15,7 @@ export interface FifoBatch {
 export interface ConsumedBatch {
   batchId: string;
   quantityConsumed: number;
+  unitCost: FifoBatch['unitCost'];
   costContribution: Prisma.Decimal;
 }
 
@@ -40,7 +41,7 @@ export function consumeBatchesFifo(batches: FifoBatch[], quantityNeeded: number)
     const costContribution = new Prisma.Decimal(batch.unitCost).mul(qtyToConsume);
 
     totalCost = totalCost.add(costContribution);
-    consumedBatches.push({ batchId: batch.id, quantityConsumed: qtyToConsume, costContribution });
+    consumedBatches.push({ batchId: batch.id, quantityConsumed: qtyToConsume, unitCost: batch.unitCost, costContribution });
     remainingQty -= qtyToConsume;
   }
 

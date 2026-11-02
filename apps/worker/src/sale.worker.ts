@@ -264,51 +264,22 @@ async function processSaleItem(
   };
 }
 
-/**
- * Record inventory consumption for FIFO audit trail
- * Creates immutable records linking sale items to consumed inventory batches
- * 
- * This is critical for:
- * - Audit compliance (traceability of cost calculations)
- * - Reconciliation (verify inventory matches consumption history)
- * - COGS analysis (detailed cost breakdown by batch)
- */
+/** Links a sale item to the batches it took from, each at its own cost (the FIFO audit trail). */
 async function recordInventoryConsumption(
   saleItemId: string,
   consumedBatches: ConsumedBatch[],
   client: Prisma.TransactionClient,
 ): Promise<void> {
-  // Batch fetch unit costs for all consumed batches
-  const batchIds = consumedBatches.map(b => b.batchId);
-  const inventoryBatches = await client.inventory.findMany({
-    where: { id: { in: batchIds } },
-    select: { id: true, unitCost: true },
-  });
-  
-  const unitCostMap = new Map(inventoryBatches.map(b => [b.id, b.unitCost]));
-
-  // Create consumption records
-  const consumptionRecords = consumedBatches.map(batch => {
-    const unitCost = unitCostMap.get(batch.batchId) || new Prisma.Decimal(0);
-    return {
+  if (consumedBatches.length === 0) return;
+  await client.inventoryConsumption.createMany({
+    data: consumedBatches.map((batch) => ({
       inventoryId: batch.batchId,
-      saleItemId: saleItemId,
+      saleItemId,
       quantity: batch.quantityConsumed,
-      unitCost: unitCost,
+      unitCost: batch.unitCost,
       totalCost: batch.costContribution,
-    };
+    })),
   });
-
-  // Batch insert all consumption records
-  if (consumptionRecords.length > 0) {
-    await client.inventoryConsumption.createMany({
-      data: consumptionRecords,
-    });
-    
-    debugLog(
-      `[FIFO_AUDIT] Recorded ${consumptionRecords.length} consumption records for saleItem ${saleItemId}`,
-    );
-  }
 }
 
 /**
@@ -338,187 +309,46 @@ function calculateSaleTotals(saleItems: SaleItemOutput[], customLines: Array<{ a
 // Main Worker Function
 // ============================================================================
 
-/**
- * Main worker entry point: process Square payment webhook and create sale with FIFO COGS
- */
+/** A Square payment.created event: records its order as a sale with FIFO cost, once per payment. */
 export async function processSaleJob(job: Job): Promise<void> {
-  debugLog('[DEBUG] ========================================');
-  debugLog('[DEBUG] Starting processSaleJob');
-  debugLog('[DEBUG] Job ID:', job.id);
-  debugLog('[DEBUG] Job data:', JSON.stringify(job.data, null, 2));
-  
-  // Extract payload from job data
-  if (!job.data) {
-    console.error('[DEBUG] ERROR: job.data is missing');
-    throw new SaleValidationError('Job data is missing', { jobId: job.id });
+  // The webhook (and the dev test-sale tool) queue Square's event.data, so the payment is at payload.object.payment.
+  // Errors name the payment by id only: the payment holds card details and the buyer's email (failed-job.ts).
+  const payload = job.data?.payload;
+  const payment = payload?.object?.payment;
+  if (!payment || typeof payment !== 'object') {
+    throw new SaleValidationError('Missing payment object in payload', { jobId: job.id });
   }
-  
-  const { payload } = job.data;
-  debugLog('[DEBUG] Extracted payload:', JSON.stringify(payload, null, 2));
+  const { id: squareId, location_id: locationId, order_id: orderId } = payment;
+  if (!squareId) throw new SaleValidationError('Payment object missing id', { jobId: job.id });
+  if (!locationId) throw new SaleValidationError('Payment object missing location_id', { paymentId: squareId });
+  const createdAt = payment.created_at ? new Date(payment.created_at) : new Date();
 
-  if (!payload) {
-    console.error('[DEBUG] ERROR: payload is missing from job.data');
-    throw new SaleValidationError(
-      'Missing payload in job data',
-      { jobData: JSON.stringify(job.data) },
-    );
-  }
-
-  // Phase 1: Validation & Idempotency
-  // Extract payment from job.data.payload.object
-  // Note: Square webhook structure is: event.data.object.payment
-  // But queue sends: payload = event.data, so payload.object.payment
-  debugLog('[DEBUG] Attempting to extract payment from payload.object');
-  debugLog('[DEBUG] payload?.object:', JSON.stringify(payload?.object, null, 2));
-  debugLog('[DEBUG] payload?.object?.payment:', JSON.stringify(payload?.object?.payment, null, 2));
-  
-  // Try payload.object.payment first (Square webhook structure)
-  // This handles: event.data.object.payment (Square webhook) -> payload.object.payment (after queue)
-  // Also handle case where payload itself might be the payment object
-  let payment: any = null;
-  
-  if (payload?.object?.payment) {
-    payment = payload.object.payment;
-    debugLog('[DEBUG] Found payment at payload.object.payment');
-  } else if (payload?.object && typeof payload.object === 'object' && 'id' in payload.object) {
-    // payload.object might be the payment directly
-    payment = payload.object;
-    debugLog('[DEBUG] Found payment at payload.object');
-  } else if (payload && typeof payload === 'object' && 'id' in payload && 'location_id' in payload) {
-    // payload itself might be the payment
-    payment = payload;
-    debugLog('[DEBUG] Found payment at payload (direct)');
-  }
-  
-  debugLog('[DEBUG] Final extracted payment:', JSON.stringify(payment, null, 2));
-
-  if (!payment) {
-    console.error('[DEBUG] ERROR: Payment object is missing');
-    throw new SaleValidationError(
-      'Missing payment object in payload',
-      { payload: JSON.stringify(payload), jobData: JSON.stringify(job.data) },
-    );
-  }
-
-  debugLog('[DEBUG] Validating payment object fields...');
-  
-  if (typeof payment !== 'object') {
-    console.error('[DEBUG] ERROR: Payment is not a valid object');
-    throw new SaleValidationError(
-      'Payment is not a valid object',
-      { payment: JSON.stringify(payment) },
-    );
-  }
-  
-  if (!payment.id) {
-    console.error('[DEBUG] ERROR: Payment object missing id');
-    throw new SaleValidationError(
-      'Payment object missing id',
-      { payment: JSON.stringify(payment) },
-    );
-  }
-  debugLog('[DEBUG] ✓ Payment ID found:', payment.id);
-
-  if (!payment.location_id) {
-    console.error('[DEBUG] ERROR: Payment object missing location_id');
-    throw new SaleValidationError(
-      'Payment object missing location_id',
-      { payment: JSON.stringify(payment) },
-    );
-  }
-  debugLog('[DEBUG] ✓ Location ID found:', payment.location_id);
-
-  const squareId = payment.id;
-  const locationId = payment.location_id;
-  const orderId = payment.order_id;
-  const createdAt = payment.created_at
-    ? new Date(payment.created_at)
-    : new Date();
-
-  debugLog('[DEBUG] Payment details extracted:', {
-    squareId,
-    locationId,
-    orderId,
-    createdAt: createdAt.toISOString(),
-  });
-
-  // Check if sale with squareId already exists (idempotency)
   // ponytail: one sale per payment, whole order each time — right only while orders
   // are paid in one cash payment. Split payments need once-per-order_id and a
   // COMPLETED-status check (vision.md, Key Constraints).
-  debugLog('[DEBUG] Checking for existing sale with squareId:', squareId);
-  const existing = await getPrisma().sale.findUnique({
-    where: { squareId },
-  });
-  if (existing) {
-    debugLog(`[DEBUG] Sale ${squareId} already exists, skipping (idempotent)`);
-    return;
-  }
+  if (await getPrisma().sale.findUnique({ where: { squareId } })) return;
   // A purely-Yastás order never creates a Sale row, so the check above can't
   // catch a redelivered webhook for it — check YastasOperation too.
-  const existingYastasOp = await getPrisma().yastasOperation.findFirst({
-    where: { squareId },
-  });
-  if (existingYastasOp) {
-    debugLog(`[DEBUG] YastasOperation ${squareId} already exists, skipping (idempotent)`);
-    return;
-  }
-  debugLog('[DEBUG] ✓ No existing sale found, proceeding...');
+  if (await getPrisma().yastasOperation.findFirst({ where: { squareId } })) return;
 
-  // Phase 2: Fetch Order Data from Square (or use test data)
-  debugLog('[DEBUG] Validating order_id...');
-  if (!orderId) {
-    console.error('[DEBUG] ERROR: Payment object missing order_id');
-    throw new SaleValidationError(
-      'Payment object missing order_id',
-      { payment: JSON.stringify(payment) },
-    );
-  }
-  debugLog('[DEBUG] ✓ Order ID found:', orderId);
-
-  let order;
-  
-  // Check if this is a test event with embedded order data
-  const testOrderData = job.data?.payload?._testOrderData;
-  if (testOrderData) {
-    debugLog('[DEBUG] Using test order data (bypassing Square API)');
-    order = testOrderData;
-  } else {
-    try {
-      debugLog('[DEBUG] Fetching order from Square API...');
-      const client = getSquareClient();
-      debugLog('[DEBUG] Square client initialized, calling orders.get()');
-      const response = await client.orders.get({
-        orderId: orderId,
-      });
-      debugLog('[DEBUG] Square API response received');
-      order = response.order;
-
-      if (!order) {
-        console.error('[DEBUG] ERROR: Order not found in Square response');
-        throw new SaleValidationError(
-          `Order ${orderId} not found in Square`,
-          { orderId, squareId },
-        );
-      }
-      debugLog('[DEBUG] ✓ Order fetched successfully, order ID:', order.id);
-    } catch (error) {
-      console.error('[DEBUG] ERROR: Failed to fetch order from Square:', {
-        error: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        orderId,
-        squareId,
-      });
-      throw new SaleValidationError(
-        `Failed to fetch order from Square: ${error instanceof Error ? error.message : String(error)}`,
-        { orderId, squareId },
-      );
-    }
-  }
+  if (!orderId) throw new SaleValidationError('Payment object missing order_id', { paymentId: squareId });
+  // A dev test sale (sales-test.service.ts) carries its order instead of having it fetched from Square.
+  const order = payload._testOrderData ?? (await fetchOrder(orderId, squareId));
 
   // An exchange where the customer pays the difference: the order also lists what came back.
   await recordSquareReturns(returnLines(order), 'Cambio en Square');
   await recordOrderSale(order, { orderId, squareId, locationId, createdAt });
+}
+
+async function fetchOrder(orderId: string, squareId: string) {
+  let order;
+  try {
+    ({ order } = await getSquareClient().orders.get({ orderId }));
+  } catch (error) {
+    throw new SaleValidationError(`Failed to fetch order from Square: ${error instanceof Error ? error.message : String(error)}`, { orderId, squareId });
+  }
+  if (!order) throw new SaleValidationError(`Order ${orderId} not found in Square`, { orderId, squareId });
+  return order;
 }
 
 /** What a Square order took back: its `returns`' lines, each pointing at the sold line. */
@@ -532,20 +362,18 @@ type SquareOrder = { lineItems?: OrderLine[] | null; returns?: Array<{ returnLin
 
 const returnLines = (order: SquareOrder) => (order.returns ?? []).flatMap((r) => r.returnLineItems ?? []);
 
-/** Records an order's line items as a sale: FIFO stock and cost, Yastás lines and custom amounts. */
+/**
+ * Records an order's line items as a sale: FIFO stock and cost, Yastás lines and custom amounts.
+ * A failure rolls the whole order back; the worker manager logs it (failed-job.ts).
+ */
 async function recordOrderSale(
   order: SquareOrder,
   { orderId, squareId, locationId, createdAt }: { orderId: string; squareId: string; locationId: string; createdAt: Date },
 ): Promise<void> {
   const orderLineItems = order.lineItems || [];
-
   if (orderLineItems.length === 0) {
     if (returnLines(order).length > 0) return; // only took items back
-    console.error('[DEBUG] ERROR: Order has no line items');
-    throw new SaleValidationError(
-      'Order has no line items',
-      { orderId, squareId, locationId },
-    );
+    throw new SaleValidationError('Order has no line items', { orderId, squareId, locationId });
   }
 
   // Resolve each catalog item's product; an unmapped one fails the sale
@@ -567,20 +395,10 @@ async function recordOrderSale(
     }
   }
 
-  const { saleItems: lineItems, yastasLines: yastasLineItems, customLines } = toSaleLines(orderLineItems, mappings, {
-    orderId,
-    squareId,
-    locationId,
-  });
-  debugLog('[DEBUG] Total line items mapped:', lineItems.length, 'Yastás line items:', yastasLineItems.length);
-
-  // Phase 3 & 4: Create Sale Record and Process Items (all in transaction)
-  debugLog('[DEBUG] Starting transaction to create sale and process items...');
-  let saleId: string | null;
-  let itemCount: number;
+  const { saleItems: lineItems, yastasLines, customLines } = toSaleLines(orderLineItems, mappings, { orderId, squareId, locationId });
 
   try {
-    const result = await getPrisma().$transaction(
+    await getPrisma().$transaction(
       async (tx) => {
         // Sales are recorded only after the store's cutover. A refused sale fails
         // the job, which is kept for replay once the store is cut over.
@@ -598,16 +416,12 @@ async function recordOrderSale(
         // Sold before the opening count, so the count already left it off the shelf.
         if (createdAt <= cutover.cutoverDate) {
           console.warn(`[SALE_WORKER] Payment ${squareId} at ${location.name} predates its cutover; nothing recorded`);
-          return { saleId: null, itemCount: 0 };
+          return;
         }
 
-        // Yastás line items never create a Sale/SaleItem — write them to the
-        // parallel ledger instead, same transaction, no FIFO involved.
-        debugLog('[DEBUG] [TX] Processing', yastasLineItems.length, 'Yastás line items...');
-        for (const item of yastasLineItems) {
-          const wallet = await tx.yastasWallet.findUnique({
-            where: { locationId: location.id },
-          });
+        // Yastás lines never create a Sale/SaleItem — they go to the parallel ledger, no FIFO.
+        for (const item of yastasLines) {
+          const wallet = await tx.yastasWallet.findUnique({ where: { locationId: location.id } });
           if (!wallet) {
             throw new SaleValidationError(
               `No YastasWallet for location ${location.id} — run the opening-balance cutover first`,
@@ -618,7 +432,7 @@ async function recordOrderSale(
             data: {
               employeeId: item.employeeId,
               locationId: location.id,
-              squareId: squareId,
+              squareId,
               squareLineUid: item.lineUid,
               direction: 'IN',
               faceAmount: item.faceAmount,
@@ -626,83 +440,37 @@ async function recordOrderSale(
             },
           });
           await tx.walletMovement.create({
-            data: {
-              walletId: wallet.id,
-              type: 'OPERATION_DEBIT',
-              amount: item.faceAmount.neg(),
-              relatedOperationId: operation.id,
-            },
+            data: { walletId: wallet.id, type: 'OPERATION_DEBIT', amount: item.faceAmount.neg(), relatedOperationId: operation.id },
           });
-          await tx.yastasWallet.update({
-            where: { id: wallet.id },
-            data: { balance: { decrement: item.faceAmount } },
-          });
-          debugLog(`[DEBUG] [TX] ✓ YastasOperation ${operation.id} + WalletMovement recorded`);
+          await tx.yastasWallet.update({ where: { id: wallet.id }, data: { balance: { decrement: item.faceAmount } } });
         }
 
-        if (lineItems.length === 0 && customLines.length === 0) {
-          // Pure-Yastás order — no Sale/SaleItem rows at all.
-          return { saleId: null, itemCount: 0 };
-        }
+        if (lineItems.length === 0 && customLines.length === 0) return; // only Yastás lines
 
-        debugLog('[DEBUG] [TX] Creating Sale record...');
-        // Create Sale record (initial with temporary totals)
+        // Totals are set once the items' FIFO costs are known.
         const sale = await tx.sale.create({
           data: {
-            squareId: squareId,
-            locationId: location.id, // Use Location UUID, not Square location ID
-            createdAt: createdAt,
-            totalRevenue: new Prisma.Decimal(0), // Temporary
-            totalCost: new Prisma.Decimal(0), // Temporary
-            grossProfit: new Prisma.Decimal(0), // Temporary
+            squareId,
+            locationId: location.id,
+            createdAt,
+            totalRevenue: new Prisma.Decimal(0),
+            totalCost: new Prisma.Decimal(0),
+            grossProfit: new Prisma.Decimal(0),
           },
         });
-        debugLog('[DEBUG] [TX] ✓ Sale record created:', sale.id);
 
         const saleItems: SaleItemOutput[] = [];
-
-        // Process each line item
-        debugLog('[DEBUG] [TX] Processing', lineItems.length, 'line items...');
-        for (let i = 0; i < lineItems.length; i++) {
-          const lineItem = lineItems[i];
-          debugLog(`[DEBUG] [TX] Processing line item ${i + 1}/${lineItems.length}:`, {
-            productId: lineItem.productId,
-            quantitySold: lineItem.quantitySold,
-            salePrice: lineItem.salePrice.toString(),
-          });
-          try {
-            debugLog(`[DEBUG] [TX] Calling processSaleItem for line item ${i + 1}...`);
-            const saleItem = await processSaleItem(
-              sale.id,
-              lineItem.productId,
-              location.id, // Use Location UUID, not Square location ID
-              lineItem.quantitySold,
-              new Prisma.Decimal(lineItem.salePrice),
-              squareId,
-              lineItem.lineUid,
-              tx,
-            );
-            debugLog(`[DEBUG] [TX] ✓ Line item ${i + 1} processed:`, {
-              productId: saleItem.productId,
-              quantity: saleItem.quantity,
-              cost: saleItem.cost.toString(),
-            });
-
-            saleItems.push(saleItem);
-          } catch (error) {
-            // Log error with full context
-            console.error(`[DEBUG] [TX] ERROR processing line item ${i + 1}:`, {
-              error: error instanceof Error ? error.message : String(error),
-              errorStack: error instanceof Error ? error.stack : undefined,
-              productId: lineItem.productId,
-              locationId: locationId,
-              quantitySold: lineItem.quantitySold,
-              saleId: sale.id,
-            });
-
-            // Re-throw to trigger transaction rollback
-            throw error;
-          }
+        for (const lineItem of lineItems) {
+          saleItems.push(await processSaleItem(
+            sale.id,
+            lineItem.productId,
+            location.id,
+            lineItem.quantitySold,
+            new Prisma.Decimal(lineItem.salePrice),
+            squareId,
+            lineItem.lineUid,
+            tx,
+          ));
         }
 
         if (customLines.length > 0) {
@@ -711,87 +479,19 @@ async function recordOrderSale(
           });
         }
 
-        // Calculate sale totals
-        debugLog('[DEBUG] [TX] Calculating sale totals...');
-        const totals = calculateSaleTotals(saleItems, customLines);
-        debugLog('[DEBUG] [TX] Sale totals:', {
-          totalRevenue: totals.totalRevenue.toString(),
-          totalCost: totals.totalCost.toString(),
-          grossProfit: totals.grossProfit.toString(),
-        });
-
-        // Update Sale record with totals
-        debugLog('[DEBUG] [TX] Updating Sale record with totals...');
-        await tx.sale.update({
-          where: { id: sale.id },
-          data: {
-            totalRevenue: totals.totalRevenue,
-            totalCost: totals.totalCost,
-            grossProfit: totals.grossProfit,
-          },
-        });
-        debugLog('[DEBUG] [TX] ✓ Sale record updated');
-
-        return { saleId: sale.id, itemCount: saleItems.length };
+        await tx.sale.update({ where: { id: sale.id }, data: calculateSaleTotals(saleItems, customLines) });
       },
-      {
-        timeout: 30000, // 30 second timeout
-      },
+      { timeout: 30000 },
     );
-
-    saleId = result.saleId;
-    itemCount = result.itemCount;
-
-    // Phase 5: Success
-    debugLog('[DEBUG] ========================================');
-    debugLog('[DEBUG] ✓ Sale processed successfully!');
-    debugLog('[DEBUG] Sale ID:', saleId);
-    debugLog('[DEBUG] Square ID:', squareId);
-    debugLog('[DEBUG] Location ID:', locationId);
-    debugLog('[DEBUG] Item Count:', itemCount);
-    debugLog('[DEBUG] ========================================');
   } catch (error) {
-    // A setup problem found inside the transaction (e.g. no Yastás wallet) keeps its type.
-    if (error instanceof SaleValidationError) {
+    // A refusal (e.g. no Yastás wallet) and a stock shortfall keep their type.
+    if (error instanceof SaleValidationError || error instanceof InsufficientInventoryError || error instanceof DatabaseTransactionError) {
       throw error;
     }
-
-    if (error instanceof InsufficientInventoryError) {
-      console.error('Insufficient inventory error:', {
-        productId: error.productId,
-        locationId: error.locationId,
-        requested: error.requested,
-        available: error.available,
-        shortage: error.shortage,
-        squareId: squareId,
-      });
-      // Transaction will rollback entire sale (Sale + SaleItems)
-      // Optionally: could create Sale with status=PENDING_REVIEW here
-      throw error;
-    }
-
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      console.error('Database error:', {
-        error: error.message,
-        code: error.code,
-        squareId: squareId,
-      });
-      throw new DatabaseTransactionError(error.message, error);
+      throw new DatabaseTransactionError(`${error.code}: ${error.message}`, error);
     }
-
-    if (error instanceof DatabaseTransactionError) {
-      throw error;
-    }
-
-    // Unknown error
-    console.error('Unknown error processing sale:', {
-      error,
-      squareId: squareId,
-    });
-    throw new DatabaseTransactionError(
-      `Unknown error: ${error instanceof Error ? error.message : String(error)}`,
-      error,
-    );
+    throw new DatabaseTransactionError(`Unknown error: ${error instanceof Error ? error.message : String(error)}`, error);
   }
 }
 /**
