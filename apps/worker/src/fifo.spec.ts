@@ -9,7 +9,8 @@ describe('consumeBatchesFifo', () => {
   it('consumes 1 unit from the oldest lot only', () => {
     const result = consumeBatchesFifo([oldLot, newLot], 1);
     expect(result.consumedBatches).toEqual([
-      { batchId: 'lot-old', quantityConsumed: 1, costContribution: expect.anything() },
+      // Carries the lot's unit cost, so recording the consumption needs no second batch read.
+      { batchId: 'lot-old', quantityConsumed: 1, unitCost: oldLot.unitCost, costContribution: expect.anything() },
     ]);
     expect(result.totalCost.toNumber()).toBe(5);
     expect(result.remainingQuantity).toBe(0);

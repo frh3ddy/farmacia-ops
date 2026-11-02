@@ -25,3 +25,4 @@
 - ✅ [Remove Stale Docs](tasks/remove-stale-docs-epic.md) — the hand-written design docs from January and the built Yastás brief deleted; the graph and schema are the map
 - ✅ [Sales Only After Cutover](tasks/sales-only-after-cutover-epic.md) — a Square sale at a store not cut over (or an unknown one) fails for replay; one dated before the cutover is skipped
 - ✅ [Replay Failed Sales](tasks/replay-failed-sales-epic.md) — the owner sees failed Square sales on the integrity banner and replays them in one click; test Postgres takes a free port
+- ✅ [Trim the Worker](tasks/trim-worker-epic.md) — one payment shape, sale-path logging noise cut, consumption costs carried from the FIFO walk
