@@ -187,6 +187,8 @@ model Product {
   sku                  String?   @unique
   categoryId           String?
   isDiscontinued       Boolean   @default(false)
+  // Transaction that last changed what the product list shows of it; set by triggers (product_change_stamp migration). Unsupported so the client never returns it.
+  changeXid            Unsupported("xid8") @default(dbgenerated("'0'::xid8"))
   tracksInventory      Boolean   @default(true) // false only for per-employee Yastás service items — never touches Inventory/FIFO
   soldOnlyAtLocationId String? // set: sold only at this store (created in Square there alone, hidden at other stores); null: every store
   soldOnlyAtLocation   Location? @relation("ProductSoldOnlyAt", fields: [soldOnlyAtLocationId], references: [id], onDelete: SetNull)
@@ -251,6 +253,7 @@ model Product {
   createdAt DateTime @default(now())
 
   @@index([medicationDefinitionId])
+  @@index([changeXid, id])
 }
 
 enum MedicationType {
@@ -1157,4 +1160,12 @@ model IntegrityRun {
   checks        Json // { books, sales, fifo }: { status: 'ok' | 'failed', mismatches, error? }
 
   @@index([ranAt])
+}
+
+// A deleted product, kept so the phone's sync can drop it (written by a trigger; see Product.changeXid).
+model ProductRemoval {
+  productId String               @id
+  changeXid Unsupported("xid8") @default(dbgenerated("'0'::xid8"))
+
+  @@index([changeXid, productId])
 }

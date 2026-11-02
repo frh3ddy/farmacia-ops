@@ -392,6 +392,22 @@ export class ProductsController {
   }
 
   /**
+   * The phone's product sync: what changed at the store since `cursor`
+   * (none = everything), as product list rows plus removed ids. Page until
+   * hasMore is false and keep the last cursor for next time.
+   * GET /products/sync?locationId=...&cursor=...
+   * NOTE: Must be BEFORE @Get(':id') so "sync" is not captured as an id param.
+   */
+  @Get('sync')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async syncProducts(@Query('locationId') locationId: string, @Query('cursor') cursor: string, @Req() req: GuardedRequest) {
+    const targetLocationId = locationId || req.currentLocation?.locationId;
+    if (!targetLocationId) throw new BadRequestException('Indica la sucursal');
+    const result = await this.productsService.syncProducts(targetLocationId, cursor || undefined);
+    return isCashierAt(req, targetLocationId) ? { ...result, data: result.data.map(withoutCosts) } : result;
+  }
+
+  /**
    * Get single product
    * GET /products/:id
    * Roles: All authenticated users

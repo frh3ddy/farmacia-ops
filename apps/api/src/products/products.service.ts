@@ -13,6 +13,7 @@ import { normalizeSearchAliases } from './catalog-search';
 import { findSearchMatchIds, sortByIdOrder } from './product-search';
 import { productsWithoutCostSql, type ProductWithoutCost } from './products-without-cost';
 import { soldAt } from './catalog-product-view';
+import { nextSyncCursor, parseSyncCursor } from './product-sync-cursor';
 
 // Currency constant - must match Square merchant account currency
 // Square merchant is configured with USD
@@ -1232,6 +1233,44 @@ export class ProductsService {
   /** Ranked product ids for a free-text search — see product-search.ts. */
   private findSearchMatchIds(search: string, locationId?: string): Promise<string[]> {
     return findSearchMatchIds(search, (sql) => this.prisma.$queryRaw<{ id: string }[]>(sql), locationId);
+  }
+
+  /**
+   * The phone's sync: products and removals stamped after `cursor`, in stamp
+   * order, products in the list's row shape (see product-sync-cursor.ts). A
+   * changed product this store doesn't sell is reported as removed.
+   */
+  async syncProducts(locationId: string, cursor: string | undefined, limit = 200) {
+    const from = parseSyncCursor(cursor);
+    // Taken before the read: anything running now is resent from this floor.
+    const [{ xmin }] = await this.prisma.$queryRaw<{ xmin: string }[]>`SELECT pg_snapshot_xmin(pg_current_snapshot())::text AS xmin`;
+    const rows = await this.prisma.$queryRaw<{ id: string; xid: string; removed: boolean }[]>`
+      SELECT id, xid::text AS xid, removed FROM (
+        SELECT id, "changeXid" AS xid, false AS removed FROM "Product"
+        UNION ALL
+        SELECT "productId", "changeXid", true FROM "ProductRemoval"
+      ) stamped
+      WHERE (xid, id) > (${from.after.xid.toString()}::xid8, ${from.after.id})
+      ORDER BY xid, id
+      LIMIT ${limit + 1}
+    `;
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+
+    const liveIds = page.filter((r) => !r.removed).map((r) => r.id);
+    const { data } = liveIds.length
+      ? await this.getProducts(locationId, { onlyIds: liveIds, limit: liveIds.length })
+      : { data: [] };
+    const sent = new Set(data.map((p) => p.id));
+    const last = page[page.length - 1];
+
+    return {
+      success: true,
+      data,
+      removedIds: page.filter((r) => !sent.has(r.id)).map((r) => r.id),
+      cursor: nextSyncCursor(from, { snapshotXmin: BigInt(xmin), last: last ? { xid: BigInt(last.xid), id: last.id } : null, hasMore }),
+      hasMore,
+    };
   }
 
   /**
