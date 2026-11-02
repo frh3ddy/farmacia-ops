@@ -26,3 +26,5 @@
 - ✅ [Sales Only After Cutover](tasks/sales-only-after-cutover-epic.md) — a Square sale at a store not cut over (or an unknown one) fails for replay; one dated before the cutover is skipped
 - ✅ [Replay Failed Sales](tasks/replay-failed-sales-epic.md) — the owner sees failed Square sales on the integrity banner and replays them in one click; test Postgres takes a free port
 - ✅ [Trim the Worker](tasks/trim-worker-epic.md) — one payment shape, sale-path logging noise cut, consumption costs carried from the FIFO walk
+- 📋 [Yastás Float Top-Up](tasks/yastas-float-top-up-epic.md) — record a float top-up from Yastás; warn when a store's balance goes negative
+- ✅ [Product Delta Sync](tasks/product-delta-sync-epic.md) — triggers stamp each product with the transaction that changed it (raw SQL included) and mark removals; `GET /products/sync` pages them by cursor, so the phone is never stale

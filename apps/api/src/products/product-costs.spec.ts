@@ -18,25 +18,35 @@ function productRoutesAs(role: string) {
   const service = {
     getProduct: vi.fn(async () => ({ success: true, data: product() })),
     getProducts: vi.fn(async () => ({ success: true, data: [product()], count: 1 })),
+    syncProducts: vi.fn(async () => ({ success: true, data: [product()], removedIds: [], cursor: '1::', hasMore: false })),
   };
   const controller = new ProductsController(service as any, {} as any, {} as any, {} as any, {} as any);
   const req = { currentLocation: { locationId: 'centro', role } } as any;
   return {
     detail: async (): Promise<unknown> => (await controller.getProduct('p1', '', req)).data,
     list: async (): Promise<unknown> => (await controller.getProducts('', '', '', '', '', req)).data[0],
+    sync: async (): Promise<unknown> => (await controller.syncProducts('', '', req)).data[0],
   };
 }
 
 describe('ProductsController product costs', () => {
   test('a cashier', async () => {
-    const { detail, list } = productRoutesAs('CASHIER');
-    const shown = [await detail(), await list()];
+    const { detail, list, sync } = productRoutesAs('CASHIER');
+    const shown = [await detail(), await list(), await sync()];
 
     assert({
-      given: 'a cashier reading a product and the product list',
+      given: "a cashier reading a product, the product list and the phone's sync",
       should: 'show stock and selling price but no average cost, batch cost or receiving cost',
       actual: shown,
       expected: [
+        {
+          id: 'p1',
+          name: 'Paracetamol',
+          sellingPrice: 30,
+          totalInventory: 5,
+          inventories: [{ id: 'b1', quantity: 5, receivedAt: '2026-10-01' }],
+          receivings: [{ id: 'r1', quantity: 5, invoiceNumber: 'F-1', receivedAt: '2026-10-01' }],
+        },
         {
           id: 'p1',
           name: 'Paracetamol',
