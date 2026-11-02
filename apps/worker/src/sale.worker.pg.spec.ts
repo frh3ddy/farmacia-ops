@@ -547,3 +547,44 @@ describe('sales and the store cutover', () => {
     expect((await recordedAt('SQ-ORIENTE', 'p-oriente')).sales).toBe(1);
   });
 });
+
+describe('the payment a sale job carries', () => {
+  const paymentJob = (payload: object) => ({ id: 'evt-shape', data: { payload } }) as unknown as Job;
+
+  test('a payment anywhere but payload.object.payment', async () => {
+    const payment = { id: 'p-shape', location_id: 'SQ-CENTRO', order_id: 'o-shape', created_at: '2026-10-27T18:00:00Z' };
+    const errors = await Promise.all([
+      processSaleJob(paymentJob({ object: payment, _testOrderData: { id: 'o-shape', lineItems: [line('v-jarabe', '1', 2000)] } })).catch((e: Error) => e),
+      processSaleJob(paymentJob({ ...payment, _testOrderData: { id: 'o-shape', lineItems: [line('v-jarabe', '1', 2000)] } })).catch((e: Error) => e),
+    ]);
+
+    expect({
+      refused: errors.map((e) => e instanceof SaleValidationError && e.message),
+      sales: await getPrisma().sale.count({ where: { squareId: 'p-shape' } }),
+    }).toEqual({ refused: ['Sale validation error: Missing payment object in payload', 'Sale validation error: Missing payment object in payload'], sales: 0 });
+  });
+
+  test('a refused payment', async () => {
+    const error = await processSaleJob(paymentJob({ object: { payment: { id: 'p-noloc', order_id: 'o-noloc', card_details: { last_4: '4242' } } } }))
+      .then(() => undefined, (e: SaleValidationError) => e);
+
+    // failed-job.ts: a sale job holds the Square payment (card details, buyer email); never keep it.
+    expect([error?.message, error?.context]).toEqual(['Sale validation error: Payment object missing location_id', { paymentId: 'p-noloc' }]);
+  });
+});
+
+test("a sale's batch consumptions, each at its own batch's cost", async () => {
+  const prisma = getPrisma();
+  const centro = await prisma.location.findFirstOrThrow({ where: { squareId: 'SQ-CENTRO' } });
+  const suero = await prisma.product.create({ data: { name: 'Suero' } });
+  await prisma.catalogMapping.create({ data: { squareVariationId: 'v-suero', productId: suero.id } });
+  const older = await prisma.inventory.create({ data: { productId: suero.id, locationId: centro.id, quantity: 1, unitCost: 7, receivedAt: new Date('2026-09-10') } });
+  const newer = await prisma.inventory.create({ data: { productId: suero.id, locationId: centro.id, quantity: 5, unitCost: 9.5, receivedAt: new Date('2026-10-10') } });
+
+  await processSaleJob(job([line('v-suero', '3', 9000)], 'p-suero'));
+
+  const consumed = await prisma.inventoryConsumption.findMany({ where: { inventoryId: { in: [older.id, newer.id] } } });
+  expect(consumed.map((c) => [c.inventoryId, c.quantity, c.unitCost.toString(), c.totalCost.toString()]).sort()).toEqual(
+    [[older.id, 1, '7', '7'], [newer.id, 2, '9.5', '19']].sort(),
+  );
+});
