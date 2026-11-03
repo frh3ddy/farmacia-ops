@@ -1612,6 +1612,34 @@ export class ProductsService {
   }
 
   /**
+   * The product's on-hand quantity at every open store that sells it, from the
+   * app's own batches (Square's counts stopped being the truth at cutover).
+   * Quantities only — every role reads this, cashiers included. A Yastás
+   * service product has no stock, so no store is listed.
+   */
+  async getStockByStore(productId: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { soldOnlyAtLocationId: true, tracksInventory: true },
+    });
+    if (!product) throw new NotFoundException('Producto no encontrado');
+    if (!product.tracksInventory) return { success: true, data: [] };
+    const [stores, sums] = await Promise.all([
+      this.prisma.location.findMany({
+        where: { isActive: true, ...(product.soldOnlyAtLocationId && { id: product.soldOnlyAtLocationId }) },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.inventory.groupBy({ by: ['locationId'], where: { productId }, _sum: { quantity: true } }),
+    ]);
+    const onHand = new Map(sums.map((s) => [s.locationId, s._sum.quantity ?? 0]));
+    return {
+      success: true,
+      data: stores.map((s) => ({ locationId: s.id, locationName: s.name, quantity: onHand.get(s.id) ?? 0 })),
+    };
+  }
+
+  /**
    * Get single product by ID
    */
   async getProduct(productId: string, locationId?: string) {
