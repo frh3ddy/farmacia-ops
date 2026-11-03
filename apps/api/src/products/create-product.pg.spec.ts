@@ -299,3 +299,67 @@ describe('ProductsService.createProduct (Postgres)', () => {
     });
   });
 });
+
+describe('ProductsService.createProduct with a barcode', () => {
+  const upcSent = (square: ReturnType<typeof productsWithSquare>['square'], call = 0) =>
+    (square.catalog.object.upsert.mock.calls[call] as any)?.[0].object.itemData.variations[0].itemVariationData.upc;
+
+  test('a scanned barcode', async () => {
+    const { products, square } = productsWithSquare();
+    const gtin = `750${Math.floor(Math.random() * 1e10)}`.padEnd(13, '0').slice(0, 13);
+    const { product } = await create(products, { gtin });
+
+    assert({
+      given: 'a new product created with a scanned 13-digit barcode and no SKU',
+      should: "save it as the barcode, not the SKU, and send it as the Square variation's upc",
+      actual: [product?.gtin, product?.sku, upcSent(square)],
+      expected: [gtin, null, gtin],
+    });
+  });
+
+  test('a barcode another product has', async () => {
+    const { products } = productsWithSquare();
+    const gtin = '7501234567890';
+    await create(products, { gtin });
+    const status = await statusOf(create(products, { gtin }));
+
+    assert({
+      given: 'a second product created with a barcode the first one has',
+      should: 'still create it',
+      actual: status,
+      expected: 201,
+    });
+  });
+
+  test('a barcode that is not a GTIN', async () => {
+    const { products, square } = productsWithSquare();
+    const name = `MalCodigo-${Math.random()}`;
+    const statuses = [
+      await statusOf(create(products, { name, gtin: '12345' })),
+      await statusOf(create(products, { name, gtin: '75012345678AB' })),
+      await statusOf(create(products, { name, gtin: 7501234567890 as any })),
+    ];
+
+    assert({
+      given: 'a barcode of the wrong length, one with letters, and one sent as a number',
+      should: 'refuse each with a 400 before writing to Square or the database',
+      actual: [statuses, square.catalog.object.upsert.mock.calls.length, await productsNamed(name)],
+      expected: [[400, 400, 400], 0, 0],
+    });
+  });
+
+  test('a product sent to Square later', async () => {
+    const { products, square } = productsWithSquare();
+    const gtin = '03664798067460';
+    const { product } = await create(products, { gtin, syncToSquare: false });
+    await products.syncUnsyncedProducts(centro);
+    const call = square.catalog.object.upsert.mock.calls.findIndex((c: any) => c[0].object.itemData.name === product?.name);
+
+    assert({
+      given: 'a product saved with a barcode while Square was off, then swept to Square',
+      should: 'send its barcode with the new Square item',
+      actual: upcSent(square, call),
+      expected: gtin,
+    });
+  });
+});
