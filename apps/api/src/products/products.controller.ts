@@ -408,6 +408,18 @@ export class ProductsController {
   }
 
   /**
+   * The product's on-hand quantity at every store, so staff can see who has it
+   * without switching stores. Quantities only, so every role may read every
+   * store — the one exception to "non-owners see only their own store".
+   * GET /products/:id/stock
+   */
+  @Get(':id/stock')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async getStockByStore(@Param('id') id: string) {
+    return this.productsService.getStockByStore(id);
+  }
+
+  /**
    * Get single product
    * GET /products/:id
    * Roles: All authenticated users

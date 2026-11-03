@@ -54,7 +54,9 @@ accountant, cashiers), working in Spanish.
   `npm test` must pass before every push.
 - **Least access by role and location:** every endpoint is authenticated unless it is
   deliberately public (setup, health, signed webhook); non-owners only see and change
-  their own location's data.
+  their own location's data. One exception: every store's stock quantity of a product
+  (no cost, no price) is readable by all staff, so they can find stock for a transfer
+  or split a delivery without switching stores.
 - Stack: npm workspaces monorepo — NestJS api (also serves the web build), BullMQ worker,
   Vite + React 19 web, Prisma 7 on PostgreSQL, Redis. Deployed on Railway; infra in
   `.railway/railway.ts`.

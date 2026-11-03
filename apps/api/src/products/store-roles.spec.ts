@@ -1,4 +1,5 @@
 import { assert } from 'riteway/vitest';
+import { ROLES_KEY } from '../auth/guards/auth.guard';
 import { ProductsController } from './products.controller';
 
 /** A product as the service returns it, with its costs. */
@@ -67,6 +68,24 @@ describe('ProductsController at another store', () => {
       should: 'leave out the low-margin count (it comes from cost) for Norte and keep it for Centro',
       actual: [atNorte.lowMargin, atNorte.total, atCentro.lowMargin],
       expected: [undefined, 10, 3],
+    });
+  });
+});
+
+describe("ProductsController.getStockByStore", () => {
+  test("every store's stock", async () => {
+    const { service, controller } = routesForManagerAtCentroCashierAtNorte();
+    const stock = [{ locationId: 'norte', locationName: 'Norte', quantity: 4 }];
+    (service as any).getStockByStore = vi.fn(async () => ({ success: true, data: stock }));
+
+    assert({
+      given: "a cashier asking for a product's stock at every store",
+      should: 'be open to every role and return the stores the service gives',
+      actual: [
+        Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.getStockByStore),
+        (await controller.getStockByStore('p1')).data,
+      ],
+      expected: [['OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER'], stock],
     });
   });
 });
