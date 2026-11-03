@@ -89,3 +89,14 @@ describe("ProductsController.getStockByStore", () => {
     });
   });
 });
+
+describe('ProductsController.importGtin', () => {
+  test('who may run the barcode import', () => {
+    assert({
+      given: 'the one-time barcode import from Square, which writes every product',
+      should: 'be open to the owner only',
+      actual: Reflect.getMetadata(ROLES_KEY, ProductsController.prototype.importGtin),
+      expected: ['OWNER'],
+    });
+  });
+});
