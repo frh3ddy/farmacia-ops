@@ -28,7 +28,7 @@ export function planGtinImport(
  * and, with `save`, fills Product.gtin per planGtinImport.
  */
 export async function importGtinFromSquare(
-  prisma: Pick<PrismaClient, 'product' | '$transaction'>,
+  prisma: Pick<PrismaClient, 'product' | '$executeRaw'>,
   client: Pick<SquareClient, 'catalog'>,
   { save }: { save: boolean },
 ) {
@@ -51,16 +51,16 @@ export async function importGtinFromSquare(
   }
 
   const { updates, conflicts } = planGtinImport(products, upcByVariation);
-  let saved = 0;
-  if (save) {
-    for (let i = 0; i < updates.length; i += 500) {
-      const results = await prisma.$transaction(
-        // gtin: null again, so a barcode set in the app since the read is never overwritten
-        updates.slice(i, i + 500).map((u) => prisma.product.updateMany({ where: { id: u.productId, gtin: null }, data: { gtin: u.gtin } })),
-      );
-      saved += results.reduce((sum, r) => sum + r.count, 0);
-    }
-  }
+  // One statement, so all or nothing with no transaction to expire (500
+  // updates in one ran past Prisma's 5 s limit in production). "gtin" IS NULL
+  // again, so a barcode set in the app since the read is never overwritten.
+  const saved =
+    save && updates.length
+      ? await prisma.$executeRaw`
+          UPDATE "Product" SET "gtin" = u.gtin
+          FROM unnest(${updates.map((u) => u.productId)}::text[], ${updates.map((u) => u.gtin)}::text[]) AS u(id, gtin)
+          WHERE "Product"."id" = u.id AND "Product"."gtin" IS NULL`
+      : 0;
 
   const nameOf = new Map(rows.map((p) => [p.id, p.name]));
   return {
