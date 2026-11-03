@@ -33,6 +33,17 @@ A one-off script reads every mapped variation's `upc` from Square and fills `gti
 
 ---
 
+## Barcode on Create
+
+`POST /products` takes `gtin` and creates the Square variation with it as `upc`, so the register scanner finds the new item.
+
+**Requirements**:
+- Given a scanned code saved as the barcode, should send it as the new variation's `upc`
+- Given a barcode that isn't 8, 12, 13 or 14 digits, should refuse with a Spanish 400 before writing anything
+- Given a barcode another product already has, should still create it (barcodes aren't unique)
+
+---
+
 ## Edit SKU and Barcode
 
 `PATCH /products/:id` with `{ sku?, gtin? }`, owner only.
