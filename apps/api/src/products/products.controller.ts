@@ -24,6 +24,8 @@ import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
 import { AuthGuard, LocationGuard, Roles, GuardedRequest, isCashierAt, assertActingAtOwnStore } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { createSquareClient } from '../square/square-client';
+import { importGtinFromSquare } from './gtin-import';
 
 // DTOs
 /** The create body: the service's input, with the location optional (defaults to the current one). */
@@ -123,6 +125,21 @@ export class ProductsController {
         inventoryCreated: result.inventoryCreated,
       },
     };
+  }
+
+  /**
+   * The one-time barcode import from Square (see gtin-import.ts), for where
+   * SSH to Railway is blocked. Dry run unless the body is { "save": true }.
+   * Remove once the import has run.
+   * POST /products/import-gtin
+   */
+  @Post('import-gtin')
+  @Roles('OWNER')
+  @HttpCode(HttpStatus.OK)
+  async importGtin(@Body() body: { save?: boolean }) {
+    const client = createSquareClient();
+    if (!client) throw new HttpException({ success: false, message: 'Square no está configurado' }, HttpStatus.BAD_GATEWAY);
+    return { success: true, data: await importGtinFromSquare(this.prisma, client, { save: body?.save === true }) };
   }
 
   /**
