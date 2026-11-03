@@ -9,8 +9,8 @@
  *   npm run import-gtin-from-square -w apps/api            # dry run: prints what it would save
  *   npm run import-gtin-from-square -w apps/api -- --yes   # saves
  * Against production: railway ssh --service api -- npm run import-gtin-from-square -w apps/api
- * (production's database has no public port). Where SSH is blocked, the owner
- * calls POST /products/import-gtin instead.
+ * (production's database has no public port). Ran in production on
+ * 2026-11-03 through a temporary owner endpoint (SSH was blocked): 798 saved.
  */
 import path from 'path';
 import dotenv from 'dotenv';
