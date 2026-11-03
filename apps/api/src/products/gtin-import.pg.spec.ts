@@ -78,3 +78,29 @@ describe('importGtinFromSquare', () => {
     });
   });
 });
+
+describe('importGtinFromSquare on a slow database', () => {
+  test('saving more than one batch', async () => {
+    const ids: string[] = [];
+    const upcs: Record<string, string> = {};
+    for (let i = 0; i < 600; i++) {
+      ids.push(await mapped(`Lote ${i}`, `VAR-BULK-${i}`));
+      upcs[`VAR-BULK-${i}`] = `75000000${String(i).padStart(5, '0')}`;
+    }
+    // Production's transactions expired mid-save (5 s limit over the network):
+    // a save must not depend on one.
+    const expiring = new Proxy(prisma, {
+      get: (target, key) =>
+        key === '$transaction' ? () => Promise.reject(new Error('A rollback cannot be executed on an expired transaction')) : (target as any)[key],
+    });
+    const result = await importGtinFromSquare(expiring as any, squareWith(upcs).client, { save: true });
+    const saved = await prisma.product.count({ where: { id: { in: ids }, gtin: { not: null } } });
+
+    assert({
+      given: '600 barcodes to save on a database whose transactions expire',
+      should: 'save all of them',
+      actual: [saved, result.saved >= 600],
+      expected: [600, true],
+    });
+  });
+});
