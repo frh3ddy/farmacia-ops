@@ -29,3 +29,4 @@
 - ✅ [Other Stores' Stock](tasks/other-stores-stock-epic.md) — `GET /products/:id/stock`: every store's on-hand quantity for any role, quantities only; vision exception recorded
 - 📋 [Yastás Float Top-Up](tasks/yastas-float-top-up-epic.md) — record a float top-up from Yastás; warn when a store's balance goes negative
 - ✅ [Product Delta Sync](tasks/product-delta-sync-epic.md) — triggers stamp each product with the transaction that changed it (raw SQL included) and mark removals; `GET /products/sync` pages them by cursor, so the phone is never stale
+- 📋 [Product Barcode](tasks/product-barcode-epic.md) — Square's `upc` stored as `Product.gtin` and matched by the scanner; one-time import; barcode on create; owner edits SKU and barcode (Square first)

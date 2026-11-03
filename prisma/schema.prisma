@@ -185,6 +185,7 @@ model Product {
   id                   String    @id @default(uuid())
   name                 String
   sku                  String?   @unique
+  gtin                 String? // the box barcode: Square variation `upc`; not unique, Square allows duplicates
   categoryId           String?
   isDiscontinued       Boolean   @default(false)
   // Transaction that last changed what the product list shows of it; set by triggers (product_change_stamp migration). Unsupported so the client never returns it.
@@ -254,6 +255,7 @@ model Product {
 
   @@index([medicationDefinitionId])
   @@index([changeXid, id])
+  @@index([gtin])
 }
 
 enum MedicationType {
