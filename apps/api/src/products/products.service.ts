@@ -52,6 +52,7 @@ const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClie
 export interface CreateProductInput {
   name: string;
   sku?: string;
+  gtin?: string; // the box barcode (8, 12, 13 or 14 digits), sent to Square as the variation upc
   description?: string;
   sellingPrice: number; // Price in dollars (e.g., 45.50)
   costPrice?: number; // Initial cost price in dollars
@@ -318,6 +319,7 @@ export class ProductsService {
 
     const { location } = await this.assertCreatable(input);
     const trimmedSku = sku?.trim() || undefined;
+    const trimmedGtin = input.gtin?.trim() || undefined;
     const productId = clientRequestId ?? randomUUID();
 
     const labId = input.labId || (labName ? await findOrCreateLaboratory(this.prisma, labName) : undefined);
@@ -381,6 +383,7 @@ export class ProductsService {
         const squareResult = await this.createProductInSquare({
           name: resolvedName,
           sku: trimmedSku,
+          gtin: trimmedGtin,
           description,
           sellingPrice,
           onlyAtSquareLocationId: onlySquareLocation(soldAtAllLocations ? null : location),
@@ -406,6 +409,7 @@ export class ProductsService {
             id: productId,
             name: resolvedName,
             sku: trimmedSku ?? null,
+            gtin: trimmedGtin ?? null,
             squareProductName: resolvedName,
             squareDescription: description || null,
             squareVariationName: 'Regular', // Simple product
@@ -548,9 +552,11 @@ export class ProductsService {
     }
     const isBoolean = (value: unknown) => typeof value === 'boolean';
     const isText = (value: unknown) => typeof value === 'string';
+    const isGtin = (value: unknown) => typeof value === 'string' && (!value.trim() || /^(\d{8}|\d{12,14})$/.test(value.trim()));
     const isPackaging = (value: unknown) => isOneOf(Object.values(PackagingType), value);
     assertFieldTypes([
       [sku, isText, 'El SKU debe ser texto'],
+      [input.gtin, isGtin, 'El código de barras debe tener 8, 12, 13 o 14 dígitos'],
       [input.medicationType, (v) => isOneOf(medicationTypes, v), 'El tipo de medicamento no es válido'],
       [input.primaryPackaging, isPackaging, 'El empaque primario no es válido'],
       [input.secondaryPackaging, isPackaging, 'El empaque secundario no es válido'],
@@ -670,6 +676,7 @@ export class ProductsService {
         const squareResult = await this.createProductInSquare({
           name: product.name,
           sku: product.sku || undefined,
+          gtin: product.gtin || undefined,
           description: product.squareDescription || undefined,
           sellingPrice: Number(mapping.priceCents) / 100,
           onlyAtSquareLocationId: onlySquareLocation(product.soldOnlyAtLocation),
@@ -718,6 +725,7 @@ export class ProductsService {
   private async createProductInSquare(input: {
     name: string;
     sku?: string;
+    gtin?: string;
     description?: string;
     sellingPrice: number;
     // Sold only at this Square location; omitted, sold everywhere.
@@ -758,6 +766,7 @@ export class ProductsService {
                 itemId: tempItemId,
                 name: 'Regular', // Simple product - single variation
                 sku: input.sku || undefined,
+                upc: input.gtin || undefined,
                 pricingType: 'FIXED_PRICING',
                 priceMoney: {
                   amount: this.toCents(input.sellingPrice),
@@ -864,6 +873,7 @@ export class ProductsService {
           const squareResult = await this.createProductInSquare({
             name: product.name,
             sku: product.sku || undefined,
+            gtin: product.gtin || undefined,
             description: product.squareDescription || undefined,
             sellingPrice,
             onlyAtSquareLocationId: onlySquareLocation(product.soldOnlyAtLocation),
