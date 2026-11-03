@@ -1328,9 +1328,10 @@ export class ProductsService {
     let rankedIds: string[] | null = null;
 
     if (search && exact) {
-      // EXACT mode: first try exact SKU match (case-insensitive)
+      // EXACT mode: first try the SKU (case-insensitive) or the box's barcode
+      // (digits, so a plain equals that can use its index)
       const exactWhere: Prisma.ProductWhereInput = {
-        sku: { equals: search, mode: 'insensitive' },
+        OR: [{ sku: { equals: search, mode: 'insensitive' } }, { gtin: search }],
       };
 
       const exactCount = await this.prisma.product.count({ where: exactWhere });

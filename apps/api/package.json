@@ -9,6 +9,7 @@
     "start:prod": "node dist/main",
     "reset-cutover-data": "ts-node --transpile-only scripts/reset-cutover-data.ts",
     "fix-selected-cost-history-dates": "ts-node --transpile-only scripts/fix-selected-cost-history-dates.ts",
+    "import-gtin-from-square": "ts-node --transpile-only scripts/import-gtin-from-square.ts",
     "test": "tsc --noEmit -p . && vitest run"
   },
   "dependencies": {
