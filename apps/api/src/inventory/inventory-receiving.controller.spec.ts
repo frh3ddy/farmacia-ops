@@ -78,6 +78,63 @@ describe('InventoryReceivingController.receiveInventory', () => {
   });
 });
 
+describe('InventoryReceivingController.receiveInventory price at every store', () => {
+  const ownerRequest = () => ({
+    employee: { id: 'e1' },
+    currentLocation: { role: 'OWNER', locationId: 'centro' },
+    accessibleLocations: [{ locationId: 'centro', isActive: true }],
+  }) as any;
+
+  const setup = () => {
+    const service = { receiveInventory: vi.fn().mockResolvedValue({ receiving: { id: 'r1' } }) };
+    const products = new ProductsService({} as any);
+    vi.spyOn(products, 'getProduct').mockResolvedValue({ data: null } as any);
+    const updatePrice = vi.spyOn(products, 'updatePrice')
+      .mockResolvedValue({ previousPrice: 20, newPrice: 25, squareSynced: true } as any);
+    return { service, updatePrice, controller: new InventoryReceivingController(service as any, products) };
+  };
+  const body = { productId: 'p1', quantity: 2, unitCost: 5, sellingPrice: 25, applyPriceToAllLocations: true } as any;
+
+  test('the owner', async () => {
+    const { controller, updatePrice } = setup();
+    await controller.receiveInventory(body, ownerRequest());
+
+    assert({
+      given: 'the owner receiving with a new price for every store',
+      should: 'update the price at every store',
+      actual: updatePrice.mock.calls[0]?.[0]?.applyToAllLocations,
+      expected: true,
+    });
+  });
+
+  test('a manager', async () => {
+    const { controller, service, updatePrice } = setup();
+
+    assert({
+      given: 'a manager receiving with a new price for every store',
+      should: 'refuse before saving anything (only the owner prices other stores)',
+      actual: [
+        await outcome(controller.receiveInventory(body, managerRequest())),
+        service.receiveInventory.mock.calls.length,
+        updatePrice.mock.calls.length,
+      ],
+      expected: ['Solo el dueño puede cambiar el precio de otras sucursales', 0, 0],
+    });
+  });
+
+  test('without the flag', async () => {
+    const { controller, updatePrice } = setup();
+    await controller.receiveInventory({ ...body, applyPriceToAllLocations: undefined }, managerRequest());
+
+    assert({
+      given: 'a receiving with a new price for this store only',
+      should: 'update the price at this store only',
+      actual: updatePrice.mock.calls[0]?.[0]?.applyToAllLocations,
+      expected: false,
+    });
+  });
+});
+
 describe('InventoryReceivingController.retrySquareSync', () => {
   test('a retry Square refuses again', async () => {
     const service = { retrySquareSync: vi.fn().mockResolvedValue({ synced: false, error: 'fetch failed' }) };

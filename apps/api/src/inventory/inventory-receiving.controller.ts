@@ -38,6 +38,8 @@ interface ReceiveInventoryDto {
   // Optional selling price update
   sellingPrice?: number;
   syncPriceToSquare?: boolean;
+  /** The new price at every store, not only this one (owner only, like PATCH /products/:id/price). */
+  applyPriceToAllLocations?: boolean;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -69,6 +71,15 @@ export class InventoryReceivingController {
     const currentLocation = req.currentLocation;
 
     const locationId = body.locationId || currentLocation.locationId;
+
+    // Refused up front, before the receiving is saved: half-applying it would
+    // leave stock in and the price change silently dropped.
+    if (body.applyPriceToAllLocations === true && currentLocation?.role !== 'OWNER') {
+      throw new HttpException(
+        { success: false, message: 'Solo el dueño puede cambiar el precio de otras sucursales' },
+        HttpStatus.FORBIDDEN,
+      );
+    }
 
     // quantity and unitCost are checked by the service
     if (!body.productId) {
@@ -129,6 +140,7 @@ export class InventoryReceivingController {
           sellingPrice: body.sellingPrice,
           locationId,
           syncToSquare: body.syncPriceToSquare !== false, // Default true
+          applyToAllLocations: body.applyPriceToAllLocations === true,
         });
         priceUpdate = {
           previousPrice: priceResult.previousPrice,
