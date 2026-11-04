@@ -317,6 +317,18 @@ describe('ProductsService.createProduct with a barcode', () => {
     });
   });
 
+  test('a 13-digit barcode read as 14 digits', async () => {
+    const { products, square } = productsWithSquare();
+    const { product } = await create(products, { gtin: '03664798067460' });
+
+    assert({
+      given: 'a barcode read as 14 digits: a 0 before the printed 13',
+      should: 'save and send the printed 13 digits, which the register scans',
+      actual: [product?.gtin, upcSent(square)],
+      expected: ['3664798067460', '3664798067460'],
+    });
+  });
+
   test('a barcode another product has', async () => {
     const { products } = productsWithSquare();
     const gtin = '7501234567890';
@@ -350,7 +362,7 @@ describe('ProductsService.createProduct with a barcode', () => {
 
   test('a product sent to Square later', async () => {
     const { products, square } = productsWithSquare();
-    const gtin = '03664798067460';
+    const gtin = '3664798067460';
     const { product } = await create(products, { gtin, syncToSquare: false });
     await products.syncUnsyncedProducts(centro);
     const call = square.catalog.object.upsert.mock.calls.findIndex((c: any) => c[0].object.itemData.name === product?.name);
