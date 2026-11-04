@@ -52,6 +52,7 @@ A one-off script reads every mapped variation's `upc` from Square and fills `gti
 - Given a manager or cashier, should refuse with 403 (a SKU belongs to the product at every store)
 - Given a SKU another product has, should refuse with 409, code `SKU_TAKEN`, and that product's id and name
 - Given an empty string, should clear that field
+- Given a barcode of 0 plus 13 digits, should save the 13 digits, as create does
 - Given a change, should write the new `sku`/`upc` to every Square variation mapped to the product first, keeping the rest of each variation
 - Given Square refuses or can't be reached, should change nothing and say so in Spanish
 - Given a Yastás product or one not in Square, should save it in the app only

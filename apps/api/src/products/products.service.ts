@@ -319,7 +319,9 @@ export class ProductsService {
 
     const { location } = await this.assertCreatable(input);
     const trimmedSku = sku?.trim() || undefined;
-    const trimmedGtin = input.gtin?.trim() || undefined;
+    // A 0 before 13 digits is the same GTIN (a phone can read an EAN-13 as
+    // GTIN-14); keep the printed 13, which the Square register scans.
+    const trimmedGtin = input.gtin?.trim().replace(/^0(\d{13})$/, '$1') || undefined;
     const productId = clientRequestId ?? randomUUID();
 
     const labId = input.labId || (labName ? await findOrCreateLaboratory(this.prisma, labName) : undefined);
