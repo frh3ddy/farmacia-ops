@@ -20,6 +20,7 @@ model Location {
   catalogMappings CatalogMapping[]
   cutoverLocks    CutoverLock[]
   adjustments     InventoryAdjustment[]
+  stockCounts     StockCount[]
   receivings      InventoryReceiving[]
   transfersOut    Transfer[]            @relation("TransferFrom")
   transfersIn     Transfer[]            @relation("TransferTo")
@@ -248,6 +249,7 @@ model Product {
   catalogMappings      CatalogMapping[]
   costApprovals        CostApproval[]
   adjustments          InventoryAdjustment[]
+  stockCountEntries    StockCountEntry[]
   receivings           InventoryReceiving[]
   transfers            Transfer[]
 
@@ -641,6 +643,7 @@ model InventoryAdjustment {
   consumptions InventoryConsumption[]
 
   saleReturnItem SaleReturnItem?
+  stockCountEntry StockCountEntry?
 
   @@index([locationId])
   @@index([productId])
@@ -663,6 +666,7 @@ enum AdjustmentType {
   WRITE_OFF // General write-off
   OTHER // Other reason (requires notes)
   AUTO_SALE_COVER // System-created to cover a Square sale that exceeded recorded stock
+  OPENING_COUNT // Conteo inicial: fixes stock the migration loaded wrong; not a loss or gain
 }
 
 enum TransferStatus {
@@ -1170,4 +1174,45 @@ model ProductRemoval {
   changeXid Unsupported("xid8") @default(dbgenerated("'0'::xid8"))
 
   @@index([changeXid, productId])
+}
+
+/// Conteo inicial: a store-wide recount of the stock the migration loaded,
+/// started and ended by the owner. While open, counts at the store are
+/// OPENING_COUNT adjustments, which stay out of shrinkage and the P&L.
+model StockCount {
+  id             String    @id @default(uuid())
+  locationId     String
+  /// Equals locationId while the count is open, null once ended: one open count per store.
+  openLocationId String?   @unique
+  startedAt      DateTime  @default(now())
+  startedBy      String?
+  endedAt        DateTime?
+  endedBy        String?
+
+  location Location          @relation(fields: [locationId], references: [id])
+  entries  StockCountEntry[]
+
+  @@index([locationId])
+}
+
+/// A product counted in a StockCount. A recount overwrites it; a count equal to
+/// the stock is recorded too, since it's what makes the product "counted".
+model StockCountEntry {
+  id               String   @id @default(uuid())
+  stockCountId     String
+  productId        String
+  countedQuantity  Int
+  previousQuantity Int
+  /// The OPENING_COUNT adjustment, when the count changed the stock.
+  adjustmentId     String?  @unique
+  countedAt        DateTime @default(now())
+  countedBy        String?
+  /// The app's dedup key: a retry after the count committed returns it instead of counting again.
+  clientRequestId  String?  @unique
+
+  stockCount StockCount           @relation(fields: [stockCountId], references: [id])
+  product    Product              @relation(fields: [productId], references: [id])
+  adjustment InventoryAdjustment? @relation(fields: [adjustmentId], references: [id])
+
+  @@unique([stockCountId, productId])
 }
