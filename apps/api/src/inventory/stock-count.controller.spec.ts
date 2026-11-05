@@ -29,7 +29,7 @@ describe('StockCountController.recordCount', () => {
       given: 'no locationId in the body',
       should: 'count at the session’s store, as the employee',
       actual: counts.recordCount.mock.calls[0],
-      expected: ['c1', { locationId: 'lolita', productId: 'p1', countedQuantity: 3, unitCost: undefined, countedBy: 'e1', clientRequestId: undefined }],
+      expected: ['c1', { locationId: 'lolita', productId: 'p1', countedQuantity: 3, unitCost: undefined, countedBy: 'e1', clientRequestId: undefined, lots: undefined }],
     });
   });
 });
@@ -54,3 +54,41 @@ describe('StockCountController another store', () => {
   });
 });
 
+
+describe('StockCountController lots', () => {
+  test('a count with lots', async () => {
+    const counts = { recordCount: vi.fn().mockResolvedValue({ entry: {}, adjustment: null, squareSync: undefined }) };
+    const controller = new StockCountController(counts as any);
+    const req = { employee: { id: 'e1' }, currentLocation: { role: 'MANAGER', locationId: 'lolita' } } as any;
+    const lots = [{ quantity: 4, expiryDate: '2027-01-01' }];
+
+    await controller.recordCount('c1', { productId: 'p1', countedQuantity: 4, lots }, req);
+
+    assert({
+      given: 'lots in the body',
+      should: 'pass them to the count',
+      actual: counts.recordCount.mock.calls[0][1].lots,
+      expected: lots,
+    });
+  });
+});
+
+describe('StockCountController.entry', () => {
+  test("a product's count", async () => {
+    const counts = { entry: vi.fn().mockResolvedValue(null) };
+    const controller = new StockCountController(counts as any);
+    const manager = { employee: { id: 'e1' }, currentLocation: { role: 'MANAGER', locationId: 'centro' } } as any;
+
+    assert({
+      given: 'a manager reading a product not counted yet, then asking for another store',
+      should: "read the session's store and return null, open to owners and managers, and refuse another store",
+      actual: [
+        await controller.entry('c1', 'p1', undefined, manager),
+        counts.entry.mock.calls[0],
+        roles('entry'),
+        await controller.entry('c1', 'p1', 'norte', manager).then(() => 'done', (e: Error) => e.message),
+      ],
+      expected: [{ success: true, data: null }, ['c1', 'centro', 'p1'], ['OWNER', 'MANAGER'], 'Solo el dueño puede hacer esto en otras sucursales'],
+    });
+  });
+});

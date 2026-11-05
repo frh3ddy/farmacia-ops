@@ -726,7 +726,7 @@ export class InventoryAgingService {
 
   /**
    * Get products with batches expiring within a given number of days.
-   * Queries InventoryReceiving (which has expiryDate) joined with Inventory (which has remaining quantity).
+   * Reads each batch's lot (expiryDate) and remaining quantity.
    * Groups by product for a product-level view.
    * 
    * @param locationId Optional filter by location
@@ -749,25 +749,20 @@ export class InventoryAgingService {
       expiryFilter.gte = expiryDayStart(1, now);
     }
 
-    // Query receivings that have an expiry date within the threshold
-    // and whose linked inventory batch still has quantity > 0
-    const receivings = await this.prisma.inventoryReceiving.findMany({
+    // Lots live on the batch (receivings copy theirs there; a Conteo inicial sets them),
+    // so the remaining quantity is the lot's.
+    const batches = await this.prisma.inventory.findMany({
       where: {
         expiryDate: expiryFilter,
-        inventoryBatch: {
-          quantity: { gt: 0 },
-          ...(locationId && { locationId }),
-        },
+        quantity: { gt: 0 },
+        ...(locationId && { locationId }),
       },
       include: {
         product: {
           select: { id: true, name: true, sku: true, categoryId: true },
         },
-        supplier: {
-          select: { id: true, name: true },
-        },
-        inventoryBatch: {
-          select: { id: true, quantity: true, unitCost: true, receivedAt: true },
+        createdByReceiving: {
+          select: { id: true, supplier: { select: { name: true } } },
         },
       },
       orderBy: {
@@ -781,32 +776,31 @@ export class InventoryAgingService {
       batches: ExpiringBatchInfo[];
     }>();
 
-    for (const rec of receivings) {
-      const batch = rec.inventoryBatch;
-      const daysUntilExpiry = expiryDaysAway(rec.expiryDate!, now);
+    for (const batch of batches) {
+      const daysUntilExpiry = expiryDaysAway(batch.expiryDate!, now);
       const isExpired = daysUntilExpiry <= 0;
       const cashValue = new Decimal(batch.quantity).mul(batch.unitCost);
 
       const batchInfo: ExpiringBatchInfo = {
         batchId: batch.id,
-        receivingId: rec.id,
+        receivingId: batch.createdByReceiving?.id ?? null,
         quantity: batch.quantity,
         unitCost: batch.unitCost,
         cashValue,
-        expiryDate: rec.expiryDate!,
+        expiryDate: batch.expiryDate!,
         daysUntilExpiry,
         isExpired,
-        batchNumber: rec.batchNumber,
-        supplierName: rec.supplier?.name ?? null,
+        batchNumber: batch.lotNumber,
+        supplierName: batch.createdByReceiving?.supplier?.name ?? null,
         receivedAt: batch.receivedAt,
       };
 
-      const existing = productMap.get(rec.productId);
+      const existing = productMap.get(batch.productId);
       if (existing) {
         existing.batches.push(batchInfo);
       } else {
-        productMap.set(rec.productId, {
-          product: rec.product,
+        productMap.set(batch.productId, {
+          product: batch.product,
           batches: [batchInfo],
         });
       }
@@ -871,7 +865,7 @@ export class InventoryAgingService {
 
 export interface ExpiringBatchInfo {
   batchId: string;
-  receivingId: string;
+  receivingId: string | null; // null for a lot set by a Conteo inicial
   quantity: number;
   unitCost: Decimal;
   cashValue: Decimal;

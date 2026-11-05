@@ -25,6 +25,14 @@ describe('booksMismatches', () => {
     expect(booksMismatches(balancedBooks())).toEqual([]);
   });
 
+  it('given a batch that gave units to lot pieces split from it, reports nothing', () => {
+    const books = balancedBooks();
+    books.batches[0].quantity = 3; // received 10, sold 4, 3 moved to a lot piece by a Conteo inicial
+    books.batches[0].splitOut = 3;
+
+    expect(booksMismatches(books)).toEqual([]);
+  });
+
   it('given a batch whose stock changed without a recorded movement, reports the batch', () => {
     const books = balancedBooks();
     books.batches[0].quantity = 5; // created 10 − consumed 4 should leave 6

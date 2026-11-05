@@ -418,8 +418,8 @@ export class InventoryReportsService {
           receivedAt: b.receivedAt,
           age: ageDays,
           source: b.source ?? null,           // "PURCHASE", "OPENING_BALANCE", "ADJUSTMENT"
-          batchNumber: receiving?.batchNumber ?? null,
-          expiryDate: receiving?.expiryDate ?? null,
+          batchNumber: b.lotNumber, // the lot is the batch's (a Conteo inicial can set it)
+          expiryDate: b.expiryDate,
           manufacturingDate: receiving?.manufacturingDate ?? null,
           invoiceNumber: receiving?.invoiceNumber ?? null,
           supplierId: receiving?.supplier?.id ?? null,
@@ -1127,9 +1127,10 @@ export class InventoryReportsService {
     const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
     const currentValue = batch.unitCost.mul(batch.quantity);
     const receiving = batch.createdByReceiving;
+    // Less what lot pieces split off (tasks/opening-count-lots-epic.md).
     const originalQuantity = receiving
-      ? receiving.quantity
-      : (batch.createdByAdjustment?.quantity ?? batch.quantity);
+      ? receiving.quantity - batch.splitOut
+      : batch.createdByAdjustment ? batch.createdByAdjustment.quantity - batch.splitOut : batch.quantity;
     const totalConsumed = batch.consumptions.reduce(
       (sum, c) => sum + c.quantity,
       0,

@@ -248,3 +248,176 @@ describe('StockCountService.zero with a stale list', () => {
     });
   });
 });
+
+describe('StockCountService lots', () => {
+  /** A store with an open count and a product in two batches: 3 at $10 (oldest) and 7 at $20. */
+  async function twoBatches() {
+    const locationId = await store();
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    await prisma.inventory.createMany({
+      data: [
+        { productId, locationId, quantity: 3, unitCost: 10, receivedAt: new Date('2026-10-01') },
+        { productId, locationId, quantity: 7, unitCost: 20, receivedAt: new Date('2026-10-02') },
+      ],
+    });
+    const { id } = await counts.start(locationId, 'owner');
+    return { locationId, productId, id };
+  }
+  /** Batches with stock in FIFO order, as [units, unit cost, caducidad day, lote]. */
+  const fifo = async (productId: string, locationId: string) =>
+    (await prisma.inventory.findMany({ where: { productId, locationId, quantity: { gt: 0 } }, orderBy: { receivedAt: 'asc' } })).map((b) => [
+      b.quantity,
+      Number(b.unitCost),
+      b.expiryDate?.toISOString().slice(0, 10) ?? null,
+      b.lotNumber,
+    ]);
+  const refusal = (p: Promise<unknown>) => p.then(() => 'done', (e: any) => [e.getStatus?.(), e.getResponse?.().code ?? e.message]);
+
+  test('lots for the whole count', async () => {
+    const { locationId, productId, id } = await twoBatches();
+    await counts.recordCount(id, {
+      locationId, productId, countedQuantity: 10, countedBy: 'e1',
+      lots: [{ quantity: 6, expiryDate: '2027-03-01' }, { quantity: 4, expiryDate: '2027-01-01', batchNumber: 'A12' }],
+    });
+
+    assert({
+      given: 'a count of 10 matching stock, with lots 4 (ene-2027, A12) and 6 (mar-2027)',
+      should: 'split the batches so FIFO sells the soonest caducidad first, every unit keeping its cost',
+      actual: [await fifo(productId, locationId), await prisma.inventoryAdjustment.count({ where: { productId } })],
+      expected: [
+        [
+          [3, 10, '2027-01-01', 'A12'],
+          [1, 20, '2027-01-01', 'A12'],
+          [6, 20, '2027-03-01', null],
+        ],
+        0,
+      ],
+    });
+  });
+
+  test('lots for part of the count', async () => {
+    const { locationId, productId, id } = await twoBatches();
+    await prisma.inventory.updateMany({ where: { productId }, data: { expiryDate: new Date('2026-12-01'), lotNumber: 'OLD' } });
+    await counts.recordCount(id, { locationId, productId, countedQuantity: 8, countedBy: 'e1', lots: [{ quantity: 4, expiryDate: '2027-05-01', batchNumber: 'B7' }] });
+
+    assert({
+      given: 'a count of 8 at 10 with one lot of 4, over stock that had a lot',
+      should: 'take the 2 from the oldest batch, put 4 in lot B7 and leave the rest without lot info',
+      actual: await fifo(productId, locationId),
+      expected: [
+        [1, 10, '2027-05-01', 'B7'],
+        [3, 20, '2027-05-01', 'B7'],
+        [4, 20, null, null],
+      ],
+    });
+  });
+
+  test('no lots sent', async () => {
+    const { locationId, productId, id } = await twoBatches();
+    await prisma.inventory.updateMany({ where: { productId }, data: { lotNumber: 'OLD' } });
+    await counts.recordCount(id, { locationId, productId, countedQuantity: 10, countedBy: 'e1' });
+
+    assert({
+      given: 'a count with no lots',
+      should: 'leave the lots as they are',
+      actual: await prisma.inventory.count({ where: { productId, lotNumber: 'OLD' } }),
+      expected: 2,
+    });
+  });
+
+  test('lots that are not valid', async () => {
+    const { locationId, productId, id } = await twoBatches();
+    const send = (lots: any[], countedQuantity = 10) => refusal(counts.recordCount(id, { locationId, productId, countedQuantity, countedBy: 'e1', lots }));
+
+    assert({
+      given: 'lots over the count, a lot with a lote but no caducidad, a lot of 0, and a caducidad that is not a date',
+      should: 'refuse each with a 400 (over the count with code LOTS_TOTAL_MISMATCH) and change nothing',
+      actual: [
+        await send([{ quantity: 11, expiryDate: '2027-01-01' }]),
+        (await send([{ quantity: 2, batchNumber: 'A' }]))[0],
+        (await send([{ quantity: 0, expiryDate: '2027-01-01' }]))[0],
+        (await send([{ quantity: 2, expiryDate: 'enero' }]))[0],
+        await stock(productId, locationId),
+        await prisma.stockCountEntry.count({ where: { stockCountId: id } }),
+      ],
+      expected: [[400, 'LOTS_TOTAL_MISMATCH'], 400, 400, 400, 10, 0],
+    });
+  });
+
+  test('a retried count with lots', async () => {
+    const { locationId, productId, id } = await twoBatches();
+    const request = { locationId, productId, countedQuantity: 10, countedBy: 'e1', clientRequestId: `r-${Math.random()}`, lots: [{ quantity: 4, expiryDate: '2027-01-01', batchNumber: 'A12' }] };
+    await counts.recordCount(id, request);
+    const rows = await prisma.inventory.count({ where: { productId } });
+    await counts.recordCount(id, request);
+
+    assert({
+      given: 'the same count with lots sent twice',
+      should: 'split the batches once',
+      actual: await prisma.inventory.count({ where: { productId } }),
+      expected: rows,
+    });
+  });
+
+  test("a product's lots for the count form", async () => {
+    const locationId = await store();
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    const at = (receivedAt: string, quantity: number, expiryDate: string | null, lotNumber: string | null) =>
+      ({ productId, locationId, quantity, unitCost: 10, receivedAt: new Date(receivedAt), expiryDate: expiryDate && new Date(expiryDate), lotNumber });
+    await prisma.inventory.createMany({
+      data: [
+        at('2026-10-01', 5, null, null), // migration stock: no lot
+        at('2026-10-02', 2, '2027-03-01T18:00:00Z', 'B'),
+        at('2026-10-03', 3, '2027-03-01T00:00:00Z', 'B'), // same lot, stored at another hour
+        at('2026-10-04', 4, '2027-01-01T18:00:00Z', null),
+        at('2026-10-05', 1, null, 'SIN-CAD'),
+        at('2026-10-06', 0, '2026-12-01T18:00:00Z', 'SOLD'), // nothing left
+      ],
+    });
+
+    assert({
+      given: 'batches with and without lots, two of the same lot, and one sold out',
+      should: 'return the lots with units left, merged, soonest caducidad first and no caducidad last',
+      actual: await counts.lots(productId, locationId),
+      expected: [
+        { quantity: 4, expiryDate: '2027-01-01', batchNumber: null },
+        { quantity: 5, expiryDate: '2027-03-01', batchNumber: 'B' },
+        { quantity: 1, expiryDate: null, batchNumber: 'SIN-CAD' },
+      ],
+    });
+  });
+});
+
+describe('StockCountService.entry', () => {
+  test("a product's count in the session", async () => {
+    const locationId = await store();
+    const counted = await product(locationId, 8);
+    const notCounted = await product(locationId, 2);
+    const { id: employeeId } = await prisma.employee.create({ data: { name: 'Fredy' } });
+    const { id } = await counts.start(locationId, 'owner');
+    await counts.recordCount(id, { locationId, productId: counted, countedQuantity: 10, countedBy: employeeId });
+
+    const entry = await counts.entry(id, locationId, counted);
+
+    assert({
+      given: 'one product counted in the session and one not',
+      should: 'return the count, when and who for the first, and null for the second',
+      actual: [entry?.countedQuantity, entry?.countedAt instanceof Date, entry?.countedByName, await counts.entry(id, locationId, notCounted)],
+      expected: [10, true, 'Fredy', null],
+    });
+  });
+
+  test('a session at another store', async () => {
+    const locationId = await store();
+    const productId = await product(locationId, 8);
+    const { id } = await counts.start(locationId, 'owner');
+    await counts.recordCount(id, { locationId, productId, countedQuantity: 8, countedBy: 'e1' });
+
+    assert({
+      given: "a read naming another store than the session's",
+      should: 'return null',
+      actual: await counts.entry(id, await store(), productId),
+      expected: null,
+    });
+  });
+});

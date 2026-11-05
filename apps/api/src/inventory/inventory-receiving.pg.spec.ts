@@ -243,3 +243,21 @@ describe('InventoryReceivingService.receiveInventory where the product is sold (
     });
   });
 });
+
+describe('InventoryReceivingService.receiveInventory lot', () => {
+  test('a receiving with caducidad and lote', async () => {
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Lolita' } });
+    await prisma.cutoverLock.create({ data: { locationId, cutoverDate: new Date('2026-09-01') } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+
+    await service.receiveInventory({ locationId, productId, quantity: 5, unitCost: 2, expiryDate: new Date('2027-01-01'), batchNumber: 'A12' });
+    const batch = await prisma.inventory.findFirstOrThrow({ where: { productId } });
+
+    assert({
+      given: 'stock received with caducidad ene-2027 and lote A12',
+      should: 'carry both on the batch, so they shrink as it sells',
+      actual: [batch.expiryDate?.toISOString().slice(0, 10), batch.lotNumber],
+      expected: ['2027-01-01', 'A12'],
+    });
+  });
+});
