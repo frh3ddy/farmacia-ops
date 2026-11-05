@@ -194,6 +194,9 @@ export class StockCountService {
 
   /** Each product counted as 0, one at a time, so one failure doesn't stop the rest. */
   async zero(id: string, locationId: string, productIds: string[], countedBy: string) {
+    // Each product is a transaction plus a Square call: a store's whole list in one
+    // request would outlast the app's 60 s timeout while the server kept zeroing.
+    if (productIds.length > 100) throw new BadRequestException('Envía como máximo 100 productos por solicitud');
     const results: Array<{ productId: string; ok: boolean; code?: 'ALREADY_COUNTED'; error?: string }> = [];
     for (const productId of productIds) {
       try {
