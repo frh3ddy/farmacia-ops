@@ -9,7 +9,7 @@ type Where = { productId: string; locationId: string };
 
 export type Books = {
   /** createdQuantity: what the receiving or adjustment that created the batch added; null for opening stock. */
-  batches: Array<Where & { id: string; quantity: number; createdQuantity: number | null }>;
+  batches: Array<Where & { id: string; quantity: number; createdQuantity: number | null; splitOut?: number }>; // splitOut: units given to lot pieces
   negativeAdjustments: Array<Where & { id: string; quantity: number }>;
   saleItems: Array<Where & { id: string; quantity: number }>;
   consumedByBatch: Record<string, number>;
@@ -36,7 +36,7 @@ export function booksMismatches(books: Books): BooksMismatch[] {
     if (batch.createdQuantity === null) {
       if (batch.quantity < 0) report('openingBatch', batch, 0, batch.quantity);
     } else {
-      report('batch', batch, batch.createdQuantity - (books.consumedByBatch[batch.id] ?? 0), batch.quantity);
+      report('batch', batch, batch.createdQuantity - (books.consumedByBatch[batch.id] ?? 0) - (batch.splitOut ?? 0), batch.quantity);
     }
   }
   for (const adjustment of books.negativeAdjustments) {
@@ -61,6 +61,7 @@ export async function loadBooks(prisma: PrismaClient): Promise<Books> {
         productId: true,
         locationId: true,
         quantity: true,
+        splitOut: true,
         createdByReceiving: { select: { quantity: true } },
         // A transfer receipt's batch is created by its TRANSFER_IN adjustment
         // (TransferLine also points at it), so it's counted once, here.
@@ -89,6 +90,7 @@ export async function loadBooks(prisma: PrismaClient): Promise<Books> {
       locationId: b.locationId,
       quantity: b.quantity,
       createdQuantity: b.createdByReceiving?.quantity ?? b.createdByAdjustment?.quantity ?? null,
+      splitOut: b.splitOut,
     })),
     negativeAdjustments,
     saleItems: saleItems.map((i) => ({ id: i.id, productId: i.productId, locationId: i.sale.locationId, quantity: i.quantity })),

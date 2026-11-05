@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard, LocationGuard, Roles, RoleGuardedRequest, assertActingAtOwnStore } from '../auth/guards/auth.guard';
 import { readableSync } from '../square/square-sync-reason';
-import { StockCountService } from './stock-count.service';
+import { CountLotInput, StockCountService } from './stock-count.service';
 
 /** The store asked for (LocationGuard checked access), else the session's. */
 const storeOf = (req: { currentLocation: { locationId: string } }, locationId?: string) => locationId || req.currentLocation.locationId;
@@ -38,7 +38,7 @@ export class StockCountController {
   @Roles('OWNER', 'MANAGER')
   async recordCount(
     @Param('id') id: string,
-    @Body() body: { locationId?: string; productId: string; countedQuantity: number; unitCost?: number; clientRequestId?: string },
+    @Body() body: { locationId?: string; productId: string; countedQuantity: number; unitCost?: number; clientRequestId?: string; lots?: CountLotInput[] },
     @Req() req: RoleGuardedRequest,
   ) {
     const store = storeOf(req, body?.locationId);
@@ -50,8 +50,22 @@ export class StockCountController {
       unitCost: body.unitCost,
       countedBy: req.employee.id,
       clientRequestId: body.clientRequestId,
+      lots: body.lots,
     });
     return { success: true, data: { ...result, squareSync: result.squareSync && readableSync(result.squareSync) } };
+  }
+
+  @Get(':id/entries')
+  @Roles('OWNER', 'MANAGER')
+  async entry(
+    @Param('id') id: string,
+    @Query('productId') productId: string,
+    @Query('locationId') locationId: string | undefined,
+    @Req() req: RoleGuardedRequest,
+  ) {
+    const store = storeOf(req, locationId);
+    assertActingAtOwnStore(req, store);
+    return { success: true, data: await this.counts.entry(id, store, productId) };
   }
 
   @Get(':id/uncounted')

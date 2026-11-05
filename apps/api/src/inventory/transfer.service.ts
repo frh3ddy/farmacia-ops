@@ -192,7 +192,7 @@ export class TransferService {
   async receive(input: ReceiveTransferInput) {
     const transfer = await this.prisma.transfer.findUnique({
       where: { id: input.transferId },
-      include: { lines: true },
+      include: { lines: { include: { sourceInventory: { select: { expiryDate: true, lotNumber: true } } } } },
     });
     if (!transfer) {
       throw new NotFoundException(`Transfer ${input.transferId} not found`);
@@ -250,6 +250,8 @@ export class TransferService {
             unitCost: line.unitCost,
             receivedAt: line.originalReceivedAt,
             source: 'ADJUSTMENT',
+            expiryDate: line.sourceInventory.expiryDate,
+            lotNumber: line.sourceInventory.lotNumber,
           },
         });
 

@@ -432,6 +432,11 @@ model Inventory {
   source      String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"
   costSource  String? // "SQUARE_COST", "DESCRIPTION", "MANUAL_INPUT", "AVERAGE_COST"
   migrationId String? // Reference to cutover
+  // The lot these units are: from a receiving, or set by a Conteo inicial (tasks/opening-count-lots-epic.md).
+  expiryDate DateTime?
+  lotNumber  String?
+  // Units this batch gave to lot pieces split from it (same cost); the books check subtracts them.
+  splitOut   Int       @default(0)
 
   location Location @relation(fields: [locationId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])

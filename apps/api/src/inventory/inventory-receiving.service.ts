@@ -208,6 +208,8 @@ export class InventoryReceivingService {
           receivedAt: new Date(),
           unitCost: new Prisma.Decimal(input.unitCost),
           source: 'PURCHASE',
+          expiryDate: input.expiryDate,
+          lotNumber: input.batchNumber,
         },
       });
 
