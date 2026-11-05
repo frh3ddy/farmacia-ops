@@ -160,6 +160,46 @@ describe('StockCountService.recordCount', () => {
   });
 });
 
+describe('A Corrección de Conteo during a Conteo inicial', () => {
+  test('sent by a client that does not know the count is open', async () => {
+    const locationId = await store();
+    const productId = await product(locationId, 8);
+    await counts.start(locationId, 'owner');
+    const adjustments = new InventoryAdjustmentService(prisma);
+
+    assert({
+      given: 'a count correction (by total or by change) at a store with an open Conteo inicial',
+      should: 'refuse both, so no migration fix lands in shrinkage, and leave the stock',
+      actual: [
+        await outcome(adjustments.createAdjustment({ locationId, productId, type: 'COUNT_CORRECTION', countedQuantity: 5 } as any)),
+        await outcome(adjustments.createAdjustment({ locationId, productId, type: 'COUNT_CORRECTION', quantity: -3 })),
+        await stock(productId, locationId),
+      ],
+      expected: [
+        'Hay un conteo inicial abierto en esta sucursal; registra el conteo ahí',
+        'Hay un conteo inicial abierto en esta sucursal; registra el conteo ahí',
+        8,
+      ],
+    });
+  });
+});
+
+describe('StockCountService.zero', () => {
+  test('more products than one request may zero', async () => {
+    const locationId = await store();
+    const productId = await product(locationId, 2);
+    const { id } = await counts.start(locationId, 'owner');
+    const ids = [productId, ...Array.from({ length: 100 }, (_, i) => `missing-${i}`)];
+
+    assert({
+      given: '101 products in one "Poner en 0" request',
+      should: 'refuse it before zeroing any, so the app sends them in chunks',
+      actual: [await outcome(counts.zero(id, locationId, ids, 'owner')), await stock(productId, locationId)],
+      expected: ['Envía como máximo 100 productos por solicitud', 2],
+    });
+  });
+});
+
 describe('StockCountService.uncounted and zero', () => {
   test('one product counted, two not', async () => {
     const locationId = await store();

@@ -202,6 +202,7 @@ export class InventoryAdjustmentService {
     if ((input.reason?.length ?? 0) > 500 || (input.notes?.length ?? 0) > 500) {
       throw new BadRequestException('El motivo y las notas deben tener 500 caracteres o menos');
     }
+    await this.refuseCorrectionDuringOpeningCount(input, db);
 
     // Idempotent replay: the offline-queue (iOS) may retry a write whose
     // original response was lost after it actually committed. Recognize the
@@ -277,6 +278,7 @@ export class InventoryAdjustmentService {
     if (!Number.isInteger(countedQuantity) || countedQuantity < 0) {
       throw new BadRequestException('El conteo debe ser un número entero de cero o más');
     }
+    await this.refuseCorrectionDuringOpeningCount(input, tx ?? this.prisma);
     if (rest.clientRequestId) {
       const existing = await this.findByClientRequestId(rest);
       if (existing) return existing;
@@ -575,11 +577,25 @@ export class InventoryAdjustmentService {
    * it would be counted in the stock read here and again when it decrements.
    */
   async lockedStock(tx: Prisma.TransactionClient, productId: string, locationId: string): Promise<number> {
+    // Row locks alone miss a batch another count inserted while this one waited
+    // (and lock nothing at 0 stock), so two counts would both add: counts of the
+    // same product at the same store take turns on this lock.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`count:${productId}:${locationId}`}))`;
     const batches = await tx.$queryRaw<Array<{ quantity: number }>>`
       SELECT quantity FROM "Inventory"
       WHERE "productId" = ${productId} AND "locationId" = ${locationId} AND quantity > 0
       FOR UPDATE`;
     return batches.reduce((sum, b) => sum + b.quantity, 0);
+  }
+
+  /**
+   * A client that doesn't know about an open Conteo inicial would book a
+   * migration fix as shrinkage; counts at that store go to the open count instead.
+   */
+  private async refuseCorrectionDuringOpeningCount(input: { type: AdjustmentType | string; locationId: string }, db: Prisma.TransactionClient | PrismaService) {
+    if (input.type === 'COUNT_CORRECTION' && (await db.stockCount.findUnique({ where: { openLocationId: input.locationId } }))) {
+      throw new ConflictException('Hay un conteo inicial abierto en esta sucursal; registra el conteo ahí');
+    }
   }
 
   /** Runs `fn` in the caller's transaction when there is one, else in a new one. */
