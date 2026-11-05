@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { businessDay } from './business-date';
 import { Prisma } from '@prisma/client';
-import { SHRINKAGE_RECOVERY_TYPES, STOCK_MOVE_TYPES } from './adjustment-types';
+import { NON_SHRINKAGE_TYPES, SHRINKAGE_RECOVERY_TYPES } from './adjustment-types';
 
 // ============================================================================
 // Types
@@ -648,7 +648,7 @@ export class InventoryReportsService {
 
     const adjustments = await this.prisma.inventoryAdjustment.findMany({
       where: {
-        type: { notIn: STOCK_MOVE_TYPES },
+        type: { notIn: NON_SHRINKAGE_TYPES },
         ...(locationId && { locationId }),
         ...((startDate || endDate) && {
           effectiveDate: {
@@ -960,7 +960,7 @@ export class InventoryReportsService {
 
     const [adjustmentLosses, adjustmentRecoveries] = await Promise.all([
       this.prisma.inventoryAdjustment.aggregate({
-        where: { ...adjustmentWhere, quantity: { lt: 0 }, type: { notIn: STOCK_MOVE_TYPES } },
+        where: { ...adjustmentWhere, quantity: { lt: 0 }, type: { notIn: NON_SHRINKAGE_TYPES } },
         _sum: { totalCost: true },
       }),
       this.prisma.inventoryAdjustment.aggregate({

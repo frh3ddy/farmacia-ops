@@ -128,7 +128,8 @@ export class InventoryAdjustmentService {
       // Square's state transitions (Inventory API "Supported state transitions"):
       // - UNLINKED_RETURN → IN_STOCK: a customer return
       // - NONE → IN_STOCK: any other stock added (found, loose units, count up)
-      // - IN_STOCK → NONE: boxes broken into loose units — removed from
+      // - IN_STOCK → NONE: boxes broken into loose units, or a Conteo inicial
+      //   down (migration stock that was never there) — removed from
       //   tracking, not lost, so they stay out of Square's waste reports
       // - IN_STOCK → WASTE: damage, theft, expired, write-off, count down
       let fromState: 'NONE' | 'IN_STOCK' | 'UNLINKED_RETURN';
@@ -138,7 +139,7 @@ export class InventoryAdjustmentService {
         toState = 'IN_STOCK';
       } else {
         fromState = 'IN_STOCK';
-        toState = adjustmentType === 'BREAK_BULK_OUT' ? 'NONE' : 'WASTE';
+        toState = adjustmentType === 'BREAK_BULK_OUT' || adjustmentType === 'OPENING_COUNT' ? 'NONE' : 'WASTE';
       }
 
       this.logger.log(`[SQUARE_SYNC] Syncing adjustment: catalogObjectId=${catalogObjectId}, locationId=${location.squareId}, quantity=${Math.abs(quantityChange)}, ${fromState} → ${toState}, type=${adjustmentType}`);
@@ -282,14 +283,7 @@ export class InventoryAdjustmentService {
     }
 
     const result = await this.inTransaction(tx, async (tx) => {
-      // Locks this product's batches at the store until the count commits, so a
-      // sale waits instead of landing between this read and the write, where it
-      // would be counted in the stock read here and again when it decrements.
-      const batches = await tx.$queryRaw<Array<{ quantity: number }>>`
-        SELECT quantity FROM "Inventory"
-        WHERE "productId" = ${rest.productId} AND "locationId" = ${rest.locationId} AND quantity > 0
-        FOR UPDATE`;
-      const change = countedQuantity - batches.reduce((sum, b) => sum + b.quantity, 0);
+      const change = countedQuantity - (await this.lockedStock(tx, rest.productId, rest.locationId));
       if (change === 0) {
         throw new BadRequestException('El conteo coincide con el inventario actual; no hay nada que ajustar');
       }
@@ -574,6 +568,19 @@ export class InventoryAdjustmentService {
   // --------------------------------------------------------------------------
   // Helper methods
   // --------------------------------------------------------------------------
+
+  /**
+   * A product's stock at a store, locking its batches until `tx` commits, so a
+   * sale waits instead of landing between this read and the count's write, where
+   * it would be counted in the stock read here and again when it decrements.
+   */
+  async lockedStock(tx: Prisma.TransactionClient, productId: string, locationId: string): Promise<number> {
+    const batches = await tx.$queryRaw<Array<{ quantity: number }>>`
+      SELECT quantity FROM "Inventory"
+      WHERE "productId" = ${productId} AND "locationId" = ${locationId} AND quantity > 0
+      FOR UPDATE`;
+    return batches.reduce((sum, b) => sum + b.quantity, 0);
+  }
 
   /** Runs `fn` in the caller's transaction when there is one, else in a new one. */
   private inTransaction<T>(tx: Prisma.TransactionClient | undefined, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {

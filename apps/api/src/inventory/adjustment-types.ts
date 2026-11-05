@@ -24,6 +24,12 @@ export const USER_ADJUSTMENT_TYPES: AdjustmentType[] = [
 export const STOCK_MOVE_TYPES: AdjustmentType[] = ['TRANSFER_OUT', 'TRANSFER_IN', 'BREAK_BULK_OUT', 'BREAK_BULK_IN'];
 
 /**
+ * Left out of shrinkage and the loss/gain report: stock moves, plus the Conteo
+ * inicial, which fixes stock the migration loaded wrong rather than losing or finding any.
+ */
+export const NON_SHRINKAGE_TYPES: AdjustmentType[] = [...STOCK_MOVE_TYPES, 'OPENING_COUNT'];
+
+/**
  * Gains that undo shrinkage: stock written off or miscounted that turned up again.
  * RETURN (customer stock back) and AUTO_SALE_COVER (stock never received in the
  * app) are not recovered losses, so they stay out.

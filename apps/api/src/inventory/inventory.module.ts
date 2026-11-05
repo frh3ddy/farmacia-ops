@@ -13,6 +13,8 @@ import { InventoryReportsController } from './inventory-reports.controller';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ExpenseController } from './expense.controller';
 import { ExpenseService } from './expense.service';
+import { StockCountController } from './stock-count.controller';
+import { StockCountService } from './stock-count.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { ProductsModule } from '../products/products.module';
@@ -27,6 +29,7 @@ import { ProductsModule } from '../products/products.module';
     InventoryReceivingController,
     InventoryReportsController,
     ExpenseController,
+    StockCountController,
   ],
   providers: [
     InventoryReconciliationService,
@@ -36,6 +39,7 @@ import { ProductsModule } from '../products/products.module';
     InventoryReceivingService,
     InventoryReportsService,
     ExpenseService,
+    StockCountService,
     PrismaService,
   ],
   exports: [
