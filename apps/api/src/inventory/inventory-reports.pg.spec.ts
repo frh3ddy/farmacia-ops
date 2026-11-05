@@ -252,3 +252,24 @@ describe('relabel of the 2026-11-04 Lolita migration fixes', () => {
     });
   });
 });
+
+describe('InventoryReportsService valuation lots', () => {
+  test('a lot set by a Conteo inicial', async () => {
+    const reports = new InventoryReportsService(prisma);
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Lolita' } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    await prisma.inventory.create({
+      data: { productId, locationId, quantity: 4, unitCost: 10, receivedAt: new Date('2026-10-01'), expiryDate: new Date('2027-01-01T18:00:00Z'), lotNumber: 'A12' },
+    });
+
+    const report: any = await reports.getInventoryValuationReport({ locationId, productId });
+    const [batch] = report.byProduct[0].batches;
+
+    assert({
+      given: 'a batch with a lot and no receiving',
+      should: 'show its caducidad and lote',
+      actual: [batch.expiryDate?.toISOString().slice(0, 10), batch.batchNumber],
+      expected: ['2027-01-01', 'A12'],
+    });
+  });
+});

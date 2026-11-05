@@ -304,3 +304,20 @@ describe('TransferService.getTransfers (Postgres)', () => {
     });
   });
 });
+
+describe('TransferService lots', () => {
+  test('a lot moved to another store', async () => {
+    const { transfers, productId } = await transferSetup();
+    await prisma.inventory.updateMany({ where: { productId }, data: { expiryDate: new Date('2027-01-01'), lotNumber: 'A12' } });
+    const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 3 });
+    await transfers.receive({ transferId: transfer.id, lineReceipts: [{ transferLineId: transfer.lines[0].id, quantityReceived: 3 }] });
+    const atNorte = await prisma.inventory.findFirstOrThrow({ where: { productId, locationId: norte } });
+
+    assert({
+      given: '3 units of lot A12 (ene-2027) received at Norte',
+      should: 'carry the caducidad and lote on the new batch',
+      actual: [atNorte.expiryDate?.toISOString().slice(0, 10), atNorte.lotNumber],
+      expected: ['2027-01-01', 'A12'],
+    });
+  });
+});
