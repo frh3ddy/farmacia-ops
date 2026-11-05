@@ -85,6 +85,35 @@ describe('InventoryReportsService shrinkage', () => {
   });
 });
 
+describe('InventoryReportsService opening count', () => {
+  test('migration stock fixed by a Conteo inicial, next to a real loss', async () => {
+    const reports = new InventoryReportsService(prisma);
+    const locationId = await locationWith([
+      ['OPENING_COUNT', -6],
+      ['OPENING_COUNT', 2],
+      ['DAMAGE', -1],
+    ]);
+
+    const [pnl, impact] = await Promise.all([
+      reports.getProfitAndLossReport({ locationId }),
+      reports.getAdjustmentImpactReport({ locationId }),
+    ]);
+
+    assert({
+      given: 'a Conteo inicial down 6 and up 2, and one damaged unit',
+      should: 'count only the damage as shrinkage',
+      actual: [pnl.operatingExpenses.shrinkageLosses, pnl.operatingExpenses.shrinkageRecovered],
+      expected: ['10', '0'],
+    });
+    assert({
+      given: 'the same adjustments',
+      should: 'leave the Conteo inicial out of the loss and gain report',
+      actual: [impact.summary.totalAdjustments, impact.summary.totalLoss, impact.summary.totalGain],
+      expected: [1, '10', '0'],
+    });
+  });
+});
+
 describe('InventoryReportsService backdated adjustments', () => {
   test('damage entered in October for a September date', async () => {
     const reports = new InventoryReportsService(prisma);
@@ -189,6 +218,37 @@ describe('InventoryReportsService returns in their own month', () => {
         // the $5 refund has no product, so only the P&L carries it
         pnl: ['0', '50', '-50', '0', '11', '-11', '-39'],
       },
+    });
+  });
+});
+
+describe('relabel of the 2026-11-04 Lolita migration fixes', () => {
+  test('the six count corrections, next to one that is not on the list', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const reports = new InventoryReportsService(prisma);
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Lolita' } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    const listed = ['31e5eb4b-d39e-4896-b18a-7102f5e589b4', 'ba17fe40-0d78-4e3c-9445-661070c645fe'];
+    await prisma.inventoryAdjustment.createMany({
+      data: [...listed, 'not-on-the-list'].map((id) => ({ id, locationId, productId, type: 'COUNT_CORRECTION' as const, quantity: -2, unitCost: 10, totalCost: 20 })),
+    });
+
+    await prisma.$executeRawUnsafe(readFileSync(
+      join(__dirname, '../../../../prisma/migrations/20261105120100_relabel_lolita_migration_counts/migration.sql'), 'utf8'));
+    const pnl = await reports.getProfitAndLossReport({ locationId });
+
+    assert({
+      given: 'two listed count corrections and one that is not',
+      should: 'leave only the unlisted one as shrinkage',
+      actual: pnl.operatingExpenses.shrinkage,
+      expected: '20',
+    });
+    assert({
+      given: 'the relabel',
+      should: 'leave one audit entry per relabeled adjustment',
+      actual: (await prisma.auditLog.findMany({ where: { entityId: { in: listed } } })).map((a) => a.action),
+      expected: ['RELABEL_ADJUSTMENT_TYPE', 'RELABEL_ADJUSTMENT_TYPE'],
     });
   });
 });
