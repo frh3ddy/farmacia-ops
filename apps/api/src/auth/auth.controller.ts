@@ -376,6 +376,10 @@ export class AuthController {
   // --------------------------------------------------------------------------
   // Get Audit Logs
   // --------------------------------------------------------------------------
+  // Owner-only read of AuditLog, filterable by action (e.g. REPLACE_LOTS,
+  // BACKFILL_LOT_PIECE, RELABEL_ADJUSTMENT_TYPE). Default 100 rows, newest first.
+  // ponytail: `limit` has no maximum; cap it if the log grows large or a
+  // non-owner role ever gets this route.
   @Get('audit-logs')
   @UseGuards(AuthGuard)
   @Roles('OWNER')
