@@ -1,4 +1,4 @@
-import { booksMismatches, type Books } from './books-check';
+import { booksMismatches, createdQuantity, type Books } from './books-check';
 
 // Centro holds one product, "jarabe". Each test starts from books that add up
 // and breaks one record.
@@ -74,5 +74,15 @@ describe('booksMismatches', () => {
     books.consumedByBatch['b-open'] = 3;
 
     expect(booksMismatches(books)).toEqual([]);
+  });
+});
+
+describe('createdQuantity', () => {
+  it('given a lot piece split off a batch, counts the units it started with', () => {
+    expect(createdQuantity({ createdByReceiving: null, createdByAdjustment: null, splitInitialQuantity: 3 })).toBe(3);
+  });
+
+  it('given cutover opening stock, has none to check', () => {
+    expect(createdQuantity({ createdByReceiving: null, createdByAdjustment: null, splitInitialQuantity: null })).toBeNull();
   });
 });

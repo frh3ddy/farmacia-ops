@@ -106,3 +106,27 @@ describe('BreakBulkService (Postgres)', () => {
     });
   });
 });
+
+describe('BreakBulkService lots', () => {
+  test('boxes with caducidad broken into loose units', async () => {
+    const { breakBulk, boxProductId, looseProductId } = await breakBulkSetup();
+    // Replace the setup's 5 boxes with two lots: 1 box expiring sooner, received later.
+    await prisma.inventory.deleteMany({ where: { productId: boxProductId } });
+    await prisma.inventory.createMany({
+      data: [
+        { productId: boxProductId, locationId: centro, quantity: 1, unitCost: 20, receivedAt: new Date('2026-10-01'), expiryDate: new Date('2027-06-01T18:00:00Z') },
+        { productId: boxProductId, locationId: centro, quantity: 1, unitCost: 20, receivedAt: new Date('2026-10-02'), expiryDate: new Date('2027-02-01T18:00:00Z') },
+      ],
+    });
+
+    await breakBulk.breakBulk({ locationId: centro, boxProductId, boxQuantity: 2 });
+    const loose = await prisma.inventory.findFirstOrThrow({ where: { productId: looseProductId } });
+
+    assert({
+      given: 'two boxes from lots with different caducidad broken into loose units',
+      should: 'give the loose units the soonest caducidad of the boxes taken',
+      actual: loose.expiryDate?.toISOString().slice(0, 10),
+      expected: '2027-02-01',
+    });
+  });
+});
