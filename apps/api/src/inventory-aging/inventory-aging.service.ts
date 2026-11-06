@@ -764,6 +764,10 @@ export class InventoryAgingService {
         createdByReceiving: {
           select: { id: true, supplier: { select: { name: true } } },
         },
+        // A lot piece's receiving is its source batch's.
+        splitFrom: {
+          select: { createdByReceiving: { select: { id: true, supplier: { select: { name: true } } } } },
+        },
       },
       orderBy: {
         expiryDate: 'asc', // Soonest-expiring first
@@ -781,9 +785,10 @@ export class InventoryAgingService {
       const isExpired = daysUntilExpiry <= 0;
       const cashValue = new Decimal(batch.quantity).mul(batch.unitCost);
 
+      const receiving = batch.createdByReceiving ?? batch.splitFrom?.createdByReceiving;
       const batchInfo: ExpiringBatchInfo = {
         batchId: batch.id,
-        receivingId: batch.createdByReceiving?.id ?? null,
+        receivingId: receiving?.id ?? null,
         quantity: batch.quantity,
         unitCost: batch.unitCost,
         cashValue,
@@ -791,7 +796,7 @@ export class InventoryAgingService {
         daysUntilExpiry,
         isExpired,
         batchNumber: batch.lotNumber,
-        supplierName: batch.createdByReceiving?.supplier?.name ?? null,
+        supplierName: receiving?.supplier?.name ?? null,
         receivedAt: batch.receivedAt,
       };
 

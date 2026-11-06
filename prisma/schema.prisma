@@ -437,6 +437,11 @@ model Inventory {
   lotNumber  String?
   // Units this batch gave to lot pieces split from it (same cost); the books check subtracts them.
   splitOut   Int       @default(0)
+  // A lot piece: the batch it was first split from (its receiving, supplier, cost) and the units it started with.
+  splitFromId          String?
+  splitInitialQuantity Int?
+  splitFrom            Inventory?  @relation("LotPieces", fields: [splitFromId], references: [id])
+  splitPieces          Inventory[] @relation("LotPieces")
 
   location Location @relation(fields: [locationId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
@@ -1212,6 +1217,8 @@ model StockCountEntry {
   adjustmentId     String?  @unique
   countedAt        DateTime @default(now())
   countedBy        String?
+  reason           String? // what the counter typed; also on the adjustment, when there is one
+  notes            String?
   /// The app's dedup key: a retry after the count committed returns it instead of counting again.
   clientRequestId  String?  @unique
 

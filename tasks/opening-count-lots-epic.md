@@ -1,6 +1,6 @@
 # Epic: Lots with caducidad on Conteo inicial (API)
 
-**Status**: ✅ COMPLETED (not yet deployed)
+**Status**: ✅ COMPLETED (deployed 2026-11-05)
 **Goal**: a Conteo inicial can record the lots on the shelf (quantity, caducidad, lote), and the expiring list shows them.
 
 ## Overview
@@ -77,5 +77,27 @@ only for a manager), so the count form can pre-fill the current lots.
 form can show "Ya contado en este conteo" (counts span days).
 
 **Requirements**:
-- Given a product counted in the session, should return its counted quantity, when, and the counter's name
+- Given a product counted in the session, should return its counted quantity, when, the counter's name, and its reason and notes
 - Given a product not counted, or a session at another store, should return null (200, not 404)
+
+---
+
+## Reason and notes on a Conteo inicial entry
+
+`POST …/entries` takes optional `reason` and `notes` (iOS request, 2026-11-05).
+
+**Requirements**:
+- Given a count with reason and notes that changes stock, should keep them trimmed on the entry and its adjustment
+- Given a matching count, should keep them on the entry
+- Given text over 500 characters, should refuse with 400
+
+---
+
+## Review follow-ups (2026-11-05)
+
+**Requirements**:
+- Given a count that replaces lots, should write an audit log row with the previous and the new lots
+- Given more than 50 lots in one count, should refuse with 400
+- Given a piece split from a batch, should record where it came from and the units it started with, so the books check reconciles it like any batch and the expiring list shows its receiving's supplier
+- Given boxes broken into loose units, the loose batch should carry the soonest caducidad of the boxes taken
+- Given a sale (FIFO) after a count with lots, should take the soonest caducidad first

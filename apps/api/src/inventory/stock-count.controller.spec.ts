@@ -28,8 +28,8 @@ describe('StockCountController.recordCount', () => {
     assert({
       given: 'no locationId in the body',
       should: 'count at the session’s store, as the employee',
-      actual: counts.recordCount.mock.calls[0],
-      expected: ['c1', { locationId: 'lolita', productId: 'p1', countedQuantity: 3, unitCost: undefined, countedBy: 'e1', clientRequestId: undefined, lots: undefined }],
+      actual: (([id, { locationId, productId, countedQuantity, countedBy }]) => [id, { locationId, productId, countedQuantity, countedBy }])(counts.recordCount.mock.calls[0]),
+      expected: ['c1', { locationId: 'lolita', productId: 'p1', countedQuantity: 3, countedBy: 'e1' }],
     });
   });
 });
@@ -89,6 +89,23 @@ describe('StockCountController.entry', () => {
         await controller.entry('c1', 'p1', 'norte', manager).then(() => 'done', (e: Error) => e.message),
       ],
       expected: [{ success: true, data: null }, ['c1', 'centro', 'p1'], ['OWNER', 'MANAGER'], 'Solo el dueño puede hacer esto en otras sucursales'],
+    });
+  });
+});
+
+describe('StockCountController reason and notes', () => {
+  test('a count with a reason and notes', async () => {
+    const counts = { recordCount: vi.fn().mockResolvedValue({ entry: {}, adjustment: null, squareSync: undefined }) };
+    const controller = new StockCountController(counts as any);
+    const req = { employee: { id: 'e1' }, currentLocation: { role: 'MANAGER', locationId: 'lolita' } } as any;
+
+    await controller.recordCount('c1', { productId: 'p1', countedQuantity: 4, reason: 'Caja vacía', notes: 'Estante 3' }, req);
+
+    assert({
+      given: 'a reason and notes in the body',
+      should: 'pass them to the count',
+      actual: [counts.recordCount.mock.calls[0][1].reason, counts.recordCount.mock.calls[0][1].notes],
+      expected: ['Caja vacía', 'Estante 3'],
     });
   });
 });

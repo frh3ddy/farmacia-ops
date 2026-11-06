@@ -588,3 +588,33 @@ test("a sale's batch consumptions, each at its own batch's cost", async () => {
     [[older.id, 1, '7', '7'], [newer.id, 2, '9.5', '19']].sort(),
   );
 });
+
+test('a sale of a product whose stock a Conteo inicial split into lots', async () => {
+  const prisma = getPrisma();
+  const location = await prisma.location.create({ data: { squareId: 'SQ-LOTS', name: 'Lolita' } });
+  await prisma.cutoverLock.create({ data: { locationId: location.id, cutoverDate: new Date('2026-09-01') } });
+  const product = await prisma.product.create({ data: { name: 'Amoxicilina' } });
+  await prisma.catalogMapping.create({ data: { squareVariationId: 'v-amox', productId: product.id } });
+  // As a count with lots leaves them: one batch's units split into a piece a millisecond
+  // later, the soonest caducidad on the older one. The later piece is created first.
+  const receivedAt = new Date('2026-10-01T12:00:00.000Z');
+  const original = await prisma.inventory.create({
+    data: { productId: product.id, locationId: location.id, quantity: 3, unitCost: 10, receivedAt, expiryDate: new Date('2027-01-01T18:00:00Z'), splitOut: 6 },
+  });
+  await prisma.inventory.create({
+    data: {
+      productId: product.id, locationId: location.id, quantity: 6, unitCost: 10, receivedAt: new Date(receivedAt.getTime() + 1),
+      expiryDate: new Date('2027-03-01T18:00:00Z'), splitFromId: original.id, splitInitialQuantity: 6,
+    },
+  });
+
+  await processSaleJob(job([line('v-amox', '2', 6000)], 'p-lots', 'SQ-LOTS'));
+  const left = await prisma.inventory.findMany({ where: { productId: product.id }, orderBy: { receivedAt: 'asc' } });
+
+  // given a sale of 2 after a count put 3 units of ene-2027 and 6 of mar-2027 on the shelf
+  // should take the 2 from the soonest caducidad
+  expect(left.map((b) => [b.expiryDate?.toISOString().slice(0, 7), b.quantity])).toEqual([
+    ['2027-01', 1],
+    ['2027-03', 6],
+  ]);
+});
