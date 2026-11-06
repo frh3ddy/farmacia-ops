@@ -101,3 +101,17 @@ form can show "Ya contado en este conteo" (counts span days).
 - Given a piece split from a batch, should record where it came from and the units it started with, so the books check reconciles it like any batch and the expiring list shows its receiving's supplier
 - Given boxes broken into loose units, the loose batch should carry the soonest caducidad of the boxes taken
 - Given a sale (FIFO) after a count with lots, should take the soonest caducidad first
+
+---
+
+## Backfill pieces split before they recorded their source
+
+Lot pieces split in production between lots going live (2026-11-05 20:16 UTC) and the deploy that added
+`splitFromId`/`splitInitialQuantity` (user chose to backfill; plan corrected by dev-ee).
+
+**Requirements**:
+- Given pieces of a batch and of a piece whose units add up to what each split off, should point both at the root with the units each started with
+- Given a piece two batches could have split, should leave it without a source
+- Given a split's pieces next to another batch in the same second, so the units don't add up, should leave them without a source
+- Given a product not counted since lots went live, should leave it alone
+- Given a linked piece, should write a BACKFILL_LOT_PIECE audit row with its source and starting units (dev-ee; the deploy log shows no counts — read them at /auth/audit-logs)
