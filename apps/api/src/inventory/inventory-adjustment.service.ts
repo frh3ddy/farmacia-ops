@@ -13,6 +13,13 @@ import { listLimit } from './list-limit';
 // Types
 // ============================================================================
 
+/** Reason and notes fit what staff screens show: 500 characters each. */
+export function assertNoteLengths(reason?: string | null, notes?: string | null): void {
+  if ((reason?.length ?? 0) > 500 || (notes?.length ?? 0) > 500) {
+    throw new BadRequestException('El motivo y las notas deben tener 500 caracteres o menos');
+  }
+}
+
 interface CreateAdjustmentInput {
   locationId: string;
   productId: string;
@@ -25,6 +32,7 @@ interface CreateAdjustmentInput {
   adjustedBy?: string;
   syncToSquare?: boolean; // Whether to sync this adjustment to Square
   clientRequestId?: string; // Dedup key for offline-queue replay (iOS)
+  expiryDate?: Date; // Additions only: the new batch's caducidad (break-bulk carries the boxes')
 }
 
 /** A count correction by the total counted on the shelf; the server derives the change. */
@@ -199,9 +207,7 @@ export class InventoryAdjustmentService {
     if (input.type === 'OTHER' && !input.notes?.trim()) {
       throw new BadRequestException('Escribe una nota para un ajuste de tipo Otro');
     }
-    if ((input.reason?.length ?? 0) > 500 || (input.notes?.length ?? 0) > 500) {
-      throw new BadRequestException('El motivo y las notas deben tener 500 caracteres o menos');
-    }
+    assertNoteLengths(input.reason, input.notes);
     await this.refuseCorrectionDuringOpeningCount(input, db);
 
     // Idempotent replay: the offline-queue (iOS) may retry a write whose
@@ -459,6 +465,7 @@ export class InventoryAdjustmentService {
           receivedAt: input.effectiveDate || new Date(),
           unitCost,
           source: 'ADJUSTMENT',
+          expiryDate: input.expiryDate,
         },
       });
 

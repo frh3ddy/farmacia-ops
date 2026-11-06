@@ -38,7 +38,7 @@ export class StockCountController {
   @Roles('OWNER', 'MANAGER')
   async recordCount(
     @Param('id') id: string,
-    @Body() body: { locationId?: string; productId: string; countedQuantity: number; unitCost?: number; clientRequestId?: string; lots?: CountLotInput[] },
+    @Body() body: { locationId?: string; productId: string; countedQuantity: number; unitCost?: number; clientRequestId?: string; lots?: CountLotInput[]; reason?: string; notes?: string },
     @Req() req: RoleGuardedRequest,
   ) {
     const store = storeOf(req, body?.locationId);
@@ -51,6 +51,8 @@ export class StockCountController {
       countedBy: req.employee.id,
       clientRequestId: body.clientRequestId,
       lots: body.lots,
+      reason: body.reason,
+      notes: body.notes,
     });
     return { success: true, data: { ...result, squareSync: result.squareSync && readableSync(result.squareSync) } };
   }

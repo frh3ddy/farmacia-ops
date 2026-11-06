@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { InventoryAdjustmentService } from './inventory-adjustment.service';
+import { InventoryAdjustmentService, assertNoteLengths } from './inventory-adjustment.service';
 import { parseBusinessDate } from './business-date';
 
 /** A lot as the app sends it: caducidad as a calendar day, lote (optional) as printed. */
@@ -19,6 +19,8 @@ type CountLot = { quantity: number; expiryDate: Date; lotNumber: string | null }
 function parseLots(lots: unknown, countedQuantity: number): CountLot[] | undefined {
   if (lots == null || (Array.isArray(lots) && lots.length === 0)) return undefined;
   if (!Array.isArray(lots)) throw new BadRequestException('Los lotes deben ser una lista');
+  // Each lot can split a batch: a bounded list keeps the product's lock short.
+  if (lots.length > 50) throw new BadRequestException('Un conteo puede tener como máximo 50 lotes');
   const parsed = lots.map((lot: CountLotInput): CountLot => {
     const lotNumber = typeof lot?.batchNumber === 'string' && lot.batchNumber.trim() ? lot.batchNumber.trim().slice(0, 100) : null;
     const expiryDate = typeof lot?.expiryDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(lot.expiryDate) ? parseBusinessDate(lot.expiryDate) : null;
@@ -46,7 +48,12 @@ interface RecordCountInput {
   clientRequestId?: string; // The app's dedup key: a retry after commit returns the first result
   onlyIfUncounted?: boolean; // "Poner en 0": skip a product counted since the list was loaded
   lots?: unknown; // CountLotInput[] from the app: replace the product's lots at the store
+  reason?: string;
+  notes?: string;
 }
+
+/** Trimmed text, or null when blank. */
+const trimmedOrNull = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
 
 /** A product someone counted after the No contados list was loaded. */
 class AlreadyCountedError extends Error {
@@ -112,6 +119,9 @@ export class StockCountService {
       throw new BadRequestException('El conteo debe ser un número entero de cero o más');
     }
     const lots = parseLots(input.lots, countedQuantity);
+    const reason = trimmedOrNull(input.reason);
+    const notes = trimmedOrNull(input.notes);
+    assertNoteLengths(reason, notes);
     // A retry of a count that committed: re-applying the total would undo any sale since.
     if (clientRequestId) {
       const replayed = await this.replay(id, input);
@@ -144,17 +154,21 @@ export class StockCountService {
                   quantity: change,
                   unitCost: input.unitCost,
                   adjustedBy: countedBy,
+                  reason: reason ?? undefined,
+                  notes: notes ?? undefined,
                 },
                 tx,
               );
 
-        if (lots) await this.replaceLots(tx, productId, locationId, lots);
+        if (lots) await this.replaceLots(tx, { id, productId, locationId, countedBy }, lots);
 
         const counted = {
           countedQuantity,
           countedBy,
           countedAt: new Date(),
           clientRequestId,
+          reason,
+          notes,
         };
         const entry = await tx.stockCountEntry.upsert({
           where: key,
@@ -212,7 +226,13 @@ export class StockCountService {
    * than the one before so FIFO order holds, and the batch records what it gave
    * away (`splitOut`) for the books check. Runs under recordCount's lock.
    */
-  private async replaceLots(tx: Prisma.TransactionClient, productId: string, locationId: string, lots: CountLot[]) {
+  private async replaceLots(
+    tx: Prisma.TransactionClient,
+    { id, productId, locationId, countedBy }: { id: string; productId: string; locationId: string; countedBy?: string },
+    lots: CountLot[],
+  ) {
+    // The lots being replaced, logged so a wrong caducidad can be traced and restored.
+    const previous = await this.lotsIn(tx, productId, locationId);
     const queue = [...lots]
       .sort((a, b) => a.expiryDate.getTime() - b.expiryDate.getTime())
       .map((lot) => ({ ...lot, left: lot.quantity }));
@@ -246,23 +266,50 @@ export class StockCountService {
             source: batch.source,
             costSource: batch.costSource,
             migrationId: batch.migrationId,
+            splitFromId: batch.splitFromId ?? batch.id,
+            splitInitialQuantity: piece.quantity,
           },
         });
       }
     }
+    await this.logLots(tx, { id, productId, locationId, countedBy }, previous);
+  }
+
+  /** Kept last in replaceLots: the old and new lots of the product at the store. */
+  private async logLots(
+    tx: Prisma.TransactionClient,
+    { id, productId, locationId, countedBy }: { id: string; productId: string; locationId: string; countedBy?: string },
+    previous: Awaited<ReturnType<StockCountService['lotsIn']>>,
+  ) {
+    await tx.auditLog.create({
+      data: {
+        employeeId: countedBy,
+        locationId,
+        action: 'REPLACE_LOTS',
+        entityType: 'Product',
+        entityId: productId,
+        details: { stockCountId: id, previous, lots: await this.lotsIn(tx, productId, locationId) },
+      },
+    });
   }
 
   /** The product's count in this session at this store, or null: the form's "Ya contado" line. */
   async entry(id: string, locationId: string, productId: string) {
     const entry = await this.prisma.stockCountEntry.findFirst({
       where: { stockCountId: id, productId, stockCount: { locationId } },
-      select: { countedQuantity: true, countedAt: true, countedBy: true },
+      select: { countedQuantity: true, countedAt: true, countedBy: true, reason: true, notes: true },
     });
     if (!entry) return null;
     const employee = entry.countedBy
       ? await this.prisma.employee.findUnique({ where: { id: entry.countedBy }, select: { name: true } })
       : null;
-    return { countedQuantity: entry.countedQuantity, countedAt: entry.countedAt, countedByName: employee?.name ?? null };
+    return {
+      countedQuantity: entry.countedQuantity,
+      countedAt: entry.countedAt,
+      countedByName: employee?.name ?? null,
+      reason: entry.reason,
+      notes: entry.notes,
+    };
   }
 
   /**
@@ -270,8 +317,12 @@ export class StockCountService {
    * same caducidad day and lote merged, stock with no lot info left out,
    * soonest caducidad first and none last.
    */
-  async lots(productId: string, locationId: string) {
-    return this.prisma.$queryRaw<Array<{ quantity: number; expiryDate: string | null; batchNumber: string | null }>>`
+  lots(productId: string, locationId: string) {
+    return this.lotsIn(this.prisma, productId, locationId);
+  }
+
+  private lotsIn(db: Prisma.TransactionClient | PrismaService, productId: string, locationId: string) {
+    return db.$queryRaw<Array<{ quantity: number; expiryDate: string | null; batchNumber: string | null }>>`
       SELECT SUM(quantity)::int AS quantity, to_char("expiryDate", 'YYYY-MM-DD') AS "expiryDate", "lotNumber" AS "batchNumber"
       FROM "Inventory"
       WHERE "productId" = ${productId} AND "locationId" = ${locationId} AND quantity > 0

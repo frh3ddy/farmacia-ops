@@ -24,6 +24,15 @@ export type BooksMismatch = Where & {
   actual: number;
 };
 
+/** Units a batch started with: its receiving's, its adjustment's, or a lot piece's; null for cutover opening stock. */
+export function createdQuantity(b: {
+  createdByReceiving: { quantity: number } | null;
+  createdByAdjustment: { quantity: number } | null;
+  splitInitialQuantity: number | null;
+}): number | null {
+  return b.createdByReceiving?.quantity ?? b.createdByAdjustment?.quantity ?? b.splitInitialQuantity;
+}
+
 export function booksMismatches(books: Books): BooksMismatch[] {
   const mismatches: BooksMismatch[] = [];
   const report = (check: BooksMismatch['check'], record: Where & { id: string }, expected: number, actual: number) => {
@@ -62,6 +71,7 @@ export async function loadBooks(prisma: PrismaClient): Promise<Books> {
         locationId: true,
         quantity: true,
         splitOut: true,
+        splitInitialQuantity: true,
         createdByReceiving: { select: { quantity: true } },
         // A transfer receipt's batch is created by its TRANSFER_IN adjustment
         // (TransferLine also points at it), so it's counted once, here.
@@ -89,7 +99,7 @@ export async function loadBooks(prisma: PrismaClient): Promise<Books> {
       productId: b.productId,
       locationId: b.locationId,
       quantity: b.quantity,
-      createdQuantity: b.createdByReceiving?.quantity ?? b.createdByAdjustment?.quantity ?? null,
+      createdQuantity: createdQuantity(b),
       splitOut: b.splitOut,
     })),
     negativeAdjustments,

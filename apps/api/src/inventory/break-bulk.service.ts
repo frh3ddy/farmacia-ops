@@ -69,6 +69,11 @@ export class BreakBulkService {
       }, tx);
 
       const unitCost = costPerLooseUnit(Number(outResult.adjustment.totalCost), looseUnits);
+      // The loose units expire when the soonest box taken does.
+      const { _min } = await tx.inventory.aggregate({
+        where: { consumptions: { some: { adjustmentId: outResult.adjustment.id } } },
+        _min: { expiryDate: true },
+      });
 
       // Leg 2: create the loose units at the preserved cost basis
       const inResult = await this.adjustments.createAdjustment({
@@ -77,6 +82,7 @@ export class BreakBulkService {
         type: 'BREAK_BULK_IN',
         quantity: looseUnits,
         unitCost,
+        expiryDate: _min.expiryDate ?? undefined,
         reason,
         notes: input.notes,
         adjustedBy: input.adjustedBy,
