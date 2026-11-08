@@ -1216,6 +1216,9 @@ model StockCountEntry {
   /// The OPENING_COUNT adjustment, when the count changed the stock.
   adjustmentId     String?  @unique
   countedAt        DateTime @default(now())
+  /// When the product was first counted in this session; a recount moves countedAt, never this.
+  /// Sorting by it gives the count order, i.e. the shelf order.
+  firstCountedAt   DateTime @default(now())
   countedBy        String?
   reason           String? // what the counter typed; also on the adjustment, when there is one
   notes            String?

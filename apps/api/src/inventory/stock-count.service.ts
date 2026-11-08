@@ -178,6 +178,7 @@ export class StockCountService {
             previousQuantity,
             adjustmentId: adjustment?.adjustment.id,
             ...counted,
+            firstCountedAt: counted.countedAt,
           },
           update: adjustment
             ? {
