@@ -407,6 +407,12 @@ describe('ProductsService.createProduct during a Conteo inicial', () => {
       ],
       expected: [false, [5, 0, null], 5],
     });
+    assert({
+      given: 'a product counted by being created during the count',
+      should: 'stamp its first count with the same time as the count itself',
+      actual: entry?.firstCountedAt.getTime(),
+      expected: entry?.countedAt.getTime(),
+    });
   });
 
   test('a product created with stock and no count open', async () => {

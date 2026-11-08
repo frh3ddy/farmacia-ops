@@ -128,6 +128,29 @@ describe('StockCountService.recordCount', () => {
     });
   });
 
+  test('a product recounted later in the session', async () => {
+    const locationId = await store();
+    const productId = await product(locationId, 8);
+    const { id } = await counts.start(locationId, 'owner');
+
+    const first = await counts.recordCount(id, { locationId, productId, countedQuantity: 5, countedBy: 'e1' });
+    await new Promise((r) => setTimeout(r, 5));
+    const recount = await counts.recordCount(id, { locationId, productId, countedQuantity: 6, countedBy: 'e1' });
+
+    assert({
+      given: 'a product counted and then recounted',
+      should: 'keep when it was first counted, so the count order survives the recount',
+      actual: [recount.entry.firstCountedAt.getTime(), recount.entry.countedAt > first.entry.countedAt],
+      expected: [first.entry.firstCountedAt.getTime(), true],
+    });
+    assert({
+      given: 'a product counted for the first time',
+      should: 'stamp its first count with the same time as the count itself',
+      actual: first.entry.firstCountedAt.getTime(),
+      expected: first.entry.countedAt.getTime(),
+    });
+  });
+
   test('a count retried after a sale landed', async () => {
     const locationId = await store();
     const productId = await product(locationId, 8);
