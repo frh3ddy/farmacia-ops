@@ -7,6 +7,8 @@ import { randomUUID } from 'crypto';
 import { startPostgres } from '../testing/pglite';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductsService, type CreateProductInput } from './products.service';
+import { StockCountService } from '../inventory/stock-count.service';
+import { InventoryAdjustmentService } from '../inventory/inventory-adjustment.service';
 
 let prisma: PrismaService;
 let stop: () => Promise<void>;
@@ -372,6 +374,51 @@ describe('ProductsService.createProduct with a barcode', () => {
       should: 'send its barcode with the new Square item',
       actual: upcSent(square, call),
       expected: gtin,
+    });
+  });
+});
+
+describe('ProductsService.createProduct during a Conteo inicial', () => {
+  /** A cut-over store with its own Square id. */
+  async function store() {
+    const { id } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Lolita' } });
+    await prisma.cutoverLock.create({ data: { locationId: id, cutoverDate: new Date('2026-09-01') } });
+    return id;
+  }
+
+  test('a product created with stock while the count is open', async () => {
+    const locationId = await store();
+    const counts = new StockCountService(prisma, new InventoryAdjustmentService(prisma));
+    const { id } = await counts.start(locationId, 'owner');
+    const { products } = productsWithSquare();
+    const { product } = await create(products, { locationId, initialStock: 5, costPrice: 10 });
+
+    const listed = (await counts.uncounted(id, locationId)).some((u) => u.productId === product!.id);
+    await counts.zero(id, locationId, [product!.id], 'owner');
+    const entry = await prisma.stockCountEntry.findUnique({ where: { stockCountId_productId: { stockCountId: id, productId: product!.id } } });
+
+    assert({
+      given: 'a product created with 5 units at a store whose Conteo inicial is open',
+      should: 'count it as counted at 5 (from 0, no adjustment), leave it off No contados, and keep its 5 through Poner en 0',
+      actual: [
+        listed,
+        [entry?.countedQuantity, entry?.previousQuantity, entry?.adjustmentId],
+        (await prisma.inventory.aggregate({ where: { productId: product!.id }, _sum: { quantity: true } }))._sum.quantity,
+      ],
+      expected: [false, [5, 0, null], 5],
+    });
+  });
+
+  test('a product created with stock and no count open', async () => {
+    const locationId = await store();
+    const { products } = productsWithSquare();
+    const { product } = await create(products, { locationId, initialStock: 5, costPrice: 10 });
+
+    assert({
+      given: 'a product created with stock at a store with no Conteo inicial open',
+      should: 'record no count',
+      actual: await prisma.stockCountEntry.count({ where: { productId: product!.id } }),
+      expected: 0,
     });
   });
 });
