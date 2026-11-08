@@ -115,3 +115,15 @@ Lot pieces split in production between lots going live (2026-11-05 20:16 UTC) an
 - Given a split's pieces next to another batch in the same second, so the units don't add up, should leave them without a source
 - Given a product not counted since lots went live, should leave it alone
 - Given a linked piece, should write a BACKFILL_LOT_PIECE audit row with its source and starting units (dev-ee; the deploy log shows no counts — read them at /auth/audit-logs)
+
+---
+
+## Products created during a Conteo inicial (fix, 2026-11-07)
+
+"Poner todos en 0" zeroed products created with initial stock while a count was open: create never recorded an entry,
+so they showed in No contados. Receiving into an uncounted product does not count it (its earlier stock is unknown);
+the app warns instead (agreed with dev-79).
+
+**Requirements**:
+- Given a product created with stock at a store whose Conteo inicial is open, should record it counted at that stock from 0 with no adjustment, so it's off No contados and survives Poner en 0
+- Given a product created with stock and no count open, should record no count

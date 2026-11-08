@@ -460,6 +460,17 @@ export class ProductsService {
             },
           });
 
+          // During a Conteo inicial the new stock is already counted (it was just
+          // entered), so "Poner todos en 0" must not take it for migration stock.
+          const openCount = await tx.stockCount.findUnique({ where: { openLocationId: locationId }, select: { id: true } });
+          if (openCount) {
+            await tx.stockCountEntry.upsert({
+              where: { stockCountId_productId: { stockCountId: openCount.id, productId } },
+              create: { stockCountId: openCount.id, productId, countedQuantity: initialStock, previousQuantity: 0 },
+              update: {},
+            });
+          }
+
           if (supplierId) {
             await tx.supplierProduct.create({
               data: {
