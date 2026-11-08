@@ -14,6 +14,10 @@ import { findSearchMatchIds, sortByIdOrder } from './product-search';
 import { productsWithoutCostSql, type ProductWithoutCost } from './products-without-cost';
 import { soldAt } from './catalog-product-view';
 import { nextSyncCursor, parseSyncCursor } from './product-sync-cursor';
+import { parseBusinessDate } from '../inventory/business-date';
+
+/** The initial stock's lote, trimmed and capped like a count lot's; null when blank. */
+const initialLotNumber = (batchNumber?: string) => batchNumber?.trim().slice(0, 100) || null;
 
 // Currency constant - must match Square merchant account currency
 // Square merchant is configured with USD
@@ -57,6 +61,8 @@ export interface CreateProductInput {
   sellingPrice: number; // Price in dollars (e.g., 45.50)
   costPrice?: number; // Initial cost price in dollars
   initialStock?: number; // Initial inventory quantity
+  batchNumber?: string; // The initial stock's lote (requires initialStock)
+  expiryDate?: string; // The initial stock's caducidad, YYYY-MM-DD (requires initialStock)
   supplierId?: string; // Supplier the initial stock came from (requires initialStock + costPrice)
   locationId: string; // Required for inventory and Square sync
   syncToSquare?: boolean; // Default true
@@ -457,6 +463,8 @@ export class ProductsService {
               receivedAt: new Date(),
               source: 'OPENING_BALANCE',
               costSource: 'MANUAL_INPUT',
+              lotNumber: initialLotNumber(input.batchNumber),
+              expiryDate: input.expiryDate ? parseBusinessDate(input.expiryDate) : null,
             },
           });
 
@@ -562,6 +570,17 @@ export class ProductsService {
     }
     if (initialStock && costPrice == null) {
       throw new BadRequestException('Las existencias iniciales necesitan un costo');
+    }
+    const { batchNumber, expiryDate } = input;
+    if (batchNumber != null && typeof batchNumber !== 'string') {
+      throw new BadRequestException('El lote debe ser texto');
+    }
+    if (expiryDate != null && !(typeof expiryDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(expiryDate) && !isNaN(parseBusinessDate(expiryDate).getTime()))) {
+      throw new BadRequestException('La caducidad debe ser una fecha AAAA-MM-DD');
+    }
+    // Dropping them silently is how the app lost the initial stock's details before.
+    if ((initialLotNumber(batchNumber) || expiryDate) && !initialStock) {
+      throw new BadRequestException('El lote y la caducidad necesitan existencias iniciales');
     }
     const isBoolean = (value: unknown) => typeof value === 'boolean';
     const isText = (value: unknown) => typeof value === 'string';
