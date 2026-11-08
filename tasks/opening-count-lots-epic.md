@@ -127,3 +127,16 @@ the app warns instead (agreed with dev-79).
 **Requirements**:
 - Given a product created with stock at a store whose Conteo inicial is open, should record it counted at that stock from 0 with no adjustment, so it's off No contados and survives Poner en 0
 - Given a product created with stock and no count open, should record no count
+
+---
+
+## Lote and caducidad on a new product's stock (2026-11-07)
+
+`POST /products` takes optional `batchNumber` and `expiryDate` (YYYY-MM-DD) for the initial stock (iOS ask via dev-79).
+
+**Requirements**:
+- Given initial stock with a lote and caducidad, should put the trimmed lote (first 100 characters, as a count lot) and that day on the stock batch
+- Given a blank lote, should save no lote
+- Given a lote or caducidad with no initial stock, should refuse with 400 before creating anything
+- Given a caducidad that isn't a YYYY-MM-DD day, or a lote that isn't text, should refuse with 400
+- Given a product created with them during a Conteo inicial, the count form's lots should show that lot

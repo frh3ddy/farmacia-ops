@@ -422,3 +422,93 @@ describe('ProductsService.createProduct during a Conteo inicial', () => {
     });
   });
 });
+
+describe('ProductsService.createProduct with lote and caducidad', () => {
+  const batchOf = (productId: string) =>
+    prisma.inventory.findFirst({ where: { productId }, select: { lotNumber: true, expiryDate: true } });
+
+  test('initial stock with its lote and caducidad', async () => {
+    const { products } = productsWithSquare();
+    const { product } = await create(products, { initialStock: 5, costPrice: 10, batchNumber: '  L-123  ', expiryDate: '2027-01-31' });
+
+    assert({
+      given: 'initial stock with a lote padded with spaces and a caducidad day',
+      should: 'put the trimmed lote and that Mexico City day on the stock batch',
+      actual: await batchOf(product!.id),
+      expected: { lotNumber: 'L-123', expiryDate: new Date('2027-01-31T12:00:00.000-06:00') },
+    });
+  });
+
+  test('an empty lote', async () => {
+    const { products } = productsWithSquare();
+    const { product } = await create(products, { initialStock: 5, costPrice: 10, batchNumber: '   ', expiryDate: '2027-01-31' });
+
+    assert({
+      given: 'a lote of only spaces',
+      should: 'save no lote',
+      actual: (await batchOf(product!.id))?.lotNumber,
+      expected: null,
+    });
+  });
+
+  test('a lote longer than a count lot allows', async () => {
+    const { products } = productsWithSquare();
+    const { product } = await create(products, { initialStock: 5, costPrice: 10, batchNumber: 'x'.repeat(150) });
+
+    assert({
+      given: 'a lote of 150 characters',
+      should: 'keep its first 100, as a count lot does',
+      actual: (await batchOf(product!.id))?.lotNumber?.length,
+      expected: 100,
+    });
+  });
+
+  test('lote or caducidad without initial stock', async () => {
+    const { products, square } = productsWithSquare();
+    const name = `SinStock-${Math.random()}`;
+    const statuses = [
+      await statusOf(create(products, { name, batchNumber: 'L-1' })),
+      await statusOf(create(products, { name, expiryDate: '2027-01-31' })),
+      await statusOf(create(products, { name, initialStock: 0, costPrice: 10, expiryDate: '2027-01-31' })),
+    ];
+
+    assert({
+      given: 'a lote or a caducidad with no initial stock to put them on',
+      should: 'refuse with a 400 before creating anything',
+      actual: [statuses, square.catalog.object.upsert.mock.calls.length, await productsNamed(name)],
+      expected: [[400, 400, 400], 0, 0],
+    });
+  });
+
+  test('a caducidad or lote that is not valid', async () => {
+    const { products } = productsWithSquare();
+    const statuses = [
+      await statusOf(create(products, { initialStock: 5, costPrice: 10, expiryDate: '31/01/2027' })),
+      await statusOf(create(products, { initialStock: 5, costPrice: 10, expiryDate: '2027-02-31x' })),
+      await statusOf(create(products, { initialStock: 5, costPrice: 10, batchNumber: 123 as any })),
+    ];
+
+    assert({
+      given: 'a caducidad that is not a YYYY-MM-DD day, or a lote that is not text',
+      should: 'refuse with a 400',
+      actual: statuses,
+      expected: [400, 400, 400],
+    });
+  });
+
+  test('created with lote and caducidad during a Conteo inicial', async () => {
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Lolita' } });
+    await prisma.cutoverLock.create({ data: { locationId, cutoverDate: new Date('2026-09-01') } });
+    const counts = new StockCountService(prisma, new InventoryAdjustmentService(prisma));
+    await counts.start(locationId, 'owner');
+    const { products } = productsWithSquare();
+    const { product } = await create(products, { locationId, initialStock: 5, costPrice: 10, batchNumber: 'L-9', expiryDate: '2027-03-15' });
+
+    assert({
+      given: 'a product created with stock, lote and caducidad while the count is open',
+      should: 'show that lot to the count form',
+      actual: await counts.lots(product!.id, locationId),
+      expected: [{ quantity: 5, expiryDate: '2027-03-15', batchNumber: 'L-9' }],
+    });
+  });
+});
