@@ -234,6 +234,12 @@ const FILTER_SQL: Record<ProductListFilter, Prisma.Sql> = {
   lowMargin: Prisma.sql`low_margin`,
 };
 
+/** Include for a box's suelto at one store; without a store, none (`in: []` matches no row). */
+const looseLinkAt = (locationId: string | undefined) => ({
+  where: locationId ? { locationId } : { id: { in: [] as string[] } },
+  select: { looseProductId: true },
+});
+
 @Injectable()
 export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
@@ -435,11 +441,15 @@ export class ProductsService {
             primaryContent: primaryContent ?? null,
             manualName: manualName?.trim() || null,
             manualPresentation: manualPresentation?.trim() || null,
-            looseProductId: looseProductId || null,
             searchAliases: searchAliases ? normalizeSearchAliases(searchAliases) : [],
             soldOnlyAtLocationId: soldAtAllLocations ? null : locationId,
           },
         });
+
+        // Linked at the store it was created at; another store links its own suelto.
+        if (looseProductId) {
+          await tx.productLooseLink.create({ data: { locationId, boxProductId: productId, looseProductId } });
+        }
 
         await tx.catalogMapping.create({
           data: {
@@ -647,6 +657,12 @@ export class ProductsService {
     ];
     for (const [id, find, message] of references) {
       if (id && !(await find(id))) throw new BadRequestException(message);
+    }
+    if (input.looseProductId) {
+      const loose = await this.prisma.product.findUniqueOrThrow({ where: { id: input.looseProductId } });
+      if (loose.soldOnlyAtLocationId && loose.soldOnlyAtLocationId !== input.locationId) {
+        throw new BadRequestException(`${loose.name} no se vende en ${location.name}`);
+      }
     }
 
     return { location };
@@ -1358,6 +1374,7 @@ export class ProductsService {
             where: { locationId },
           }
         : true,
+      looseLinks: looseLinkAt(locationId),
     };
 
     // Build a `where` clause for optional search
@@ -1428,9 +1445,11 @@ export class ProductsService {
         0,
       );
       const averageCost = totalInventory > 0 ? totalCost / totalInventory : null;
-      
+      const { looseLinks, ...row } = product;
+
       return {
-        ...product,
+        ...row,
+        looseProductId: looseLinks[0]?.looseProductId ?? null,
         sellingPrice: mapping ? this.fromCents(Number(mapping.priceCents)) : null,
         currency: mapping?.currency || CURRENCY,
         totalInventory,
@@ -1706,6 +1725,7 @@ export class ProductsService {
           take: 10,
           orderBy: { receivedAt: 'desc' },
         },
+        looseLinks: looseLinkAt(locationId),
       },
     });
 
@@ -1722,11 +1742,13 @@ export class ProductsService {
       0
     );
     const averageCost = totalInventory > 0 ? totalCost / totalInventory : null;
+    const { looseLinks, ...row } = product;
 
     return {
       success: true,
       data: {
-        ...product,
+        ...row,
+        looseProductId: looseLinks[0]?.looseProductId ?? null,
         sellingPrice: mapping ? this.fromCents(Number(mapping.priceCents)) : null,
         currency: mapping?.currency || CURRENCY,
         totalInventory,
@@ -1737,14 +1759,17 @@ export class ProductsService {
   }
 
   /**
-   * Link (or unlink) an already-existing box product to its already-existing
-   * loose counterpart — the realistic entry point for sueltos, since Box and
-   * Loose are two separate products/Square items that already exist today.
+   * Link (or unlink, with null) a box to its suelto at one store, leaving every
+   * other store's link as it was. `quantity`, the box's pieces, is the same at
+   * every store, so it is set on the box itself.
    */
-  async setLooseProductLink(productId: string, looseProductId: string | null, quantity?: number) {
+  async setLooseProductLink(productId: string, looseProductId: string | null, quantity: number | undefined, locationId: string) {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       throw new NotFoundException(`Product ${productId} not found`);
+    }
+    if (quantity !== undefined && !(isWholeNumber(quantity) && quantity > 0)) {
+      throw new BadRequestException('La cantidad debe ser un número entero mayor que cero');
     }
 
     if (looseProductId) {
@@ -1755,25 +1780,38 @@ export class ProductsService {
       if (!looseProduct) {
         throw new NotFoundException(`Product ${looseProductId} not found`);
       }
-      // Walk the loose product's own chain: reaching this product would loop
+      for (const p of [product, looseProduct]) {
+        if (p.soldOnlyAtLocationId && p.soldOnlyAtLocationId !== locationId) {
+          const store = await this.prisma.location.findUnique({ where: { id: locationId }, select: { name: true } });
+          throw new BadRequestException(`${p.name} no se vende en ${store?.name ?? 'esta sucursal'}`);
+        }
+      }
+      // Walk the suelto's own chain at this store: reaching this product would loop
       // break-bulk. Stop at a product seen twice, a loop saved before this check.
       const seen = new Set<string>();
-      for (let next = looseProduct.looseProductId; next && !seen.has(next); ) {
+      for (let next = await this.looseProductIdAt(looseProductId, locationId); next && !seen.has(next); ) {
         if (next === productId) {
           throw new BadRequestException('El producto suelto ya lleva de vuelta a este producto');
         }
         seen.add(next);
-        next = (await this.prisma.product.findUnique({ where: { id: next }, select: { looseProductId: true } }))?.looseProductId ?? null;
+        next = await this.looseProductIdAt(next, locationId);
       }
     }
-    if (quantity !== undefined && !(isWholeNumber(quantity) && quantity > 0)) {
-      throw new BadRequestException('La cantidad debe ser un número entero mayor que cero');
-    }
 
-    return this.prisma.product.update({
-      where: { id: productId },
-      data: { looseProductId, ...(quantity !== undefined && { quantity }) },
-    });
+    const at = { locationId_boxProductId: { locationId, boxProductId: productId } };
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.product.update({ where: { id: productId }, data: quantity !== undefined ? { quantity } : {} }),
+      looseProductId
+        ? this.prisma.productLooseLink.upsert({ where: at, create: { locationId, boxProductId: productId, looseProductId }, update: { looseProductId } })
+        : this.prisma.productLooseLink.deleteMany({ where: { locationId, boxProductId: productId } }),
+    ]);
+    return { ...updated, looseProductId };
+  }
+
+  /** The box's suelto at this store, or null. */
+  private async looseProductIdAt(boxProductId: string, locationId: string): Promise<string | null> {
+    const link = await this.prisma.productLooseLink.findUnique({ where: { locationId_boxProductId: { locationId, boxProductId } } });
+    return link?.looseProductId ?? null;
   }
 
   /**

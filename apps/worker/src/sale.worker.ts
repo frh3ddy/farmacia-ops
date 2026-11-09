@@ -392,7 +392,7 @@ async function openBoxesForSale(
   // One product at a time, up to 10s each: fine for the job lock, which BullMQ renews
   // while the job awaits (lockDuration / 2), so a slow api never makes it stall.
   for (const [productId, pieces] of needed) {
-    if (!(await prisma.product.count({ where: { looseProductId: productId } }))) continue; // not a suelto
+    if (!(await prisma.productLooseLink.count({ where: { looseProductId: productId, locationId: location.id } }))) continue; // not a suelto here
     const { _sum } = await prisma.inventory.aggregate({ where: { productId, locationId: location.id, quantity: { gt: 0 } }, _sum: { quantity: true } });
     if ((_sum.quantity ?? 0) >= pieces) continue;
 
