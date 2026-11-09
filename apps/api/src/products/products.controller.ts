@@ -22,7 +22,7 @@ import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts, PR
 import { InventoryAgingService } from '../inventory-aging/inventory-aging.service';
 import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
-import { AuthGuard, LocationGuard, Roles, GuardedRequest, isCashierAt, assertActingAtOwnStore } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest, RoleGuardedRequest, isCashierAt, assertActingAtOwnStore } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 
 // DTOs
@@ -488,9 +488,10 @@ export class ProductsController {
   }
 
   /**
-   * Link an already-existing box product to its already-existing loose
-   * counterpart, so break-bulk (POST /inventory/break-bulk) knows where
-   * converted stock goes. Pass looseProductId: null to remove the link.
+   * Link a box to its suelto at the session's store, so break-bulk
+   * (POST /inventory/break-bulk) there knows where converted stock goes.
+   * Other stores keep their own links. Pass looseProductId: null to remove
+   * this store's link.
    * quantity (base units per box) is also settable here since break-bulk
    * needs both — pass it if the product doesn't already have one set.
    * Roles: OWNER, MANAGER
@@ -500,8 +501,9 @@ export class ProductsController {
   async setLooseProductLink(
     @Param('id') id: string,
     @Body() body: { looseProductId: string | null; quantity?: number },
+    @Req() req: RoleGuardedRequest,
   ) {
-    const product = await this.productsService.setLooseProductLink(id, body.looseProductId, body.quantity);
+    const product = await this.productsService.setLooseProductLink(id, body.looseProductId, body.quantity, req.currentLocation.locationId);
     return { success: true, data: { product } };
   }
 

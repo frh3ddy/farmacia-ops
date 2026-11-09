@@ -44,10 +44,12 @@ export class BreakBulkService {
     if (!boxProduct) {
       throw new NotFoundException(`Product ${input.boxProductId} not found`);
     }
-    if (!boxProduct.looseProductId) {
-      throw new BadRequestException(
-        `El producto ${input.boxProductId} no tiene un producto suelto vinculado. Vincúlalo primero.`,
-      );
+    const link = await this.prisma.productLooseLink.findUnique({
+      where: { locationId_boxProductId: { locationId: input.locationId, boxProductId: input.boxProductId } },
+    });
+    if (!link) {
+      const store = await this.prisma.location.findUnique({ where: { id: input.locationId }, select: { name: true } });
+      throw new BadRequestException(`${boxProduct.name} no tiene suelto vinculado en ${store?.name ?? 'esta sucursal'}. Vincúlalo primero.`);
     }
     if (!boxProduct.quantity || boxProduct.quantity <= 0) {
       throw new BadRequestException(`El producto ${input.boxProductId} no tiene definidas las piezas por caja`);
@@ -56,7 +58,7 @@ export class BreakBulkService {
     const looseUnits = looseUnitsFromBoxes(input.boxQuantity, boxProduct.quantity);
     const reason = input.reason ?? `Break bulk: ${input.boxQuantity} box(es) -> ${looseUnits} loose units`;
     const { outResult, inResult, unitCost } = await this.prisma.$transaction((tx) =>
-      this.openBoxes(tx, { ...input, looseProductId: boxProduct.looseProductId!, looseUnits, reason }),
+      this.openBoxes(tx, { ...input, looseProductId: link.looseProductId, looseUnits, reason }),
     );
 
     if (input.syncToSquare) {
@@ -65,7 +67,7 @@ export class BreakBulkService {
     }
 
     this.logger.log(
-      `[BREAK_BULK] Broke ${input.boxQuantity} box(es) of ${input.boxProductId} into ${looseUnits} loose units of ${boxProduct.looseProductId} at $${unitCost.toFixed(4)}/unit`,
+      `[BREAK_BULK] Broke ${input.boxQuantity} box(es) of ${input.boxProductId} into ${looseUnits} loose units of ${link.looseProductId} at $${unitCost.toFixed(4)}/unit`,
     );
 
     return {
@@ -78,7 +80,7 @@ export class BreakBulkService {
 
   /**
    * Open just enough boxes for a sale that needs `needed` pieces of a suelto:
-   * the pieces it doesn't already have, from the linked box whose stock expires
+   * the pieces it doesn't already have, from the box linked to it at this store whose stock expires
    * soonest (no caducidad last, then oldest received, then id), up to what the
    * store has. Counted under the suelto's stock lock, so two covers take turns
    * and the second sees the first's sueltos. Opens nothing, without refusing,
@@ -101,8 +103,10 @@ export class BreakBulkService {
 
       const [box] = await tx.$queryRaw<Array<{ id: string; pieces: number; stock: number }>>`
         SELECT p.id, p.quantity AS pieces, SUM(i.quantity)::int AS stock
-        FROM "Product" p JOIN "Inventory" i ON i."productId" = p.id
-        WHERE p."looseProductId" = ${looseProductId} AND p.quantity > 0
+        FROM "Product" p
+        JOIN "ProductLooseLink" k ON k."boxProductId" = p.id AND k."locationId" = ${locationId}
+        JOIN "Inventory" i ON i."productId" = p.id
+        WHERE k."looseProductId" = ${looseProductId} AND p.quantity > 0
           AND i."locationId" = ${locationId} AND i.quantity > 0
         GROUP BY p.id, p.quantity
         ORDER BY MIN(i."expiryDate") ASC NULLS LAST, MIN(i."receivedAt") ASC, p.id ASC

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "../../lib/apiFetch";
+import { useAuth } from "../../lib/auth/AuthContext";
 
 export type ProductOption = {
   id: string;
@@ -117,6 +118,7 @@ export function ProductPicker({
 }
 
 function LinkProductsCard() {
+  const { user } = useAuth();
   const [boxProduct, setBoxProduct] = useState<ProductOption | null>(null);
   const [looseProduct, setLooseProduct] = useState<ProductOption | null>(null);
   const [quantity, setQuantity] = useState("");
@@ -164,6 +166,9 @@ function LinkProductsCard() {
         <h2 className="text-sm font-semibold text-(--color-ink)">Vincular caja con suelto</h2>
         <p className="mt-1 text-xs text-(--color-ink-tertiary)">
           Ambos productos ya existen por separado en Square — esto solo los relaciona aquí para poder abrir cajas.
+        </p>
+        <p className="mt-1 text-xs font-medium text-(--color-ink-secondary)">
+          Se vincula solo en {user?.currentLocation?.locationName ?? "esta sucursal"}; cada sucursal elige su propio suelto.
         </p>
       </div>
 

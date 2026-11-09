@@ -2,6 +2,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { BreakBulkScreen } from "./BreakBulkScreen";
 
+vi.mock("../../lib/auth/AuthContext", () => ({
+  useAuth: () => ({ user: { currentLocation: { locationId: "oriente", locationName: "Oriente", role: "OWNER" } } }),
+}));
+
 vi.mock("../../lib/apiFetch", () => ({
   ApiError: class extends Error {},
   apiFetch: vi.fn(async (path: string) => {
@@ -23,5 +27,13 @@ describe("BreakBulkScreen automatic openings", () => {
     expect(await screen.findByText("Abrió 1 caja de Paracetamol caja")).toBeTruthy();
     expect(screen.getByText("Faltaron 2 de Paracetamol suelto sin abrir caja: api no disponible")).toBeTruthy();
     expect(screen.getAllByText(/Venta pay-/).map((e) => e.textContent)).toEqual(["Venta pay-2", "Venta pay-1"]);
+  });
+});
+
+describe("BreakBulkScreen link card", () => {
+  it("says the link is for the store being worked at", async () => {
+    render(<BreakBulkScreen />);
+
+    expect(await screen.findByText("Se vincula solo en Oriente; cada sucursal elige su propio suelto.")).toBeTruthy();
   });
 });

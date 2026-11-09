@@ -38,6 +38,7 @@ model Location {
 
   createdAt            DateTime  @default(now())
   productsSoldOnlyHere Product[] @relation("ProductSoldOnlyAt")
+  looseLinks           ProductLooseLink[]
 }
 
 // ============================================================================
@@ -230,13 +231,11 @@ model Product {
   manualName         String? // overrides the derived name when set
   manualPresentation String? // overrides the derived presentación when set
 
-  // Sueltos: Box and Loose are two separate, already-existing Products
-  // (each its own Square item/inventory) — looseProductId links a box
-  // product to its loose counterpart so break-bulk knows where converted
-  // stock goes. `quantity` above doubles as the box->piece conversion factor.
-  looseProductId String?
-  looseProduct   Product?  @relation("BreakBulk", fields: [looseProductId], references: [id])
-  brokenFrom     Product[] @relation("BreakBulk")
+  // Sueltos: Box and Loose are two separate Products (each its own Square
+  // item/inventory), paired per store by ProductLooseLink. `quantity` above
+  // doubles as the box->piece conversion factor, the same at every store.
+  looseLinks    ProductLooseLink[] @relation("LooseLinkBox")
+  looseLinkedTo ProductLooseLink[] @relation("LooseLinkLoose")
 
   category             Category?             @relation(fields: [categoryId], references: [id])
   laboratory           Laboratory?           @relation(fields: [labId], references: [id])
@@ -1230,4 +1229,23 @@ model StockCountEntry {
   adjustment InventoryAdjustment? @relation(fields: [adjustmentId], references: [id])
 
   @@unique([stockCountId, productId])
+}
+
+/// A store's pairing of a box with its suelto: Abrir caja (and a sale short on
+/// sueltos) turns this store's boxes into this suelto. One suelto per box and
+/// store; many boxes may share a suelto. Changes stamp the box for product sync
+/// (per_store_loose_link migration).
+model ProductLooseLink {
+  id             String   @id @default(uuid())
+  locationId     String
+  boxProductId   String
+  looseProductId String
+  createdAt      DateTime @default(now())
+
+  location     Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  boxProduct   Product  @relation("LooseLinkBox", fields: [boxProductId], references: [id], onDelete: Cascade)
+  looseProduct Product  @relation("LooseLinkLoose", fields: [looseProductId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, boxProductId])
+  @@index([locationId, looseProductId])
 }
