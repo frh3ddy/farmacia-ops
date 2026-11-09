@@ -5,6 +5,7 @@ import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
+import { servesIndexHtml } from "./spa-fallback";
 import * as express from "express";
 
 // Load .env file from project root
@@ -70,41 +71,11 @@ async function bootstrap() {
     index: "index.html",
   });
 
-  // Fallback to index.html for non-API routes (client-side routing)
-  app.use(
-    (
-      req: express.Request,
-      res: express.Response,
-      next: express.NextFunction
-    ) => {
-      const path = req.path;
-      // List of API route prefixes that should NOT serve static HTML
-      const apiPrefixes = [
-        "/api",
-        "/admin",
-        "/webhooks",
-        "/locations",
-        "/auth",
-        "/employees",
-        "/inventory",
-        "/expenses",
-        "/products",
-        "/labor",
-        "/yastas",
-      ];
-      const isApiRoute = apiPrefixes.some(prefix => path.startsWith(prefix));
-      
-      if (
-        !isApiRoute &&
-        path !== "/" &&
-        !path.includes(".")
-      ) {
-        res.sendFile(join(publicPath, "index.html"));
-      } else {
-        next();
-      }
-    }
-  );
+  // Fallback to index.html for the web app's own routes (client-side routing).
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (servesIndexHtml(req.method, req.path)) res.sendFile(join(publicPath, "index.html"));
+    else next();
+  });
 
   await app.listen(port);
   console.log(`✅ API server listening on port ${port}`);
