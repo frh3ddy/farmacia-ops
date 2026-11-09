@@ -1701,6 +1701,23 @@ export class ProductsService {
     };
   }
 
+  /** The store's box→suelto pairs by box name, each side a product list row. */
+  async listLooseLinks(locationId: string) {
+    const links = await this.prisma.productLooseLink.findMany({
+      where: { locationId },
+      orderBy: { boxProduct: { name: 'asc' } },
+      select: { boxProductId: true, looseProductId: true },
+    });
+    const onlyIds = [...new Set(links.flatMap((l) => [l.boxProductId, l.looseProductId]))];
+    const { data: rows } = await this.getProducts(locationId, { onlyIds, limit: onlyIds.length });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return {
+      success: true,
+      // A side not sold at the store isn't listed; linking refuses that, so only a hand edit leaves one.
+      data: links.map((l) => ({ box: byId.get(l.boxProductId), loose: byId.get(l.looseProductId) })).filter((p) => p.box && p.loose),
+    };
+  }
+
   /**
    * Get single product by ID
    */
