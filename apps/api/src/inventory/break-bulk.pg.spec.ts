@@ -11,11 +11,13 @@ import { BreakBulkService } from './break-bulk.service';
 let prisma: PrismaService;
 let stop: () => Promise<void>;
 let centro: string;
+let oriente: string;
 
 beforeAll(async () => {
   ({ prisma, stop } = await startPostgres());
   ({ id: centro } = await prisma.location.create({ data: { squareId: 'SQ-CENTRO', name: 'Centro' } }));
   await prisma.cutoverLock.create({ data: { locationId: centro, cutoverDate: new Date('2026-09-01') } });
+  ({ id: oriente } = await prisma.location.create({ data: { squareId: 'SQ-ORIENTE', name: 'Oriente' } }));
 }, 120_000);
 
 afterAll(() => stop?.());
@@ -25,7 +27,8 @@ async function breakBulkSetup() {
   const adjustments = new InventoryAdjustmentService(prisma);
   const breakBulk = new BreakBulkService(prisma, adjustments);
   const loose = await prisma.product.create({ data: { name: `Loose-${Math.random()}` } });
-  const box = await prisma.product.create({ data: { name: `Box-${Math.random()}`, quantity: 10, looseProductId: loose.id } });
+  const box = await prisma.product.create({ data: { name: `Box-${Math.random()}`, quantity: 10 } });
+  await prisma.productLooseLink.create({ data: { locationId: centro, boxProductId: box.id, looseProductId: loose.id } });
   await prisma.inventory.create({ data: { productId: box.id, locationId: centro, quantity: 5, unitCost: 20, receivedAt: new Date('2026-10-01') } });
   return { adjustments, breakBulk, boxProductId: box.id, looseProductId: loose.id };
 }
@@ -107,6 +110,39 @@ describe('BreakBulkService (Postgres)', () => {
   });
 });
 
+describe('BreakBulkService per store', () => {
+  test("each store's own suelto", async () => {
+    const { breakBulk, boxProductId, looseProductId } = await breakBulkSetup();
+    const orienteLoose = await prisma.product.create({ data: { name: `Loose-${Math.random()}` } });
+    await prisma.productLooseLink.create({ data: { locationId: oriente, boxProductId, looseProductId: orienteLoose.id } });
+
+    await breakBulk.breakBulk({ boxProductId, locationId: centro, boxQuantity: 1 });
+
+    assert({
+      given: 'a box opened at a store, while another store pairs it with a different suelto',
+      should: "turn it into this store's suelto",
+      actual: [await stockOf(looseProductId), await stockOf(orienteLoose.id)],
+      expected: [10, 0],
+    });
+  });
+
+  test('a box linked only at another store', async () => {
+    const { breakBulk, boxProductId } = await breakBulkSetup();
+    await prisma.productLooseLink.deleteMany({ where: { boxProductId } });
+    await prisma.productLooseLink.create({ data: { locationId: oriente, boxProductId, looseProductId: (await prisma.product.create({ data: { name: 'x' } })).id } });
+
+    await prisma.product.update({ where: { id: boxProductId }, data: { name: 'Paracetamol Caja' } });
+    const error = await breakBulk.breakBulk({ boxProductId, locationId: centro, boxQuantity: 1 }).catch((e) => e);
+
+    assert({
+      given: 'a box opened at a store where it has no suelto, though another store has one',
+      should: 'refuse with a 400 naming the box and this store, and open nothing',
+      actual: [error.status, error.message, await stockOf(boxProductId)],
+      expected: [400, 'Paracetamol Caja no tiene suelto vinculado en Centro. Vincúlalo primero.', 5],
+    });
+  });
+});
+
 describe('BreakBulkService lots', () => {
   test('boxes with caducidad broken into loose units', async () => {
     const { breakBulk, boxProductId, looseProductId } = await breakBulkSetup();
@@ -141,7 +177,8 @@ describe('BreakBulkService.coverLoose', () => {
     }
     const boxIds: string[] = [];
     for (const { pieces, stock, expiry } of boxes) {
-      const box = await prisma.product.create({ data: { name: `Box-${Math.random()}`, quantity: pieces, looseProductId: loose.id } });
+      const box = await prisma.product.create({ data: { name: `Box-${Math.random()}`, quantity: pieces } });
+      await prisma.productLooseLink.create({ data: { locationId: centro, boxProductId: box.id, looseProductId: loose.id } });
       if (stock) {
         await prisma.inventory.create({
           data: { productId: box.id, locationId: centro, quantity: stock, unitCost: 20, receivedAt: new Date('2026-10-01'), expiryDate: expiry ? new Date(expiry) : null },
@@ -262,6 +299,20 @@ describe('BreakBulkService.coverLoose', () => {
     });
   });
 
+  test('a box linked to the suelto only at another store', async () => {
+    const { breakBulk, looseProductId, boxIds: [boxId] } = await coverSetup();
+    await prisma.productLooseLink.updateMany({ where: { boxProductId: boxId }, data: { locationId: oriente } });
+
+    const result = await breakBulk.coverLoose({ locationId: centro, looseProductId, needed: 3, requestKey: key() });
+
+    assert({
+      given: "a sale short on a suelto whose box in stock here is paired with it only at another store",
+      should: "open nothing, since this store's box turns into a different suelto or none",
+      actual: [result.boxesOpened, await stockOf(boxId)],
+      expected: [0, 5],
+    });
+  });
+
   test('the same request sent twice', async () => {
     const { breakBulk, looseProductId, boxIds: [boxId] } = await coverSetup();
     const requestKey = key();
@@ -285,7 +336,8 @@ describe('BreakBulkService.automaticOpenings', () => {
     await prisma.cutoverLock.create({ data: { locationId: store, cutoverDate: new Date('2026-09-01') } });
     const breakBulk = new BreakBulkService(prisma, new InventoryAdjustmentService(prisma));
     const loose = await prisma.product.create({ data: { name: 'Paracetamol suelto' } });
-    const box = await prisma.product.create({ data: { name: 'Paracetamol caja', quantity: 10, looseProductId: loose.id } });
+    const box = await prisma.product.create({ data: { name: 'Paracetamol caja', quantity: 10 } });
+    await prisma.productLooseLink.create({ data: { locationId: store, boxProductId: box.id, looseProductId: loose.id } });
     await prisma.inventory.create({ data: { productId: box.id, locationId: store, quantity: 3, unitCost: 20, receivedAt: new Date('2026-10-01') } });
 
     await breakBulk.coverLoose({ locationId: store, looseProductId: loose.id, needed: 3, requestKey: `pay-1:${loose.id}` });

@@ -43,6 +43,33 @@ async function walk(cursor?: string, limit?: number) {
 }
 
 describe('ProductsService.syncProducts', () => {
+  test('a box linked to its suelto after the phone caught up', async () => {
+    const [box, loose] = [await product('Caja'), await product('Suelto')];
+    const { cursor } = await walk();
+
+    await products.setLooseProductLink(box.id, loose.id, 10, centro);
+    const next = await walk(cursor);
+
+    assert({
+      given: "a box linked at the phone's store since the last sync",
+      should: 'resend the box with its suelto at that store',
+      actual: next.rows.filter((p) => p.id === box.id).map((p) => p.looseProductId),
+      expected: [loose.id],
+    });
+  });
+
+  test("a box linked only at another store", async () => {
+    const [box, loose] = [await product('Caja Oriente'), await product('Suelto Oriente')];
+    await products.setLooseProductLink(box.id, loose.id, 10, oriente);
+
+    assert({
+      given: 'a box linked to a suelto only at another store',
+      should: "show no suelto for it at the phone's store",
+      actual: (await walk()).rows.filter((p) => p.id === box.id).map((p) => p.looseProductId),
+      expected: [null],
+    });
+  });
+
   test('a sale after the phone caught up', async () => {
     const [sold] = [await product('Jarabe', 5), await product('Suero', 3)];
     const { cursor } = await walk();

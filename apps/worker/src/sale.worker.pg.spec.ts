@@ -631,7 +631,8 @@ describe('a sale short of sueltos with a box in stock', () => {
     const location = await prisma.location.create({ data: { squareId: `SQ-${tag}`, name: tag } });
     await prisma.cutoverLock.create({ data: { locationId: location.id, cutoverDate: new Date('2026-09-01') } });
     const suelto = await prisma.product.create({ data: { name: `Suelto ${tag}` } });
-    const box = await prisma.product.create({ data: { name: `Caja ${tag}`, quantity: 10, looseProductId: suelto.id } });
+    const box = await prisma.product.create({ data: { name: `Caja ${tag}`, quantity: 10 } });
+    await prisma.productLooseLink.create({ data: { locationId: location.id, boxProductId: box.id, looseProductId: suelto.id } });
     await prisma.catalogMapping.create({ data: { squareVariationId: `v-${tag}`, productId: suelto.id } });
     await prisma.inventory.create({ data: { productId: box.id, locationId: location.id, quantity: 2, unitCost: 20, receivedAt: new Date('2026-10-01') } });
     // Last known cost for a cover: $5 a piece, so a made-up batch shows in the cost.
@@ -691,6 +692,20 @@ describe('a sale short of sueltos with a box in stock', () => {
       covers: 0,
       left: 7,
     });
+  });
+
+  test('a suelto paired with a box only at another store', async () => {
+    const { prisma, location, suelto, box } = await sueltoStore('SUELTO9');
+    const other = await prisma.location.create({ data: { squareId: 'SQ-OTHER9', name: 'Otra' } });
+    await prisma.productLooseLink.update({ where: { locationId_boxProductId: { locationId: location.id, boxProductId: box.id } }, data: { locationId: other.id } });
+    const api = apiThatOpens(location.id, suelto.id);
+    global.fetch = api as any;
+
+    await processSaleJob(job([line('v-SUELTO9', '3', 3000)], 'p-suelto9', 'SQ-SUELTO9'));
+
+    // given a sale short on a product that is a suelto only at another store
+    // should not ask the api to open a box, and record the sale as before
+    expect({ calls: api.mock.calls.length, recorded: !!(await prisma.sale.findUnique({ where: { squareId: 'p-suelto9' } })) }).toEqual({ calls: 0, recorded: true });
   });
 
   test('sueltos in stock that cover the sale', async () => {

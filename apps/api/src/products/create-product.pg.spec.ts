@@ -54,6 +54,34 @@ const statusOf = (p: Promise<unknown>) => p.then(() => 201, (e: any) => e.status
 const productsNamed = (name: string) => prisma.product.count({ where: { name } });
 
 describe('ProductsService.createProduct (Postgres)', () => {
+  test('a box created with its suelto', async () => {
+    const { products } = productsWithSquare();
+    const loose = await prisma.product.create({ data: { name: `Suelto-${Math.random()}` } });
+    const { product } = await create(products, { looseProductId: loose.id, quantity: 10 });
+    const links = await prisma.productLooseLink.findMany({ where: { boxProductId: product!.id } });
+
+    assert({
+      given: 'a new box with a suelto chosen, created at one store',
+      should: 'link it at that store only',
+      actual: links.map((l) => [l.locationId, l.looseProductId]),
+      expected: [[centro, loose.id]],
+    });
+  });
+
+  test('a suelto not sold at the store', async () => {
+    const { products } = productsWithSquare();
+    const loose = await prisma.product.create({ data: { name: 'Suelto Norte', soldOnlyAtLocationId: norte } });
+    const name = `Caja-${Math.random()}`;
+    const error = await create(products, { name, looseProductId: loose.id }).catch((e) => e);
+
+    assert({
+      given: 'a new box whose suelto is sold only at another store',
+      should: 'refuse with a 400 naming the suelto and the store, and create nothing',
+      actual: [error.status, error.message, await productsNamed(name)],
+      expected: [400, 'Suelto Norte no se vende en Centro', 0],
+    });
+  });
+
   test('initial stock at a location before its cutover', async () => {
     const { products, square } = productsWithSquare();
     const name = `Antes-${Math.random()}`;

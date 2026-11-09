@@ -19,11 +19,20 @@ const { pg_trgm } = require('@electric-sql/pglite/contrib/pg_trgm') as { pg_trgm
 
 const MIGRATIONS = join(__dirname, '../../../../prisma/migrations');
 
-export async function startPostgres() {
+/** A bare engine with the migrations applied in order, those before `before` only when given (to test a migration's data step). */
+export async function migratedDb({ before }: { before?: string } = {}) {
   const db = await PGlite.create({ extensions: { pg_trgm } });
-  for (const dir of readdirSync(MIGRATIONS).filter((d) => !d.endsWith('.toml')).sort()) {
+  for (const dir of readdirSync(MIGRATIONS).filter((d) => !d.endsWith('.toml') && (!before || d < before)).sort()) {
     await db.exec(readFileSync(join(MIGRATIONS, dir, 'migration.sql'), 'utf8'));
   }
+  return db;
+}
+
+/** Runs one migration by its folder name. */
+export const applyMigration = (db: PGlite, name: string) => db.exec(readFileSync(join(MIGRATIONS, name, 'migration.sql'), 'utf8'));
+
+export async function startPostgres() {
+  const db = await migratedDb();
   const port = await freePort();
   const server = new PGLiteSocketServer({ db, port });
   await server.start();
