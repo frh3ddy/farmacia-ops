@@ -392,6 +392,17 @@ export class ProductsController {
   }
 
   /**
+   * The session store's box→suelto pairs, by box name.
+   * GET /products/loose-links
+   * NOTE: Must be BEFORE @Get(':id') so "loose-links" is not captured as an id param.
+   */
+  @Get('loose-links')
+  @Roles('OWNER', 'MANAGER')
+  async listLooseLinks(@Req() req: RoleGuardedRequest) {
+    return this.productsService.listLooseLinks(req.currentLocation.locationId);
+  }
+
+  /**
    * The phone's product sync: what changed at the store since `cursor`
    * (none = everything), as product list rows plus removed ids. Page until
    * hasMore is false and keep the last cursor for next time.
