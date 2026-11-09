@@ -56,7 +56,7 @@ export function UnmatchedLinesScreen() {
                 <span className="font-medium text-(--color-ink)">{l.description ?? "Sin descripción"}</span>
                 <span className="text-(--color-ink-tertiary)">
                   {l.quantity} × ${(Number(l.amount) / l.quantity).toFixed(2)} · {l.sale.location.name} ·{" "}
-                  {new Date(l.sale.createdAt).toLocaleDateString("es-MX")}
+                  {new Date(l.sale.createdAt).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" })}
                 </span>
               </button>
               {l.matchError && <p className="mt-1 text-sm text-(--color-destructive)">No se pudo asignar: {l.matchError.error}</p>}

@@ -52,10 +52,11 @@ export function ReturnsScreen() {
         Ventas de los últimos 3 días. Lo devuelto regresa a la existencia y cuenta como devolución del día; se
         paga en efectivo.
       </p>
+      <h2 id="recent-sales" className="mb-2 text-sm font-semibold text-(--color-ink)">Ventas recientes</h2>
       {sales.length === 0 ? (
         <p className="text-sm text-(--color-ink-tertiary)">No hay ventas recientes.</p>
       ) : (
-        <ul className="divide-y divide-(--color-border-standard) rounded-md border border-(--color-border-standard) bg-(--color-surface-raised)">
+        <ul aria-labelledby="recent-sales" className="divide-y divide-(--color-border-standard) rounded-md border border-(--color-border-standard) bg-(--color-surface-raised)">
           {sales.map(s => (
             <li key={s.id} className="p-3">
               <button
