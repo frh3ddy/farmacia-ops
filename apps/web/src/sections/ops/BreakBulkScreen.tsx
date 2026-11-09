@@ -297,12 +297,61 @@ function BreakBulkCard() {
   );
 }
 
+type AutomaticOpening = {
+  kind: "opened" | "covered";
+  at: string;
+  productName: string;
+  quantity: number;
+  paymentId?: string;
+  why?: string;
+};
+
+/** Boxes sales opened, and shortfalls covered without one: what to check on the shelf. */
+function AutomaticOpeningsCard() {
+  const [rows, setRows] = useState<AutomaticOpening[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ data: AutomaticOpening[] }>("/inventory/break-bulk/automatic")
+      .then((body) => setRows(body.data))
+      .catch((e) => setError(e instanceof ApiError ? e.message : "No se pudo cargar la lista"));
+  }, []);
+
+  return (
+    <div className="space-y-3 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4">
+      <div>
+        <h2 className="text-sm font-semibold text-(--color-ink)">Por ventas</h2>
+        <p className="mt-1 text-xs text-(--color-ink-tertiary)">
+          Cajas que una venta abrió sola, y sueltos que faltaron sin poder abrir caja. Si alguna no cuadra con el anaquel, corrígela con un ajuste.
+        </p>
+      </div>
+      {error && <p className="text-sm text-(--color-destructive)">{error}</p>}
+      {rows?.length === 0 && <p className="text-sm text-(--color-ink-tertiary)">Ninguna todavía.</p>}
+      <ul className="divide-y divide-(--color-border-standard)">
+        {rows?.map((r, i) => (
+          <li key={i} className="py-2 text-sm">
+            <p className="text-(--color-ink)">
+              {r.kind === "opened"
+                ? `Abrió ${r.quantity} ${r.quantity === 1 ? "caja" : "cajas"} de ${r.productName}`
+                : `Faltaron ${r.quantity} de ${r.productName} sin abrir caja: ${r.why}`}
+            </p>
+            <p className="text-xs text-(--color-ink-tertiary)">
+              <span>Venta {r.paymentId}</span> · {new Date(r.at).toLocaleString("es-MX")}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function BreakBulkScreen() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <h1 className="text-xl font-semibold text-(--color-ink)">Sueltos</h1>
       <LinkProductsCard />
       <BreakBulkCard />
+      <AutomaticOpeningsCard />
     </div>
   );
 }

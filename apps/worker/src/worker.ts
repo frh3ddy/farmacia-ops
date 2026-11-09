@@ -20,6 +20,7 @@ async function main() {
   debugLog('[DEBUG] [WORKER_MAIN] Process PID:', process.pid);
   debugLog('[DEBUG] [WORKER_MAIN] Environment:', process.env.NODE_ENV || 'development');
   
+  console.log('[WORKER_MAIN] WORKER_API_SECRET set:', !!process.env.WORKER_API_SECRET, '· API_INTERNAL_URL:', process.env.API_INTERNAL_URL || 'not set');
   console.log('[WORKER_MAIN] SQUARE_ACCESS_TOKEN set:', !!process.env.SQUARE_ACCESS_TOKEN, '· SQUARE_ENVIRONMENT:', process.env.SQUARE_ENVIRONMENT || 'not set');
 
   // Run connection tests on startup

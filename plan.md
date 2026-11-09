@@ -27,6 +27,7 @@
 - ✅ [Replay Failed Sales](tasks/replay-failed-sales-epic.md) — the owner sees failed Square sales on the integrity banner and replays them in one click; test Postgres takes a free port
 - ✅ [Trim the Worker](tasks/trim-worker-epic.md) — one payment shape, sale-path logging noise cut, consumption costs carried from the FIFO walk
 - ✅ [Other Stores' Stock](tasks/other-stores-stock-epic.md) — `GET /products/:id/stock`: every store's on-hand quantity for any role, quantities only; vision exception recorded
+- ✅ [Auto Open Box](tasks/auto-open-box-epic.md) — a sale short on sueltos opens a linked box (real FIFO cost, caducidad, Square updated); manual "Abrir caja" stays; automatic openings reviewable
 - 📋 [Yastás Float Top-Up](tasks/yastas-float-top-up-epic.md) — record a float top-up from Yastás; warn when a store's balance goes negative
 - ✅ [Product Delta Sync](tasks/product-delta-sync-epic.md) — triggers stamp each product with the transaction that changed it (raw SQL included) and mark removals; `GET /products/sync` pages them by cursor, so the phone is never stale
 - 📋 [Product Barcode](tasks/product-barcode-epic.md) — Square's `upc` stored as `Product.gtin` and matched by the scanner; one-time import; barcode on create; owner edits SKU and barcode (Square first)
