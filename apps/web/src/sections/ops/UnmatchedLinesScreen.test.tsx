@@ -41,6 +41,13 @@ describe("UnmatchedLinesScreen", () => {
     expect(screen.getByText("Sin descripción")).toBeTruthy();
   });
 
+  it("shows the time of day each amount was charged, not only the date", async () => {
+    render(<UnmatchedLinesScreen />);
+    const row = (await screen.findByText("crema roja")).closest("button")!;
+    const time = new Date("2026-10-27T18:00:00Z").toLocaleTimeString("es-MX", { timeStyle: "short" });
+    expect(row.textContent).toContain(time);
+  });
+
   it("says why a match the worker gave up on didn't go through", async () => {
     render(<UnmatchedLinesScreen />);
     expect(await screen.findByText("No se pudo asignar: Crema no tiene costo")).toBeTruthy();

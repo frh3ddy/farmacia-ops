@@ -62,6 +62,13 @@ describe("ReturnsScreen", () => {
   });
 });
 
+describe("ReturnsScreen list", () => {
+  it("labels the list as recent sales, so no row reads as a return", async () => {
+    render(<ReturnsScreen />);
+    expect(await screen.findByRole("list", { name: "Ventas recientes" })).toBeTruthy();
+  });
+});
+
 describe("ReturnsHistoryScreen", () => {
   it("lists each return with who made it, and any Square stock it could not update", async () => {
     render(<ReturnsHistoryScreen />);
