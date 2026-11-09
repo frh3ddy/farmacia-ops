@@ -1,6 +1,6 @@
-import { Controller, Post, Body, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { BreakBulkService } from './break-bulk.service';
-import { AuthGuard, LocationGuard, Roles, GuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 interface BreakBulkDto {
   boxProductId: string;
@@ -52,5 +52,12 @@ export class BreakBulkController {
       message: `Broke ${body.boxQuantity} box(es) into ${result.looseUnitsCreated} loose units`,
       data: result,
     };
+  }
+
+  /** Boxes opened by sales at the session's store, and shortfalls covered without a box. */
+  @Get('automatic')
+  @Roles('OWNER', 'MANAGER')
+  async automatic(@Req() req: RoleGuardedRequest) {
+    return { success: true, data: await this.breakBulkService.automaticOpenings(req.currentLocation.locationId) };
   }
 }

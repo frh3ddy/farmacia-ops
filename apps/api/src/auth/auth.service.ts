@@ -784,7 +784,7 @@ function pinLockoutKey(deviceId: string): string {
 }
 
 /** Constant-time equality for two tokens; a missing one never matches. */
-function sameToken(a: string | undefined, b: string): boolean {
+export function sameToken(a: string | undefined, b: string): boolean {
   if (!a) return false;
   const [x, y] = [Buffer.from(a), Buffer.from(b)];
   return x.length === y.length && crypto.timingSafeEqual(x, y);

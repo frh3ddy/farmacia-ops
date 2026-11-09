@@ -77,6 +77,7 @@ async function bootstrap() {
     else next();
   });
 
+  console.log(`[API] WORKER_API_SECRET set: ${Boolean(process.env.WORKER_API_SECRET)}`);
   await app.listen(port);
   console.log(`✅ API server listening on port ${port}`);
   console.log(`📁 Serving static files from: ${publicPath}`);

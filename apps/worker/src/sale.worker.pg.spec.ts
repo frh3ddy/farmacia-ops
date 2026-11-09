@@ -618,3 +618,158 @@ test('a sale of a product whose stock a Conteo inicial split into lots', async (
     ['2027-03', 6],
   ]);
 });
+
+describe('a sale short of sueltos with a box in stock', () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  /** A cut-over store with a suelto (mapped to `v-<tag>`), linked to a box of 10 that has 2 in stock. */
+  async function sueltoStore(tag: string, looseStock = 0) {
+    const prisma = getPrisma();
+    const location = await prisma.location.create({ data: { squareId: `SQ-${tag}`, name: tag } });
+    await prisma.cutoverLock.create({ data: { locationId: location.id, cutoverDate: new Date('2026-09-01') } });
+    const suelto = await prisma.product.create({ data: { name: `Suelto ${tag}` } });
+    const box = await prisma.product.create({ data: { name: `Caja ${tag}`, quantity: 10, looseProductId: suelto.id } });
+    await prisma.catalogMapping.create({ data: { squareVariationId: `v-${tag}`, productId: suelto.id } });
+    await prisma.inventory.create({ data: { productId: box.id, locationId: location.id, quantity: 2, unitCost: 20, receivedAt: new Date('2026-10-01') } });
+    // Last known cost for a cover: $5 a piece, so a made-up batch shows in the cost.
+    if (looseStock) await prisma.inventory.create({ data: { productId: suelto.id, locationId: location.id, quantity: looseStock, unitCost: 5, receivedAt: new Date('2026-10-01') } });
+    else await prisma.inventory.create({ data: { productId: suelto.id, locationId: location.id, quantity: 0, unitCost: 5, receivedAt: new Date('2026-09-15') } });
+    process.env.API_INTERNAL_URL = 'http://api.test';
+    process.env.WORKER_API_SECRET = 'worker-secret';
+    return { prisma, location, suelto, box };
+  }
+
+  /** Stands in for the api's cover-loose: opens one box as 10 sueltos at $2, as the real one writes it. */
+  function apiThatOpens(locationId: string, sueltoId: string, then: 'answer' | 'lose the reply' = 'answer') {
+    return jest.fn(async (_url: string, init: { body: string }) => {
+      const { requestKey } = JSON.parse(init.body);
+      const prisma = getPrisma();
+      const batch = await prisma.inventory.create({ data: { productId: sueltoId, locationId, quantity: 10, unitCost: 2, receivedAt: new Date() } });
+      await prisma.inventoryAdjustment.create({
+        data: { locationId, productId: sueltoId, type: 'BREAK_BULK_IN', quantity: 10, unitCost: 2, totalCost: 20, createdBatchId: batch.id, clientRequestId: `auto-open:${requestKey}:in` },
+      });
+      if (then === 'lose the reply') throw new Error('socket hang up');
+      return { ok: true, status: 201, json: async () => ({ success: true, data: { boxesOpened: 1 } }) };
+    });
+  }
+
+  const failingApi = () => jest.fn(async () => { throw new Error('connect ECONNREFUSED'); });
+  const lastTry = (j: Job) => Object.assign(j, { attemptsMade: 2, opts: { attempts: 3 } });
+  const earlierTry = (j: Job) => Object.assign(j, { attemptsMade: 0, opts: { attempts: 3 } });
+  const covers = (productId: string) => getPrisma().inventoryAdjustment.findMany({ where: { productId, type: 'AUTO_SALE_COVER' } });
+  const stock = async (productId: string, locationId: string) =>
+    (await getPrisma().inventory.aggregate({ where: { productId, locationId }, _sum: { quantity: true } }))._sum.quantity;
+
+  test('two lines of the same suelto, none in stock', async () => {
+    const { location, suelto } = await sueltoStore('SUELTO1');
+    const api = apiThatOpens(location.id, suelto.id);
+    global.fetch = api as any;
+
+    await processSaleJob(job([line('v-SUELTO1', '1', 1000, 'a'), line('v-SUELTO1', '2', 2000, 'b')], 'p-suelto1', 'SQ-SUELTO1'));
+    const sale = await getPrisma().sale.findUniqueOrThrow({ where: { squareId: 'p-suelto1' } });
+    const [url, init] = api.mock.calls[0] as any;
+
+    // given a sale of 1 + 2 sueltos with none in stock and a box of 10
+    // should ask the api once for the 3, with the secret, and cost the sale from the opened box
+    expect({
+      calls: api.mock.calls.length,
+      url,
+      secret: init.headers['x-worker-secret'],
+      body: JSON.parse(init.body),
+      cost: sale.totalCost.toString(),
+      covers: (await covers(suelto.id)).length,
+      left: await stock(suelto.id, location.id),
+    }).toEqual({
+      calls: 1,
+      url: 'http://api.test/internal/inventory/cover-loose',
+      secret: 'worker-secret',
+      body: { locationId: location.id, looseProductId: suelto.id, needed: 3, requestKey: `p-suelto1:${suelto.id}` },
+      cost: '6',
+      covers: 0,
+      left: 7,
+    });
+  });
+
+  test('sueltos in stock that cover the sale', async () => {
+    const { suelto } = await sueltoStore('SUELTO2', 5);
+    const api = apiThatOpens('unused', suelto.id);
+    global.fetch = api as any;
+
+    await processSaleJob(job([line('v-SUELTO2', '3', 3000)], 'p-suelto2', 'SQ-SUELTO2'));
+
+    // given a sale the sueltos on the shelf already cover
+    // should not call the api
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  test('the api failing on a try that is not the last', async () => {
+    await sueltoStore('SUELTO3');
+    global.fetch = failingApi() as any;
+
+    const outcome = await processSaleJob(earlierTry(job([line('v-SUELTO3', '3', 3000)], 'p-suelto3', 'SQ-SUELTO3'))).then(() => 'recorded', () => 'failed');
+
+    // given the api unreachable with tries left
+    // should fail the job so it retries, recording nothing
+    expect([outcome, await getPrisma().sale.count({ where: { squareId: 'p-suelto3' } })]).toEqual(['failed', 0]);
+  });
+
+  test('the api failing on the last try', async () => {
+    const { suelto } = await sueltoStore('SUELTO4');
+    global.fetch = failingApi() as any;
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await processSaleJob(lastTry(job([line('v-SUELTO4', '3', 3000)], 'p-suelto4', 'SQ-SUELTO4')));
+    const [cover] = await covers(suelto.id);
+    const warned = warn.mock.calls.some(([m]) => String(m).includes('p-suelto4'));
+    warn.mockRestore();
+
+    // given the api unreachable on the job's last try
+    // should record the sale with today's cover, labeled as a box not opened, and warn
+    expect([cover?.quantity, cover?.notes?.includes('api no disponible'), warned]).toEqual([3, true, true]);
+  });
+
+  test('the api opening the box but its reply lost', async () => {
+    const { location, suelto } = await sueltoStore('SUELTO5');
+    global.fetch = apiThatOpens(location.id, suelto.id, 'lose the reply') as any;
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const outcome = await processSaleJob(earlierTry(job([line('v-SUELTO5', '3', 3000)], 'p-suelto5', 'SQ-SUELTO5'))).then(() => 'recorded', () => 'failed');
+    const sale = await getPrisma().sale.findUniqueOrThrow({ where: { squareId: 'p-suelto5' } });
+    const warned = warn.mock.calls.some(([m]) => String(m).includes('p-suelto5'));
+    warn.mockRestore();
+
+    // given the api committed the opening but the worker never got the answer, with tries left
+    // should find the opening and sell from it now: no retry, no warning, nothing covered
+    expect([outcome, warned, sale.totalCost.toString(), (await covers(suelto.id)).length, await stock(suelto.id, location.id)]).toEqual(['recorded', false, '6', 0, 7]);
+  });
+
+  test('a sale dated before the store cutover', async () => {
+    const { location, suelto } = await sueltoStore('SUELTO7');
+    // The payment is from 2026-10-27; this store was cut over after it.
+    await getPrisma().cutoverLock.updateMany({ where: { locationId: location.id }, data: { cutoverDate: new Date('2026-12-01') } });
+    const api = apiThatOpens(location.id, suelto.id);
+    global.fetch = api as any;
+
+    await processSaleJob(job([line('v-SUELTO7', '3', 3000)], 'p-suelto7', 'SQ-SUELTO7')).catch(() => undefined);
+
+    // given a suelto sale the store's cutover means is never recorded
+    // should open no box for it
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  test('a store with no box in stock for the suelto', async () => {
+    const { location, suelto, box } = await sueltoStore('SUELTO6');
+    await getPrisma().inventory.updateMany({ where: { productId: box.id }, data: { quantity: 0 } });
+    global.fetch = jest.fn(async () => ({ ok: true, status: 201, json: async () => ({ success: true, data: { boxesOpened: 0 } }) })) as any;
+
+    await processSaleJob(job([line('v-SUELTO6', '3', 3000)], 'p-suelto6', 'SQ-SUELTO6'));
+    const [cover] = await covers(suelto.id);
+
+    // given the api opening nothing because no box has stock
+    // should cover the shortfall as today, labeled why
+    expect([cover?.quantity, cover?.notes?.includes('sin caja con existencias'), await stock(suelto.id, location.id)]).toEqual([3, true, 0]);
+  });
+});

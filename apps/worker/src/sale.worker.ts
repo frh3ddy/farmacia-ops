@@ -109,6 +109,7 @@ async function calculateFIFOCost(
   quantitySold: number,
   squareId: string,
   client: Prisma.TransactionClient,
+  coverWhy?: string,
 ): Promise<FifoConsumptionResult> {
   // Step 1: Query inventory batches (FIFO order - NON-NEGOTIABLE)
   const batches = await client.inventory.findMany({
@@ -155,7 +156,8 @@ async function calculateFIFOCost(
           totalCost: unitCost.mul(shortfall),
           createdBatchId: coveringBatch.id,
           reason: 'Auto-covered to fulfill a Square sale that exceeded recorded stock',
-          notes: `squareId=${squareId}`,
+          // The api lists labeled covers by this exact text (BreakBulkService.automaticOpenings).
+          notes: coverWhy ? `squareId=${squareId} · caja no abierta: ${coverWhy}` : `squareId=${squareId}`,
           adjustedBy: 'SYSTEM',
           effectiveDate: new Date(),
         },
@@ -231,9 +233,10 @@ async function processSaleItem(
   squareId: string,
   squareLineUid: string | null,
   client: Prisma.TransactionClient,
+  coverWhy?: string,
 ): Promise<SaleItemOutput> {
   // Step 1: Calculate FIFO cost (this queries inventory)
-  const costResult = await calculateFIFOCost(productId, locationId, quantitySold, squareId, client);
+  const costResult = await calculateFIFOCost(productId, locationId, quantitySold, squareId, client, coverWhy);
 
   // Step 2: Deduct inventory (atomic update)
   await deductInventory(costResult.consumedBatches, client);
@@ -337,7 +340,8 @@ export async function processSaleJob(job: Job): Promise<void> {
 
   // An exchange where the customer pays the difference: the order also lists what came back.
   await recordSquareReturns(returnLines(order), 'Cambio en Square');
-  await recordOrderSale(order, { orderId, squareId, locationId, createdAt });
+  const lastTry = job.attemptsMade + 1 >= (job.opts?.attempts ?? 1);
+  await recordOrderSale(order, { orderId, squareId, locationId, createdAt, lastTry });
 }
 
 async function fetchOrder(orderId: string, squareId: string) {
@@ -363,12 +367,83 @@ type SquareOrder = { lineItems?: OrderLine[] | null; returns?: Array<{ returnLin
 const returnLines = (order: SquareOrder) => (order.returns ?? []).flatMap((r) => r.returnLineItems ?? []);
 
 /**
+ * Opens linked boxes, through the api's "Abrir caja" code, for each suelto the
+ * sale needs more of than the store has. Returns, per product, why a shortfall
+ * the sale still has will be covered without a box (the cover's label).
+ *
+ * A failed call fails the job while tries remain. On the last try the sale is
+ * recorded anyway, with today's cover, unless the api opened the box and only
+ * its reply was lost (found by the opening's key).
+ */
+async function openBoxesForSale(
+  lines: Array<{ productId: string; quantitySold: number }>,
+  { squareId, squareLocationId, createdAt, lastTry }: { squareId: string; squareLocationId: string; createdAt: Date; lastTry: boolean },
+): Promise<Map<string, string>> {
+  const why = new Map<string, string>();
+  const prisma = getPrisma();
+  // Only where the sale will be recorded: the transaction refuses or skips the rest.
+  const location = await prisma.location.findUnique({ where: { squareId: squareLocationId } });
+  const cutover = location && (await storeCutover(prisma, location.id));
+  if (!location || !cutover || createdAt <= cutover.cutoverDate) return why;
+
+  const needed = new Map<string, number>();
+  for (const { productId, quantitySold } of lines) needed.set(productId, (needed.get(productId) ?? 0) + quantitySold);
+
+  // One product at a time, up to 10s each: fine for the job lock, which BullMQ renews
+  // while the job awaits (lockDuration / 2), so a slow api never makes it stall.
+  for (const [productId, pieces] of needed) {
+    if (!(await prisma.product.count({ where: { looseProductId: productId } }))) continue; // not a suelto
+    const { _sum } = await prisma.inventory.aggregate({ where: { productId, locationId: location.id, quantity: { gt: 0 } }, _sum: { quantity: true } });
+    if ((_sum.quantity ?? 0) >= pieces) continue;
+
+    const requestKey = `${squareId}:${productId}`;
+    try {
+      const { boxesOpened } = await coverLoose({ locationId: location.id, looseProductId: productId, needed: pieces, requestKey });
+      why.set(productId, boxesOpened ? 'cajas insuficientes' : 'sin caja con existencias');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      // Opened, but the reply was lost. The usual cause: the api tells Square before it
+      // answers, and a slow Square outlasts the timeout. Without this the sale would retry
+      // and warn of an outage for nothing (the transaction still covers only real shortfalls).
+      if (await prisma.inventoryAdjustment.findUnique({ where: { clientRequestId: `auto-open:${requestKey}:in` } })) continue;
+      if (!lastTry) throw new Error(`Box opening for payment ${squareId} failed, retrying: ${reason}`);
+      console.warn(`[SALE_WORKER] Payment ${squareId}: no box opened for product ${productId} (${reason}); covering without one`);
+      why.set(productId, 'api no disponible');
+    }
+  }
+  return why;
+}
+
+/** The api's cover-loose route (BreakBulkService.coverLoose), over Railway's private network. */
+async function coverLoose(body: { locationId: string; looseProductId: string; needed: number; requestKey: string }): Promise<{ boxesOpened: number }> {
+  const url = process.env.API_INTERNAL_URL;
+  const secret = process.env.WORKER_API_SECRET;
+  if (!url || !secret) throw new Error('API_INTERNAL_URL or WORKER_API_SECRET is not set');
+  const response = await fetch(`${url}/internal/inventory/cover-loose`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-worker-secret': secret },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`api answered ${response.status}`);
+  return ((await response.json()) as { data: { boxesOpened: number } }).data;
+}
+
+/** The store's latest cutover, or the one covering every store. */
+function storeCutover(client: Prisma.TransactionClient | PrismaClient, locationId: string) {
+  return client.cutoverLock.findFirst({
+    where: { OR: [{ locationId }, { locationId: null }], isLocked: true },
+    orderBy: { cutoverDate: 'desc' },
+  });
+}
+
+/**
  * Records an order's line items as a sale: FIFO stock and cost, Yastás lines and custom amounts.
  * A failure rolls the whole order back; the worker manager logs it (failed-job.ts).
  */
 async function recordOrderSale(
   order: SquareOrder,
-  { orderId, squareId, locationId, createdAt }: { orderId: string; squareId: string; locationId: string; createdAt: Date },
+  { orderId, squareId, locationId, createdAt, lastTry = true }: { orderId: string; squareId: string; locationId: string; createdAt: Date; lastTry?: boolean },
 ): Promise<void> {
   const orderLineItems = order.lineItems || [];
   if (orderLineItems.length === 0) {
@@ -396,6 +471,8 @@ async function recordOrderSale(
   }
 
   const { saleItems: lineItems, yastasLines, customLines } = toSaleLines(orderLineItems, mappings, { orderId, squareId, locationId });
+  // Before the transaction: no HTTP call while it holds locks.
+  const coverWhy = await openBoxesForSale(lineItems, { squareId, squareLocationId: locationId, createdAt, lastTry });
 
   try {
     await getPrisma().$transaction(
@@ -406,10 +483,7 @@ async function recordOrderSale(
         if (!location) {
           throw new SaleValidationError(`Square location ${locationId} is not linked to a store`, { locationId, squareId });
         }
-        const cutover = await tx.cutoverLock.findFirst({
-          where: { OR: [{ locationId: location.id }, { locationId: null }], isLocked: true },
-          orderBy: { cutoverDate: 'desc' },
-        });
+        const cutover = await storeCutover(tx, location.id);
         if (!cutover) {
           throw new SaleValidationError(`${location.name} has not finished its cutover; replay this sale once it has`, { locationId, squareId });
         }
@@ -470,6 +544,7 @@ async function recordOrderSale(
             squareId,
             lineItem.lineUid,
             tx,
+            coverWhy.get(lineItem.productId),
           ));
         }
 
