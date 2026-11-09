@@ -230,3 +230,55 @@ describe('ProductsService.setYastasMapping (Postgres)', () => {
     });
   });
 });
+
+describe('ProductsController.listLooseLinks (Postgres)', () => {
+  test("a store's links", async () => {
+    const { id: here } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Aquí' } });
+    const { id: there } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Allá' } });
+    const boxB = await newProduct({ name: `B caja ${Math.random()}` });
+    const boxA = await newProduct({ name: `A caja ${Math.random()}` });
+    const loose = await newProduct();
+    const otherLoose = await newProduct();
+    await prisma.productLooseLink.createMany({
+      data: [
+        { locationId: here, boxProductId: boxB, looseProductId: loose },
+        { locationId: here, boxProductId: boxA, looseProductId: loose },
+        { locationId: there, boxProductId: boxA, looseProductId: otherLoose },
+      ],
+    });
+    const controller = new ProductsController(products, prisma, null as any, null as any, null as any);
+    const req = { currentLocation: { locationId: here, role: 'MANAGER' } } as any;
+
+    const { data } = await controller.listLooseLinks(req);
+
+    assert({
+      given: 'boxes linked at the session store and at another store',
+      should: "list only this store's pairs by box name, as product rows with this store's suelto",
+      actual: data.map((p: any) => [p.box.id, p.box.looseProductId, p.loose.id]),
+      expected: [
+        [boxA, loose, loose],
+        [boxB, loose, loose],
+      ],
+    });
+  });
+
+  test('a link whose product is not sold at the store', async () => {
+    const { id: here } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Aquí' } });
+    const { id: there } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Allá' } });
+    const box = await newProduct({ soldOnlyAtLocationId: there });
+    const loose = await newProduct();
+    // Linking refuses this and nothing changes where a product is sold; only a hand edit gets here.
+    await prisma.productLooseLink.create({ data: { locationId: here, boxProductId: box, looseProductId: loose } });
+    const controller = new ProductsController(products, prisma, null as any, null as any, null as any);
+    const req = { currentLocation: { locationId: here, role: 'MANAGER' } } as any;
+
+    const { data } = await controller.listLooseLinks(req);
+
+    assert({
+      given: 'a link at a store that does not sell its box',
+      should: 'leave the pair out rather than send a pair missing a side',
+      actual: data,
+      expected: [],
+    });
+  });
+});
