@@ -155,6 +155,8 @@ function CreateTransferCard({ onCreated }: { onCreated: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // One per send: a resend after a lost response ships once. Renewed after a send goes through.
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     apiFetch<LocationListResponse>("/locations").then(body => setLocations(body.data)).catch(() => {});
@@ -179,10 +181,17 @@ function CreateTransferCard({ onCreated }: { onCreated: () => void }) {
 
     setSubmitting(true);
     try {
-      await apiFetch("/transfers", {
+      // Confirmed on arrival: the destination receives it under "En tránsito".
+      await apiFetch("/transfers/batch", {
         method: "POST",
-        body: JSON.stringify({ productId: product.id, toLocationId, quantity: quantityNum }),
+        body: JSON.stringify({
+          toLocationId,
+          clientRequestId: requestId,
+          receiveOnSend: false,
+          items: [{ productId: product.id, quantity: quantityNum }],
+        }),
       });
+      setRequestId(crypto.randomUUID());
       setSuccessMessage(`Transferencia de ${quantityNum} unidad(es) de "${product.name}" enviada.`);
       setProduct(null);
       setToLocationId("");

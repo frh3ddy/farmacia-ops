@@ -24,6 +24,8 @@ model Location {
   receivings      InventoryReceiving[]
   transfersOut    Transfer[]            @relation("TransferFrom")
   transfersIn     Transfer[]            @relation("TransferTo")
+  shipmentsOut    Shipment[]            @relation("ShipmentFrom")
+  shipmentsIn     Shipment[]            @relation("ShipmentTo")
 
   // Authentication relations
   devices             Device[]
@@ -705,6 +707,7 @@ model Transfer {
   shippedAt      DateTime?
   receivedAt     DateTime?
   createdBy      String?
+  shipmentId     String? // the multi-product send it went in; null for a single transfer
 
   // Square sync of the receipt (sent once, on receive)
   squareSynced    Boolean   @default(false)
@@ -714,14 +717,35 @@ model Transfer {
   product      Product        @relation(fields: [productId], references: [id])
   fromLocation Location       @relation("TransferFrom", fields: [fromLocationId], references: [id])
   toLocation   Location       @relation("TransferTo", fields: [toLocationId], references: [id])
+  shipment     Shipment?      @relation(fields: [shipmentId], references: [id])
   lines        TransferLine[]
 
   createdAt DateTime @default(now())
 
+  @@index([shipmentId])
   @@index([productId])
   @@index([fromLocationId])
   @@index([toLocationId])
   @@index([status])
+}
+
+// Several products sent together, one Transfer each. Its status is derived from
+// its transfers (in transit while any is), since each can still be received alone.
+model Shipment {
+  id              String   @id @default(uuid())
+  fromLocationId  String
+  toLocationId    String
+  receiveOnSend   Boolean // received in the same step it was sent; nobody counted it on arrival
+  clientRequestId String   @unique // one per send, so a resend ships once
+  createdBy       String?
+  shippedAt       DateTime @default(now())
+
+  fromLocation Location   @relation("ShipmentFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location   @relation("ShipmentTo", fields: [toLocationId], references: [id])
+  transfers    Transfer[]
+
+  @@index([fromLocationId])
+  @@index([toLocationId])
 }
 
 model TransferLine {

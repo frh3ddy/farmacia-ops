@@ -330,9 +330,14 @@ export class InventoryAdjustmentService {
 
       previousTotal = batches.reduce((sum, b) => sum + b.quantity, 0);
       if (quantityToRemove > previousTotal) {
-        throw new BadRequestException(
-          `No hay suficientes existencias: se pidieron ${quantityToRemove} y hay ${previousTotal}`
-        );
+        throw new BadRequestException({
+          success: false,
+          code: 'INSUFFICIENT_STOCK',
+          message: `No hay suficientes existencias: se pidieron ${quantityToRemove} y hay ${previousTotal}`,
+          productId: input.productId,
+          requested: quantityToRemove,
+          available: previousTotal,
+        });
       }
 
       // Calculate FIFO consumption
