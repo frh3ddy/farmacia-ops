@@ -136,7 +136,7 @@ describe('TransferService (Postgres, Square recorded)', () => {
     const request = batchCreateChanges.mock.calls[0][0];
     assert({
       given: '6 shipped and 4 received',
-      should: 'move the 4 from Centro to Norte and record the 2 lost in transit as waste at Centro, in one call keyed on the transfer',
+      should: 'take the 6 out at Centro, 2 of them as lost in transit, and add the 4 at Norte, each change at one store (a move between stores needs a paid Square plan), in one call',
       actual: [
         batchCreateChanges.mock.calls.length,
         request.idempotencyKey,
@@ -145,12 +145,36 @@ describe('TransferService (Postgres, Square recorded)', () => {
       ],
       expected: [
         1,
-        transfer.id,
+        `${transfer.id}:adjust`,
         [
-          ['IN_STOCK', 'IN_STOCK', 'SQ-CENTRO', 'SQ-NORTE', '4'],
+          ['IN_STOCK', 'NONE', 'SQ-CENTRO', 'SQ-CENTRO', '4'],
+          ['NONE', 'IN_STOCK', 'SQ-NORTE', 'SQ-NORTE', '4'],
           ['IN_STOCK', 'WASTE', 'SQ-CENTRO', 'SQ-CENTRO', '2'],
         ],
         { synced: true },
+      ],
+    });
+  });
+
+  test('a product mapped to another Square variation at the destination', async () => {
+    const { transfers, batchCreateChanges, productId } = await transferSetup();
+    await prisma.catalogMapping.create({ data: { productId, locationId: norte, squareVariationId: `v-norte-${productId}` } });
+    const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 });
+
+    await transfers.receive({
+      transferId: transfer.id,
+      lineReceipts: [{ transferLineId: transfer.lines[0].id, quantityReceived: 4 }],
+      syncToSquare: true,
+    });
+
+    assert({
+      given: "a destination whose catalog mapping names its own variation",
+      should: "add the received units to the destination's variation and take them out of the origin's",
+      actual: batchCreateChanges.mock.calls[0][0].changes.map(({ adjustment: a }: any) => [a.toLocationId, a.toState, a.catalogObjectId]),
+      expected: [
+        ['SQ-CENTRO', 'NONE', `v-${productId}`],
+        ['SQ-NORTE', 'IN_STOCK', `v-norte-${productId}`],
+        ['SQ-CENTRO', 'WASTE', `v-${productId}`],
       ],
     });
   });
