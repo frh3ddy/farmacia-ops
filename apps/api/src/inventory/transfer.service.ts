@@ -134,9 +134,12 @@ export class TransferService {
   }
 
   /**
-   * Tells Square about a received transfer in one call: the received units move
-   * between the two locations (IN_STOCK → IN_STOCK), and any shortfall — lost in
-   * transit — is waste at the origin. The shipment itself isn't pushed, so
+   * Tells Square about a received transfer in one call: the received units
+   * leave the origin (IN_STOCK → NONE) and arrive at the destination
+   * (NONE → IN_STOCK), and any shortfall — lost in transit — is waste at the
+   * origin. Every change stays at one location: a move between locations
+   * (IN_STOCK → IN_STOCK) is a Square transfer, which needs a paid plan
+   * (MERCHANT_SUBSCRIPTION_NOT_FOUND). The shipment itself isn't pushed, so
    * Square holds the units at the origin until now.
    */
   private async syncReceiveToSquare(
@@ -156,19 +159,24 @@ export class TransferService {
       const to = squareIdOf.get(transfer.toLocationId);
       if (!from || !to) return { synced: false, error: 'Location not linked to Square' };
 
-      const catalogObjectId = await findSquareVariationId(this.prisma, transfer.productId, transfer.fromLocationId);
-      if (!catalogObjectId) return { synced: false, error: 'Product not mapped to Square catalog' };
+      // Each store's change names the variation that store maps to.
+      const [fromVariationId, toVariationId] = await Promise.all([
+        findSquareVariationId(this.prisma, transfer.productId, transfer.fromLocationId),
+        findSquareVariationId(this.prisma, transfer.productId, transfer.toLocationId),
+      ]);
+      if (!fromVariationId || !toVariationId) return { synced: false, error: 'Product not mapped to Square catalog' };
 
       const occurredAt = new Date().toISOString();
       const change = (
-        fromLocationId: string, toLocationId: string, toState: 'IN_STOCK' | 'WASTE', quantity: number, reference: string,
+        catalogObjectId: string, locationId: string,
+        fromState: 'IN_STOCK' | 'NONE', toState: 'IN_STOCK' | 'NONE' | 'WASTE', quantity: number, reference: string,
       ) => ({
         type: 'ADJUSTMENT' as const,
         adjustment: {
           catalogObjectId,
-          fromLocationId,
-          toLocationId,
-          fromState: 'IN_STOCK' as const,
+          fromLocationId: locationId,
+          toLocationId: locationId,
+          fromState,
           toState,
           quantity: quantity.toString(),
           occurredAt,
@@ -177,8 +185,13 @@ export class TransferService {
       });
       const lost = transfer.quantity - received;
       const changes = [
-        ...(received > 0 ? [change(from, to, 'IN_STOCK', received, 'receive')] : []),
-        ...(lost > 0 ? [change(from, from, 'WASTE', lost, 'lost')] : []),
+        ...(received > 0
+          ? [
+              change(fromVariationId, from, 'IN_STOCK', 'NONE', received, 'out'),
+              change(toVariationId, to, 'NONE', 'IN_STOCK', received, 'in'),
+            ]
+          : []),
+        ...(lost > 0 ? [change(fromVariationId, from, 'IN_STOCK', 'WASTE', lost, 'lost')] : []),
       ];
       if (changes.length === 0) return { synced: true };
 
@@ -186,7 +199,9 @@ export class TransferService {
         // Keyed on the transfer itself (not randomUUID()) so a retry
         // (retrySquareSync) replays the same key — Square returns the
         // original result instead of double-applying the stock change.
-        idempotencyKey: transfer.id,
+        // ':adjust' leaves the key used by the old between-stores move, so a
+        // transfer Square refused for the plan isn't answered from that refusal.
+        idempotencyKey: `${transfer.id}:adjust`,
         changes,
       }, this.logger, 'transfer receive');
     } catch (error) {
