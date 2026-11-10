@@ -66,4 +66,27 @@ describe("TransfersScreen", () => {
     expect(await screen.findByText("Jarabe")).toBeTruthy();
     expect(screen.queryByText(/Sin actualizar en Square/)).toBeNull();
   });
+
+  it("sends a product as a shipment confirmed on arrival, once per send", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path: string) => {
+      if (path === "/locations") return { success: true, data: [{ id: "norte", name: "Norte" }] };
+      if (path.startsWith("/products?search=")) return { success: true, data: [{ id: "p-1", name: "Jarabe", sku: null }] };
+      return { success: true, data: [] };
+    });
+    render(<TransfersScreen />);
+
+    fireEvent.change(screen.getByPlaceholderText("Buscar por nombre o SKU…"), { target: { value: "jar" } });
+    fireEvent.click(await screen.findByText("Jarabe", {}, { timeout: 2000 }));
+    await screen.findByRole("option", { name: "Norte" });
+    fireEvent.change(screen.getByDisplayValue("Elige una sucursal"), { target: { value: "norte" } });
+    fireEvent.change(screen.getByPlaceholderText("10"), { target: { value: "3" } });
+    fireEvent.click(screen.getByText("Enviar transferencia"));
+
+    await screen.findByText(/enviada/);
+    const sends = vi.mocked(apiFetch).mock.calls.filter(([p]) => p === "/transfers/batch");
+    expect(sends).toHaveLength(1);
+    const body = JSON.parse(sends[0][1]!.body as string);
+    expect(body).toMatchObject({ toLocationId: "norte", receiveOnSend: false, items: [{ productId: "p-1", quantity: 3 }] });
+    expect(typeof body.clientRequestId).toBe("string");
+  });
 });
