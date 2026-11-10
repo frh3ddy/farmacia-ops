@@ -1,6 +1,6 @@
-import { Controller, Post, Get, Body, Param, Query, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, Req, UseGuards, HttpException, HttpStatus, ForbiddenException } from '@nestjs/common';
 import { TransferStatus } from '@prisma/client';
-import { TransferService } from './transfer.service';
+import { TransferService, ShipmentStatus } from './transfer.service';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 import { readableSync, squareSyncReason } from '../square/square-sync-reason';
 
@@ -11,6 +11,18 @@ interface ShipTransferDto {
   quantity: number;
   reason?: string;
   notes?: string;
+}
+
+interface ShipBatchDto {
+  toLocationId: string;
+  clientRequestId: string;
+  /** Received in the same step it is sent; required. */
+  receiveOnSend: boolean;
+  items: { productId: string; quantity: number }[];
+}
+
+interface ReceiveShipmentDto {
+  lines?: { transferLineId: string; quantityReceived: number }[];
 }
 
 interface ReceiveTransferDto {
@@ -57,6 +69,79 @@ export class TransferController {
     });
 
     return { success: true, message: `Shipped ${body.quantity} unit(s)`, data: result };
+  }
+
+  /**
+   * Send several products from the session's store in one go, all or nothing.
+   * Receiving on send needs access to the destination too (OWNER: any).
+   * POST /transfers/batch
+   */
+  @Post('batch')
+  @Roles('OWNER', 'MANAGER')
+  async shipBatch(@Body() body: ShipBatchDto, @Req() req: GuardedRequest) {
+    const fromLocationId = req.currentLocation?.locationId;
+    if (!fromLocationId) throw new HttpException({ success: false, message: 'fromLocationId is required' }, HttpStatus.BAD_REQUEST);
+    if (!body.toLocationId) throw new HttpException({ success: false, message: 'toLocationId is required' }, HttpStatus.BAD_REQUEST);
+    assertLocationAccess(req, fromLocationId);
+    if (typeof body.receiveOnSend !== 'boolean') {
+      throw new HttpException({ success: false, message: 'receiveOnSend must be true or false' }, HttpStatus.BAD_REQUEST);
+    }
+    const receiveOnSend = body.receiveOnSend;
+    if (receiveOnSend) {
+      try {
+        assertLocationAccess(req, body.toLocationId);
+      } catch {
+        throw new ForbiddenException({
+          success: false,
+          code: 'RECEIVE_ON_SEND_NOT_ALLOWED',
+          message: 'No tienes acceso a la sucursal de destino: envíala para confirmar al llegar',
+        });
+      }
+    }
+
+    const data = await this.transferService.shipBatch({
+      fromLocationId,
+      toLocationId: body.toLocationId,
+      clientRequestId: body.clientRequestId,
+      receiveOnSend,
+      items: body.items,
+      createdBy: req.employee?.id,
+    });
+    return { success: true, data };
+  }
+
+  /**
+   * Shipments to or from a store, newest first. Scoped like GET /transfers.
+   * GET /transfers/shipments?locationId=&status=IN_TRANSIT|RECEIVED
+   */
+  @Get('shipments')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async getShipments(@Query('locationId') locationId: string, @Query('status') status: string, @Req() req: RoleGuardedRequest) {
+    if (status && status !== 'IN_TRANSIT' && status !== 'RECEIVED') {
+      throw new HttpException({ success: false, message: 'Invalid status. Must be one of: IN_TRANSIT, RECEIVED' }, HttpStatus.BAD_REQUEST);
+    }
+    const data = await this.transferService.getShipments({
+      locationId: scopedLocationId(req, locationId) || undefined,
+      status: (status as ShipmentStatus) || undefined,
+    });
+    return { success: true, data };
+  }
+
+  /**
+   * Receive every product of a shipment still in transit; a line not listed
+   * arrives at its sent quantity.
+   * POST /transfers/shipments/:id/receive
+   */
+  @Post('shipments/:id/receive')
+  @Roles('OWNER', 'MANAGER')
+  async receiveShipment(@Param('id') id: string, @Body() body: ReceiveShipmentDto, @Req() req: GuardedRequest) {
+    const data = await this.transferService.receiveShipment({
+      shipmentId: id,
+      lineReceipts: body.lines,
+      receivedBy: req.employee?.id,
+      assertAccess: (toLocationId) => assertLocationAccess(req, toLocationId),
+    });
+    return { success: true, data };
   }
 
   /**
