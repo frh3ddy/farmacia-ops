@@ -92,6 +92,23 @@ describe('appStockDays()', () => {
     });
   });
 
+  test('stock that came in with no movement record', async () => {
+    // A product created in the app with its initial stock (or a store's cutover opening batch): no receiving, transfer or adjustment.
+    await prisma.inventory.create({
+      data: { productId: product, locationId: centro, quantity: 6, unitCost: 10, receivedAt: at('2026-11-09T17:00:00Z'), source: 'OPENING_BALANCE', createdAt: at('2026-11-09T17:00:00Z') },
+    });
+
+    assert({
+      given: 'a batch created after the first day without a receiving, transfer or adjustment',
+      should: 'count it from the day it was created, not as already on hand, and not as a restock',
+      actual: (await appStockDays(prisma, centro, '2026-11-08')).get(product),
+      expected: [
+        { day: '2026-11-08', quantity: 0, restocked: false },
+        { day: '2026-11-09', quantity: 6, restocked: false },
+      ],
+    });
+  });
+
   test('a received transfer is a restock', async () => {
     const source = await prisma.inventory.create({ data: { productId: product, locationId: oriente, quantity: 0, unitCost: 10, receivedAt: at('2026-10-01') } });
     const arrived = await prisma.inventory.create({

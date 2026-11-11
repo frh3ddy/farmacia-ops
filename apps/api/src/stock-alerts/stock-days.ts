@@ -7,8 +7,12 @@ const DAY = 86_400_000;
 /**
  * A store's end-of-day stock per product from `from` (a store day) to today,
  * from the app's own movements: walked back from what is on hand now. Units
- * come in as batches (receivings and received transfers are restocks; found,
- * returned or broken-bulk units aren't) and go out as consumptions. Lot
+ * come in as batches, whatever created them (receivings and received transfers
+ * are restocks; found, returned or broken-bulk units, a new product's initial
+ * stock and cutover opening stock aren't) and go out as consumptions.
+ * A consumption is dated when it was recorded (consumedAt), so a sale the
+ * worker records after midnight counts on that day, not the day it was rung up;
+ * levels stay right, only the day of a late sale shifts. Lot
  * pieces only move units between batches, so they aren't movements. Each
  * product gets a row for `from`, then one per day it moved.
  */
@@ -18,14 +22,12 @@ export async function appStockDays(prisma: PrismaClient, locationId: string, fro
     SELECT "productId", sum(quantity)::int AS quantity FROM "Inventory" WHERE "locationId" = ${locationId} GROUP BY 1`;
   const moves = await prisma.$queryRaw<Array<{ productId: string; at: Date; quantity: number; restock: boolean }>>`
     SELECT i."productId", i."createdAt" AS at,
-           coalesce(r.quantity, tl."quantityReceived", a.quantity)::int AS quantity,
-           (r.id IS NOT NULL OR tl.id IS NOT NULL) AS restock
+           -- what the batch started with: Inventory keeps no initial quantity, so add back what left it
+           (i.quantity + i."splitOut" + coalesce((SELECT sum(c.quantity) FROM "InventoryConsumption" c WHERE c."inventoryId" = i.id), 0))::int AS quantity,
+           (EXISTS (SELECT 1 FROM "InventoryReceiving" r WHERE r."inventoryBatchId" = i.id)
+             OR EXISTS (SELECT 1 FROM "TransferLine" tl WHERE tl."destinationInventoryId" = i.id)) AS restock
       FROM "Inventory" i
-      LEFT JOIN "InventoryReceiving" r ON r."inventoryBatchId" = i.id
-      LEFT JOIN "TransferLine" tl ON tl."destinationInventoryId" = i.id
-      LEFT JOIN "InventoryAdjustment" a ON a."createdBatchId" = i.id
      WHERE i."locationId" = ${locationId} AND i."createdAt" >= ${start} AND i."splitFromId" IS NULL
-       AND (r.id IS NOT NULL OR tl.id IS NOT NULL OR a.id IS NOT NULL)
     UNION ALL
     SELECT i."productId", c."consumedAt", -c.quantity, false
       FROM "InventoryConsumption" c JOIN "Inventory" i ON i.id = c."inventoryId"
