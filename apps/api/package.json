@@ -10,6 +10,7 @@
     "reset-cutover-data": "ts-node --transpile-only scripts/reset-cutover-data.ts",
     "fix-selected-cost-history-dates": "ts-node --transpile-only scripts/fix-selected-cost-history-dates.ts",
     "import-gtin-from-square": "ts-node --transpile-only scripts/import-gtin-from-square.ts",
+    "import-sales-history": "ts-node --transpile-only scripts/import-sales-history.ts",
     "test": "tsc --noEmit -p . && vitest run"
   },
   "dependencies": {

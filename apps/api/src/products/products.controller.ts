@@ -11,6 +11,7 @@ import {
   HttpStatus,
   HttpException,
   BadRequestException,
+  NotFoundException,
   UseGuards,
   UseInterceptors,
   UploadedFile,
@@ -24,6 +25,7 @@ import { CatalogSearchService } from './catalog-search.service';
 import { ReferenceDataService } from './reference-data.service';
 import { AuthGuard, LocationGuard, Roles, GuardedRequest, RoleGuardedRequest, isCashierAt, assertActingAtOwnStore } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { salesVelocity } from '../sales-history/sales-history';
 
 // DTOs
 /** The create body: the service's input, with the location optional (defaults to the current one). */
@@ -335,6 +337,20 @@ export class ProductsController {
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     return { success: true, products: await this.productsService.getSupplierCatalog(supplierId, targetLocationId) };
+  }
+
+  /**
+   * How fast a product sells at a store: imported Square history plus live sales.
+   * GET /products/:id/sales-velocity?locationId= (default: the session's store)
+   */
+  @Get(':id/sales-velocity')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER')
+  async getSalesVelocity(@Req() req: RoleGuardedRequest, @Param('id') productId: string, @Query('locationId') locationId?: string) {
+    if (!(await this.prisma.product.findUnique({ where: { id: productId }, select: { id: true } }))) {
+      throw new NotFoundException({ success: false, message: 'Producto no encontrado' });
+    }
+    const storeId = locationId ?? req.currentLocation.locationId;
+    return { success: true, data: await salesVelocity(this.prisma, productId, storeId) };
   }
 
   /**

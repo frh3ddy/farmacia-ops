@@ -38,9 +38,10 @@ model Location {
   yastasTransfersOut YastasWalletTransfer[] @relation("YastasTransferFrom")
   yastasTransfersIn  YastasWalletTransfer[] @relation("YastasTransferTo")
 
-  createdAt            DateTime  @default(now())
-  productsSoldOnlyHere Product[] @relation("ProductSoldOnlyAt")
+  createdAt            DateTime           @default(now())
+  productsSoldOnlyHere Product[]          @relation("ProductSoldOnlyAt")
   looseLinks           ProductLooseLink[]
+  salesHistory         SalesHistoryLine[]
 }
 
 // ============================================================================
@@ -186,17 +187,17 @@ enum MigrationStatus {
 }
 
 model Product {
-  id                   String    @id @default(uuid())
+  id                   String              @id @default(uuid())
   name                 String
-  sku                  String?   @unique
+  sku                  String?             @unique
   gtin                 String? // the box barcode: Square variation `upc`; not unique, Square allows duplicates
   categoryId           String?
-  isDiscontinued       Boolean   @default(false)
+  isDiscontinued       Boolean             @default(false)
   // Transaction that last changed what the product list shows of it; set by triggers (product_change_stamp migration). Unsupported so the client never returns it.
   changeXid            Unsupported("xid8") @default(dbgenerated("'0'::xid8"))
-  tracksInventory      Boolean   @default(true) // false only for per-employee Yastás service items — never touches Inventory/FIFO
+  tracksInventory      Boolean             @default(true) // false only for per-employee Yastás service items — never touches Inventory/FIFO
   soldOnlyAtLocationId String? // set: sold only at this store (created in Square there alone, hidden at other stores); null: every store
-  soldOnlyAtLocation   Location? @relation("ProductSoldOnlyAt", fields: [soldOnlyAtLocationId], references: [id], onDelete: SetNull)
+  soldOnlyAtLocation   Location?           @relation("ProductSoldOnlyAt", fields: [soldOnlyAtLocationId], references: [id], onDelete: SetNull)
 
   // Square catalog data (cached to avoid API calls during extraction)
   squareProductName   String? // Product name from Square ITEM
@@ -247,6 +248,7 @@ model Product {
   inventories          Inventory[]
   placements           Placement[]
   saleItems            SaleItem[]
+  salesHistory         SalesHistoryLine[]
   catalogMappings      CatalogMapping[]
   costApprovals        CostApproval[]
   adjustments          InventoryAdjustment[]
@@ -427,17 +429,17 @@ model Inventory {
   locationId String
   productId  String
 
-  quantity    Int // CHECK (quantity >= 0) — Inventory_quantity_nonnegative, in SQL only (Prisma doesn't model it)
-  receivedAt  DateTime
-  unitCost    Decimal
-  source      String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"
-  costSource  String? // "SQUARE_COST", "DESCRIPTION", "MANUAL_INPUT", "AVERAGE_COST"
-  migrationId String? // Reference to cutover
+  quantity             Int // CHECK (quantity >= 0) — Inventory_quantity_nonnegative, in SQL only (Prisma doesn't model it)
+  receivedAt           DateTime
+  unitCost             Decimal
+  source               String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"
+  costSource           String? // "SQUARE_COST", "DESCRIPTION", "MANUAL_INPUT", "AVERAGE_COST"
+  migrationId          String? // Reference to cutover
   // The lot these units are: from a receiving, or set by a Conteo inicial (tasks/opening-count-lots-epic.md).
-  expiryDate DateTime?
-  lotNumber  String?
+  expiryDate           DateTime?
+  lotNumber            String?
   // Units this batch gave to lot pieces split from it (same cost); the books check subtracts them.
-  splitOut   Int       @default(0)
+  splitOut             Int         @default(0)
   // A lot piece: the batch it was first split from (its receiving, supplier, cost) and the units it started with.
   splitFromId          String?
   splitInitialQuantity Int?
@@ -653,7 +655,7 @@ model InventoryAdjustment {
   // Consumption records (for negative adjustments - FIFO trail)
   consumptions InventoryConsumption[]
 
-  saleReturnItem SaleReturnItem?
+  saleReturnItem  SaleReturnItem?
   stockCountEntry StockCountEntry?
 
   @@index([locationId])
@@ -1203,7 +1205,7 @@ model IntegrityRun {
 
 // A deleted product, kept so the phone's sync can drop it (written by a trigger; see Product.changeXid).
 model ProductRemoval {
-  productId String               @id
+  productId String              @id
   changeXid Unsupported("xid8") @default(dbgenerated("'0'::xid8"))
 
   @@index([changeXid, productId])
@@ -1272,4 +1274,26 @@ model ProductLooseLink {
 
   @@unique([locationId, boxProductId])
   @@index([locationId, looseProductId])
+}
+
+/// Square order lines imported from before the app recorded sales, for sales
+/// velocity and busy hours only: never FIFO, COGS or P&L (those read Sale).
+model SalesHistoryLine {
+  id                String   @id @default(uuid())
+  squareOrderId     String
+  squareLineUid     String // unique within its order
+  squarePaymentId   String? // the order's tender: a Sale with this squareId already counts the order
+  locationId        String
+  productId         String? // null when the variation isn't mapped to a product
+  squareVariationId String? // null for a custom amount
+  quantity          Int // negative for a returned line
+  soldAt            DateTime // the order's closed_at
+
+  location Location @relation(fields: [locationId], references: [id])
+  product  Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@unique([squareOrderId, squareLineUid])
+  @@index([productId, locationId, soldAt])
+  @@index([locationId, soldAt])
+  @@index([squarePaymentId])
 }
