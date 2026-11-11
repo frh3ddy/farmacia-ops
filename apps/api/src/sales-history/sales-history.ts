@@ -5,7 +5,7 @@ import { preferredMapping } from '../inventory/square-sync';
 
 const DAY = 86_400_000;
 /** Before the stores' first Square order (2020-07-17). */
-const HISTORY_START = '2020-01-01T00:00:00.000Z';
+export const HISTORY_START = '2020-01-01T00:00:00.000Z';
 
 export interface SalesHistoryImport {
   pages: number;

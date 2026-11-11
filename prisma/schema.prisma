@@ -38,10 +38,15 @@ model Location {
   yastasTransfersOut YastasWalletTransfer[] @relation("YastasTransferFrom")
   yastasTransfersIn  YastasWalletTransfer[] @relation("YastasTransferTo")
 
-  createdAt            DateTime  @default(now())
-  productsSoldOnlyHere Product[] @relation("ProductSoldOnlyAt")
+  createdAt            DateTime                   @default(now())
+  productsSoldOnlyHere Product[]                  @relation("ProductSoldOnlyAt")
   looseLinks           ProductLooseLink[]
   salesHistory         SalesHistoryLine[]
+  storeStatuses        ProductStoreStatus[]
+  stockDays            StockDay[]
+  stockStats           ProductStockStats[]
+  suggestionDismissals PauseSuggestionDismissal[]
+  stockAlertSettings   StockAlertSettings?
 }
 
 // ============================================================================
@@ -187,17 +192,17 @@ enum MigrationStatus {
 }
 
 model Product {
-  id                   String    @id @default(uuid())
+  id                   String              @id @default(uuid())
   name                 String
-  sku                  String?   @unique
+  sku                  String?             @unique
   gtin                 String? // the box barcode: Square variation `upc`; not unique, Square allows duplicates
   categoryId           String?
-  isDiscontinued       Boolean   @default(false)
+  isDiscontinued       Boolean             @default(false)
   // Transaction that last changed what the product list shows of it; set by triggers (product_change_stamp migration). Unsupported so the client never returns it.
   changeXid            Unsupported("xid8") @default(dbgenerated("'0'::xid8"))
-  tracksInventory      Boolean   @default(true) // false only for per-employee Yastás service items — never touches Inventory/FIFO
+  tracksInventory      Boolean             @default(true) // false only for per-employee Yastás service items — never touches Inventory/FIFO
   soldOnlyAtLocationId String? // set: sold only at this store (created in Square there alone, hidden at other stores); null: every store
-  soldOnlyAtLocation   Location? @relation("ProductSoldOnlyAt", fields: [soldOnlyAtLocationId], references: [id], onDelete: SetNull)
+  soldOnlyAtLocation   Location?           @relation("ProductSoldOnlyAt", fields: [soldOnlyAtLocationId], references: [id], onDelete: SetNull)
 
   // Square catalog data (cached to avoid API calls during extraction)
   squareProductName   String? // Product name from Square ITEM
@@ -214,6 +219,7 @@ model Product {
   labId                  String?
   medicationType         MedicationType?
   medicationDefinitionId String? // links to the underlying medication (brand/generic equivalence)
+  equivalenceGroupId     String? // manual equivalents (EquivalenceGroup); set by hand, never automatically
   presentation           String? // e.g. "Caja c/20 tabletas"
   requiresPrescription   Boolean         @default(false)
   isControlled           Boolean         @default(false) // controlled/restricted substance
@@ -240,9 +246,9 @@ model Product {
   looseLinks    ProductLooseLink[] @relation("LooseLinkBox")
   looseLinkedTo ProductLooseLink[] @relation("LooseLinkLoose")
 
-  category             Category?             @relation(fields: [categoryId], references: [id])
-  laboratory           Laboratory?           @relation(fields: [labId], references: [id])
-  medicationDefinition MedicationDefinition? @relation(fields: [medicationDefinitionId], references: [id])
+  category             Category?                  @relation(fields: [categoryId], references: [id])
+  laboratory           Laboratory?                @relation(fields: [labId], references: [id])
+  medicationDefinition MedicationDefinition?      @relation(fields: [medicationDefinitionId], references: [id])
   suppliers            SupplierProduct[]
   supplierCostHistory  SupplierCostHistory[]
   inventories          Inventory[]
@@ -255,10 +261,17 @@ model Product {
   stockCountEntries    StockCountEntry[]
   receivings           InventoryReceiving[]
   transfers            Transfer[]
+  equivalenceGroup     EquivalenceGroup?          @relation(fields: [equivalenceGroupId], references: [id], onDelete: SetNull)
+  storeStatuses        ProductStoreStatus[]       @relation("ProductStoreStatus")
+  replacingStatuses    ProductStoreStatus[]       @relation("ProductStoreStatusReplacedBy")
+  stockDays            StockDay[]
+  stockStats           ProductStockStats[]
+  suggestionDismissals PauseSuggestionDismissal[]
 
   createdAt DateTime @default(now())
 
   @@index([medicationDefinitionId])
+  @@index([equivalenceGroupId])
   @@index([changeXid, id])
   @@index([gtin])
 }
@@ -429,17 +442,17 @@ model Inventory {
   locationId String
   productId  String
 
-  quantity    Int // CHECK (quantity >= 0) — Inventory_quantity_nonnegative, in SQL only (Prisma doesn't model it)
-  receivedAt  DateTime
-  unitCost    Decimal
-  source      String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"
-  costSource  String? // "SQUARE_COST", "DESCRIPTION", "MANUAL_INPUT", "AVERAGE_COST"
-  migrationId String? // Reference to cutover
+  quantity             Int // CHECK (quantity >= 0) — Inventory_quantity_nonnegative, in SQL only (Prisma doesn't model it)
+  receivedAt           DateTime
+  unitCost             Decimal
+  source               String? // "OPENING_BALANCE", "PURCHASE", "ADJUSTMENT"
+  costSource           String? // "SQUARE_COST", "DESCRIPTION", "MANUAL_INPUT", "AVERAGE_COST"
+  migrationId          String? // Reference to cutover
   // The lot these units are: from a receiving, or set by a Conteo inicial (tasks/opening-count-lots-epic.md).
-  expiryDate DateTime?
-  lotNumber  String?
+  expiryDate           DateTime?
+  lotNumber            String?
   // Units this batch gave to lot pieces split from it (same cost); the books check subtracts them.
-  splitOut   Int       @default(0)
+  splitOut             Int         @default(0)
   // A lot piece: the batch it was first split from (its receiving, supplier, cost) and the units it started with.
   splitFromId          String?
   splitInitialQuantity Int?
@@ -655,7 +668,7 @@ model InventoryAdjustment {
   // Consumption records (for negative adjustments - FIFO trail)
   consumptions InventoryConsumption[]
 
-  saleReturnItem SaleReturnItem?
+  saleReturnItem  SaleReturnItem?
   stockCountEntry StockCountEntry?
 
   @@index([locationId])
@@ -1205,7 +1218,7 @@ model IntegrityRun {
 
 // A deleted product, kept so the phone's sync can drop it (written by a trigger; see Product.changeXid).
 model ProductRemoval {
-  productId String               @id
+  productId String              @id
   changeXid Unsupported("xid8") @default(dbgenerated("'0'::xid8"))
 
   @@index([changeXid, productId])
@@ -1296,4 +1309,118 @@ model SalesHistoryLine {
   @@index([productId, locationId, soldAt])
   @@index([locationId, soldAt])
   @@index([squarePaymentId])
+}
+
+// ============================================================================
+// Stock alerts (farmacia-ios docs/stock-alerts-design.md): per-store pause,
+// stock history, nightly stats, pause suggestions, manual equivalents.
+// ============================================================================
+
+/// Per product × store: paused or not. No row, or pausedAt null = active. Paused is not discontinued: it may be restocked.
+model ProductStoreStatus {
+  productId           String
+  locationId          String
+  pausedAt            DateTime?
+  pauseReason         PauseReason?
+  pauseNote           String?
+  replacedByProductId String?
+  pausedByEmployeeId  String?
+  resumedAt           DateTime?
+  resumeCause         ResumeCause?
+
+  product    Product  @relation("ProductStoreStatus", fields: [productId], references: [id], onDelete: Cascade)
+  replacedBy Product? @relation("ProductStoreStatusReplacedBy", fields: [replacedByProductId], references: [id], onDelete: SetNull)
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([productId, locationId])
+  @@index([locationId, pausedAt])
+}
+
+enum PauseReason {
+  SUPPLIER_UNAVAILABLE
+  REPLACED_BY_EQUIVALENT
+  SLOW_MOVER
+  OTHER
+}
+
+enum ResumeCause {
+  STOCK_RECEIVED
+  MANUAL
+}
+
+/// End-of-day stock per product × store (store clock). Rebuilt once from Square's inventory changes before the cutover and our own movements after; nightly from then on.
+model StockDay {
+  productId  String
+  locationId String
+  day        DateTime @db.Date
+  quantity   Int
+  restocked  Boolean  @default(false) // supply came in that day (receiving, transfer in, a recount above the replay before the cutover); a return is not a restock
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([productId, locationId, day])
+  @@index([locationId, day])
+}
+
+/// Nightly per product × store, from StockDay and sales; read by product rows, counts, alerts and suggestions.
+model ProductStockStats {
+  productId      String
+  locationId     String
+  windowDays     Int
+  unitsSold      Int // net of returns, in the window
+  weeksWithSales Int
+  lastSoldAt     DateTime?
+  typicalOnHand  Int // median end-of-day stock on days it was > 0
+  daysAtZero     Int // days at 0 without a sale, in the window
+  stockOuts      Int // times it went from > 0 to 0 in the window
+  zeroSince      DateTime? // start of the current run at 0
+  computedAt     DateTime
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([productId, locationId])
+  @@index([locationId])
+}
+
+/// A dismissed pause suggestion stays hidden until the window passes or its evidence changes.
+model PauseSuggestionDismissal {
+  productId             String
+  locationId            String
+  kind                  PauseSuggestionKind
+  dismissedAt           DateTime            @default(now())
+  dismissedByEmployeeId String?
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([productId, locationId, kind])
+}
+
+enum PauseSuggestionKind {
+  NO_SALES_AT_ZERO
+  SLOW_WITH_STOCKOUTS
+  EQUIVALENT_SELLING
+}
+
+/// Stock alert thresholds, one row per store (seeded by the migration; a store without a row uses these defaults).
+model StockAlertSettings {
+  locationId         String @id
+  windowDays         Int    @default(90)
+  coverDays          Int    @default(14)
+  regularMinWeeks    Int    @default(4) // a regular seller sold in ≥ this many of the window's weeks
+  slowMaxUnits       Int    @default(2)
+  slowMinDaysAtZero  Int    @default(30)
+  equivalentMinUnits Int    @default(3)
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+}
+
+/// Manual equivalence, independent of the medication catalog: products in one group are interchangeable.
+model EquivalenceGroup {
+  id                  String    @id @default(uuid())
+  createdByEmployeeId String?
+  createdAt           DateTime  @default(now())
+  products            Product[]
 }
