@@ -71,7 +71,12 @@ async function lastRows(prisma: PrismaClient, locationId: string, day: string) {
   return new Map(rows.map((r) => [r.productId, r]));
 }
 
-/** The day after a store's last stored day, or `yesterday` when nothing is stored or it's already reached. */
+/**
+ * The day after a store's last stored day, or `yesterday` when nothing is stored or it's already reached.
+ * ponytail: rows exist only on days something changed, so at an active store where nothing moves (closed but
+ * still active) this start drifts back and each night recomputes every day since. Still correct, just more
+ * work per night. Store a per-store "recorded through" day if that ever gets slow.
+ */
 async function firstMissingDay(prisma: PrismaClient, locationId: string, yesterday: string): Promise<string> {
   const { _max } = await prisma.stockDay.aggregate({ where: { locationId }, _max: { day: true } });
   if (!_max.day) return yesterday;
