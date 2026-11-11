@@ -48,6 +48,15 @@ export const WORKERS: WorkerConfig[] = [
     schedule: { pattern: '0 3 * * *', tz: 'America/Mexico_City' },
     options: { attempts: 1 },
   },
+  {
+    // Nightly end-of-day stock for stock alerts (apps/api/src/stock-alerts/stock-days.ts).
+    // One attempt: the next night fills any day this one missed.
+    queueName: 'stock-days',
+    processor: () => postInternal('/internal/stock-alerts/stock-days'),
+    concurrency: 1,
+    schedule: { pattern: '0 3 * * *', tz: 'America/Mexico_City' },
+    options: { attempts: 1 },
+  },
   // Add more workers here as needed:
   // {
   //   queueName: 'inventory',
@@ -56,3 +65,16 @@ export const WORKERS: WorkerConfig[] = [
   // },
 ];
 
+/** A worker-only api route, over Railway's private network. */
+async function postInternal(path: string): Promise<unknown> {
+  const url = process.env.API_INTERNAL_URL;
+  const secret = process.env.WORKER_API_SECRET;
+  if (!url || !secret) throw new Error('API_INTERNAL_URL or WORKER_API_SECRET is not set');
+  const response = await fetch(`${url}${path}`, {
+    method: 'POST',
+    headers: { 'x-worker-secret': secret },
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!response.ok) throw new Error(`api answered ${response.status} for ${path}`);
+  return response.json();
+}
