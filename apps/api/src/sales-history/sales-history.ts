@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import type { Square, SquareClient } from 'square';
-import { BUSINESS_TIME_ZONE } from '../inventory/business-date';
+import { BUSINESS_TIME_ZONE, businessDay } from '../inventory/business-date';
 import { preferredMapping } from '../inventory/square-sync';
 
 const DAY = 86_400_000;
@@ -88,29 +88,28 @@ export async function importSalesHistory(
 }
 
 /**
- * Every order line at a store: imported history, less what the app also
+ * A product's lines at a store: imported history, less what the app also
  * recorded live (an order whose payment is a Sale, a return line it took back),
  * plus live sales net of their returns.
  */
-const storeLines = (locationId: string, productId?: string) => Prisma.sql`
-  SELECT h."squareOrderId" AS "order", h.quantity, h."soldAt" AS at
+const productLines = (productId: string, locationId: string) => Prisma.sql`
+  SELECT h.quantity, h."soldAt" AS at
     FROM "SalesHistoryLine" h
-   WHERE h."locationId" = ${locationId}
-     ${productId ? Prisma.sql`AND h."productId" = ${productId}` : Prisma.empty}
+   WHERE h."productId" = ${productId} AND h."locationId" = ${locationId}
      AND NOT EXISTS (SELECT 1 FROM "Sale" s WHERE s."squareId" = h."squarePaymentId")
      -- a returned line the worker took back live (sale.worker.ts recordSquareReturns)
      AND NOT EXISTS (SELECT 1 FROM "SaleReturn" r WHERE r."clientRequestId" = 'square-return-line:' || h."squareLineUid")
   UNION ALL
-  SELECT s.id, i.quantity, s."createdAt"
+  SELECT i.quantity, s."createdAt"
     FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-   WHERE s."locationId" = ${locationId} ${productId ? Prisma.sql`AND i."productId" = ${productId}` : Prisma.empty}
+   WHERE i."productId" = ${productId} AND s."locationId" = ${locationId}
   UNION ALL
-  SELECT s.id, -ri.quantity, r."returnedAt"
+  SELECT -ri.quantity, r."returnedAt"
     FROM "SaleReturnItem" ri
     JOIN "SaleReturn" r ON r.id = ri."returnId"
     JOIN "SaleItem" i ON i.id = ri."saleItemId"
     JOIN "Sale" s ON s.id = i."saleId"
-   WHERE s."locationId" = ${locationId} ${productId ? Prisma.sql`AND i."productId" = ${productId}` : Prisma.empty}`;
+   WHERE i."productId" = ${productId} AND s."locationId" = ${locationId}`;
 
 export interface SalesVelocity {
   lastSoldAt: string | null;
@@ -125,12 +124,13 @@ export async function salesVelocity(prisma: PrismaClient, productId: string, loc
     SELECT max(at) FILTER (WHERE quantity > 0) AS last,
            coalesce(sum(quantity) FILTER (WHERE at >= ${new Date(now.getTime() - 30 * DAY)}), 0)::int AS u30,
            coalesce(sum(quantity) FILTER (WHERE at >= ${new Date(now.getTime() - 90 * DAY)}), 0)::int AS u90
-      FROM (${storeLines(locationId, productId)}) lines`;
+      FROM (${productLines(productId, locationId)}) lines`;
   return {
     lastSoldAt: row.last?.toISOString() ?? null,
     unitsLast30d: row.u30,
     unitsLast90d: row.u90,
-    daysSinceLastSale: row.last ? Math.floor((now.getTime() - row.last.getTime()) / DAY) : null,
+    // Calendar days on the store clock: a sale last night was 1 day ago this morning.
+    daysSinceLastSale: row.last ? (Date.parse(businessDay(now)) - Date.parse(businessDay(row.last))) / DAY : null,
   };
 }
 
@@ -139,13 +139,29 @@ export interface BusyHours {
   cells: Array<{ dayOfWeek: number; hour: number; orders: number }>;
 }
 
-/** Orders a store closed in the last `days`, by day of week (0 = Sunday) and hour on the store's clock. */
+/**
+ * Orders a store closed in the last `days`, by day of week (0 = Sunday) and
+ * hour on the store's clock, whatever their lines (products, custom amounts,
+ * Yastás). A live order is its payment, a Sale and its Yastás lines alike; an
+ * imported order the app also recorded live counts as the live one.
+ */
 export async function busyHours(prisma: PrismaClient, locationId: string, days: number, now = new Date()): Promise<BusyHours> {
+  const since = new Date(now.getTime() - days * DAY);
   const local = Prisma.sql`(at AT TIME ZONE 'UTC' AT TIME ZONE ${BUSINESS_TIME_ZONE})`;
   const cells = await prisma.$queryRaw<BusyHours['cells']>`
     SELECT extract(dow FROM ${local})::int AS "dayOfWeek", extract(hour FROM ${local})::int AS hour, count(DISTINCT "order")::int AS orders
-      FROM (${storeLines(locationId)}) lines
-     WHERE quantity > 0 AND at >= ${new Date(now.getTime() - days * DAY)}
+      FROM (
+        SELECT h."squareOrderId" AS "order", h."soldAt" AS at
+          FROM "SalesHistoryLine" h
+         WHERE h."locationId" = ${locationId} AND h."soldAt" >= ${since} AND h.quantity > 0
+           AND NOT EXISTS (SELECT 1 FROM "Sale" s WHERE s."squareId" = h."squarePaymentId")
+           AND NOT EXISTS (SELECT 1 FROM "YastasOperation" y WHERE y."squareId" = h."squarePaymentId")
+        UNION ALL
+        SELECT s."squareId", s."createdAt" FROM "Sale" s WHERE s."locationId" = ${locationId} AND s."createdAt" >= ${since}
+        UNION ALL
+        SELECT y."squareId", y."occurredAt" FROM "YastasOperation" y
+         WHERE y."locationId" = ${locationId} AND y."squareId" IS NOT NULL AND y."occurredAt" >= ${since}
+      ) orders
      GROUP BY 1, 2
      ORDER BY 1, 2`;
   return { timezone: BUSINESS_TIME_ZONE, cells };
