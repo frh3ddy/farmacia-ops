@@ -41,6 +41,7 @@ model Location {
   createdAt            DateTime  @default(now())
   productsSoldOnlyHere Product[] @relation("ProductSoldOnlyAt")
   looseLinks           ProductLooseLink[]
+  salesHistory         SalesHistoryLine[]
 }
 
 // ============================================================================
@@ -247,6 +248,7 @@ model Product {
   inventories          Inventory[]
   placements           Placement[]
   saleItems            SaleItem[]
+  salesHistory         SalesHistoryLine[]
   catalogMappings      CatalogMapping[]
   costApprovals        CostApproval[]
   adjustments          InventoryAdjustment[]
@@ -1272,4 +1274,26 @@ model ProductLooseLink {
 
   @@unique([locationId, boxProductId])
   @@index([locationId, looseProductId])
+}
+
+/// Square order lines imported from before the app recorded sales, for sales
+/// velocity and busy hours only: never FIFO, COGS or P&L (those read Sale).
+model SalesHistoryLine {
+  id                String   @id @default(uuid())
+  squareOrderId     String
+  squareLineUid     String // unique within its order
+  squarePaymentId   String? // what a live record of the order is keyed on: its payment, or the refund for an exchange
+  locationId        String
+  productId         String? // null when the variation isn't mapped to a product
+  squareVariationId String? // null for a custom amount
+  quantity          Int // negative for a returned line
+  soldAt            DateTime // the order's closed_at
+
+  location Location @relation(fields: [locationId], references: [id])
+  product  Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@unique([squareOrderId, squareLineUid])
+  @@index([productId, locationId, soldAt])
+  @@index([locationId, soldAt])
+  @@index([squarePaymentId])
 }

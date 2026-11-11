@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { busyHours } from '../sales-history/sales-history';
 import { businessDay } from './business-date';
 import { Prisma } from '@prisma/client';
 import { NON_SHRINKAGE_TYPES, SHRINKAGE_RECOVERY_TYPES } from './adjustment-types';
@@ -138,6 +139,11 @@ export class InventoryReportsService {
   private readonly logger = new Logger(InventoryReportsService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /** Orders the store closed over the last `days`, by day of week and hour (sales-history). */
+  getBusyHours(locationId: string, days: number) {
+    return busyHours(this.prisma, locationId, days);
+  }
 
   /** Returns that came back in the period at the location, with each returned item's product. */
   private returnsInPeriod<S extends Prisma.ProductSelect>(period: { locationId?: string } & DateRange, product: S) {

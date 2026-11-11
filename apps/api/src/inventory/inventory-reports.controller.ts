@@ -6,6 +6,7 @@ import {
   Req,
   UseGuards,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { EmployeeRole } from '@prisma/client';
 import { InventoryReportsService } from './inventory-reports.service';
@@ -191,6 +192,21 @@ export class InventoryReportsController {
       success: true,
       data: report,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // Busy hours - OWNER, MANAGER
+  // --------------------------------------------------------------------------
+  /** GET /inventory/reports/busy-hours?locationId=&days=90: orders by day of week and hour. */
+  @Get('busy-hours')
+  @Roles('OWNER', 'MANAGER')
+  async getBusyHours(@Req() req: RoleGuardedRequest, @Query('locationId') locationId?: string, @Query('days') days = '90') {
+    const span = Number(days);
+    if (!Number.isInteger(span) || span < 1 || span > 730) {
+      throw new BadRequestException({ success: false, message: 'days debe ser un número entero de 1 a 730' });
+    }
+    const storeId = scopedLocationId(req, locationId) ?? req.currentLocation.locationId;
+    return { success: true, data: await this.reportsService.getBusyHours(storeId, span) };
   }
 
   // --------------------------------------------------------------------------
