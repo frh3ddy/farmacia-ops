@@ -26,6 +26,7 @@ afterAll(() => stop?.());
 
 beforeEach(async () => {
   await prisma.salesHistoryLine.deleteMany();
+  await prisma.yastasOperation.deleteMany();
   await prisma.saleReturnItem.deleteMany();
   await prisma.saleReturn.deleteMany();
   await prisma.inventoryAdjustment.deleteMany();
@@ -267,6 +268,19 @@ describe('salesVelocity (Postgres)', () => {
     });
   });
 
+  test('days since the last sale, by the store calendar', async () => {
+    const productId = await product();
+    // Sunday 2026-11-08 at 20:00 in Mexico City, read Monday at 08:00: 12 hours, but the day before.
+    await historyLine({ productId, locationId: centro, at: new Date('2026-11-09T02:00:00Z'), quantity: 1 });
+
+    assert({
+      given: 'a sale last night, read this morning',
+      should: 'say it sold 1 day ago',
+      actual: (await salesVelocity(prisma, productId, centro, new Date('2026-11-09T14:00:00Z'))).daysSinceLastSale,
+      expected: 1,
+    });
+  });
+
   test('a product never sold', async () => {
     const productId = await product();
 
@@ -291,20 +305,29 @@ describe('busyHours (Postgres)', () => {
     await historyLine({ locationId: centro, at: new Date('2026-11-08T01:30:00Z'), quantity: 1, order: 'sat-1' });
     await liveSale({ productId, locationId: centro, at: new Date('2026-11-08T01:35:00Z'), quantity: 1, paymentId: 'pay-sat' });
     await historyLine({ productId, locationId: centro, at: new Date('2026-11-08T01:35:00Z'), quantity: 1, order: 'sat-2', paymentId: 'pay-sat' });
+    // Monday 09:50: an order recorded live with only a custom amount (no item),
+    // and Monday 09:55 a Yastás payment recorded live and imported too.
+    await prisma.sale.create({ data: { squareId: 'pay-custom', locationId: centro, totalRevenue: 5, totalCost: 0, grossProfit: 5, createdAt: new Date('2026-11-02T15:50:00Z') } });
+    const { id: employeeId } = await prisma.employee.create({ data: { name: `E-${Math.random()}` } });
+    await prisma.yastasOperation.create({ data: { employeeId, locationId: centro, squareId: 'pay-yastas', squareLineUid: 'y', direction: 'IN', faceAmount: 100, occurredAt: new Date('2026-11-02T15:55:00Z') } });
+    await historyLine({ locationId: centro, at: new Date('2026-11-02T15:55:00Z'), quantity: 1, order: 'mon-yastas', paymentId: 'pay-yastas' });
+    // Saturday 19:40: one payment with a product and a Yastás line, recorded live as both.
+    await liveSale({ productId, locationId: centro, at: new Date('2026-11-08T01:40:00Z'), quantity: 1, paymentId: 'pay-mixed' });
+    await prisma.yastasOperation.create({ data: { employeeId, locationId: centro, squareId: 'pay-mixed', squareLineUid: 'y', direction: 'IN', faceAmount: 50, occurredAt: new Date('2026-11-08T01:40:00Z') } });
     // Left out: a return, an order older than the window, another store.
     await historyLine({ locationId: centro, at: new Date('2026-11-02T15:20:00Z'), quantity: -1, order: 'mon-return' });
     await historyLine({ locationId: centro, at: ago(120), quantity: 1 });
     await historyLine({ locationId: norte, at: new Date('2026-11-02T15:15:00Z'), quantity: 1 });
 
     assert({
-      given: 'orders imported and recorded live over the last 90 days',
-      should: 'count each order once in the hour it closed, on the store clock, leaving out returns, older orders and other stores',
+      given: 'orders imported and recorded live over the last 90 days, including custom amounts and Yastás payments',
+      should: 'count each order once in the hour it closed, on the store clock, whatever its lines, leaving out returns, older orders and other stores',
       actual: await busyHours(prisma, centro, 90, now),
       expected: {
         timezone: 'America/Mexico_City',
         cells: [
-          { dayOfWeek: 1, hour: 9, orders: 2 },
-          { dayOfWeek: 6, hour: 19, orders: 2 },
+          { dayOfWeek: 1, hour: 9, orders: 4 },
+          { dayOfWeek: 6, hour: 19, orders: 3 },
         ],
       },
     });
