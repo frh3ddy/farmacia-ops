@@ -28,7 +28,7 @@
 - ✅ [Trim the Worker](tasks/trim-worker-epic.md) — one payment shape, sale-path logging noise cut, consumption costs carried from the FIFO walk
 - ✅ [Other Stores' Stock](tasks/other-stores-stock-epic.md) — `GET /products/:id/stock`: every store's on-hand quantity for any role, quantities only; vision exception recorded
 - ✅ [Auto Open Box](tasks/auto-open-box-epic.md) — a sale short on sueltos opens a linked box (real FIFO cost, caducidad, Square updated); manual "Abrir caja" stays; automatic openings reviewable
-- 🚧 [Sales History](tasks/sales-history-epic.md) — Square orders since 2020 imported apart from sales (never FIFO, COGS or P&L); sales velocity per product and busy hours on the Mexico City clock, each order counted once with live sales
+- ✅ [Sales History](tasks/sales-history-epic.md) — Square orders since 2020 imported apart from sales (never FIFO, COGS or P&L); sales velocity per product and busy hours on the Mexico City clock, each order counted once with live sales
 - ✅ [Transfer Shipments](tasks/transfer-shipments-epic.md) — several products sent to another store in one go, all or nothing and once per request; received on send or confirmed on arrival; stable error codes
 - ✅ [Per-Store Loose Link](tasks/per-store-loose-link-epic.md) — each store pairs a box with its own suelto; linking at one store never changes another; piezas por caja stays on the box
 - 📋 [Yastás Float Top-Up](tasks/yastas-float-top-up-epic.md) — record a float top-up from Yastás; warn when a store's balance goes negative

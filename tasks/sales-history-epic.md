@@ -1,6 +1,6 @@
 # Sales History Epic
 
-**Status**: 🚧 BUILT (2026-11-10), reviewed by dev-67. Not merged; the production import waits on the owner's go.
+**Status**: ✅ COMPLETED (2026-11-10). Reviewed by dev-67, deployed (20fdfb9), history imported: 136,416 lines from 111,333 orders, 2020-07-17 to 2026-11-11.
 **Goal**: know how fast each product sells and when the stores are busy, from every Square order since 2020
 
 ## Overview
@@ -49,8 +49,9 @@ The app records sales only since go-live, so "how fast it sells", a dead-stock c
 
 ## Follow-ups
 
-- [ ] Merge and deploy (adds the `SalesHistoryLine` table)
-- [ ] Production import: dry run, send dev-67 the counts, then `--yes` on the owner's go (all history)
+- [x] Merge and deploy (adds the `SalesHistoryLine` table): 20fdfb9, migration applied 2026-11-11 00:41Z
+- [x] Production import: dry run (111,332 orders, 136,415 lines, 19,756 without a product), then `--yes` saved 136,416 (2026-11-11)
 - [ ] Check busy hours' query plan against the imported data (`EXPLAIN`)
 - [ ] Split tender: only the first tender is matched to a live Sale (`ponytail:` comment); store every tender if the stores take split payments
+- [ ] `oldestUnitDays` on sales velocity (days since the oldest lot on hand was received), when farmacia-ios asks: dead stock warns only at 90+
 - [ ] Store-wide dead-stock list, if iOS needs one (`GET /inventory/reports/dead-stock`); today it's per product on the detail
