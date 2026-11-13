@@ -18,8 +18,9 @@ beforeAll(async () => {
 afterAll(() => stop?.());
 
 /**
- * A store of its own with: out of stock (0), low stock (5), in stock (20), and a
- * product in stock priced at 10 that cost 9.50 (5% margin). Every product has a price.
+ * A store of its own with: out of stock (0), low stock (5 of a regular seller of
+ * 1 a day), in stock (20), and a product in stock priced at 10 that cost 9.50
+ * (5% margin). Every product has a price.
  */
 async function storeWithStockLevels() {
   const { id: store } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Filtros' } });
@@ -34,10 +35,18 @@ async function storeWithStockLevels() {
   return {
     store,
     out: await product('Agotado', 0, 5000, 20),
-    low: await product('Poco', 5, 5000, 20),
+    low: await regularSeller(store, await product('Poco', 5, 5000, 20)),
     plenty: await product('Mucho', 20, 5000, 20),
     thinMargin: await product('Margen', 30, 1000, 9.5),
   };
+}
+
+/** Nightly stats of a regular seller of 1 a day that usually has 20 on hand: under 14 it's low. */
+async function regularSeller(locationId: string, productId: string) {
+  await prisma.productStockStats.create({
+    data: { productId, locationId, windowDays: 90, unitsSold: 90, weeksWithSales: 10, typicalOnHand: 20, daysAtZero: 0, stockOuts: 0, computedAt: new Date() },
+  });
+  return productId;
 }
 
 const counts = (products: ProductsService, store: string) => products.getProductCounts(store).then((r) => r.data);
@@ -82,6 +91,7 @@ describe('ProductsService.getProducts with a filter', () => {
     const { store, low } = await storeWithStockLevels();
     const second = await prisma.product.create({ data: { name: `Poco2-${Math.random()}`, soldOnlyAtLocationId: store } });
     await prisma.inventory.create({ data: { productId: second.id, locationId: store, quantity: 3, unitCost: 1, receivedAt: new Date('2026-10-01') } });
+    await regularSeller(store, second.id);
     const page = (n: number) => products.getProducts(store, { filter: 'lowStock', page: n, limit: 1 });
     const [one, two] = [await page(1), await page(2)];
 
