@@ -72,8 +72,8 @@ export function stockStats({ window, levels, sales, lastSoldDay, zeroFrom }: Sto
     typicalOnHand: inStock[(inStock.length - 1) >> 1] ?? 0, // the lower median: an integer, like stock
     daysAtZero,
     stockOuts,
-    // At 0 at the end of the window, even if it sold its last unit that day.
-    zeroSince: q === 0 ? (runStarts.pop() ?? null) : null,
+    // At 0 at the end of the window, even if it sold its last unit that day; never while its stock is unknown.
+    zeroSince: knownFrom && q === 0 ? (runStarts.pop() ?? null) : null,
   };
 }
 
