@@ -57,6 +57,7 @@ Runs in the same nightly call as the stock days, right after them, over each sto
 - Given the chips, should list out of stock as stock at 0 and not paused (latest stock-out first, unknown last), low by alert, paused whatever its stock, and in stock as the rest; `/products/counts` gains `paused`, so in stock = total − out − low − paused
 - Given a pause or a stats change, should reach the phones' delta sync
 - Given stock that moved since last night's stats, should date the run at 0 today for one that was in stock last night (`ProductStockStats.stockAtEnd`, only from stats computed today; unknown after a missed night) and drop it once restocked
+  - Known gap: one that sells out between midnight and the 03:00 stats run is sent to the phones with an unknown start; the server says today after 03:00, but nothing re-sends it until the next night (stores are closed then). If it matters, have `recordStockStats` touch the few products with qty ≤ 0, `stockAtEnd` > 0 and no `zeroSince`.
 
 ---
 
