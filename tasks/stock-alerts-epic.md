@@ -1,6 +1,6 @@
 # Stock Alerts Epic
 
-**Status**: 🚧 IN PROGRESS. O1 and O2 are built (branch `feature/stock-alerts`), not deployed. The production history report is waiting on the owner.
+**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is built on `feature/stock-stats`.
 **Goal**: alert only on regular sellers that ran out or are running low, ranked by lost sales; let a product be paused per store; suggest pauses from history for a person to review
 
 ## Overview
@@ -32,6 +32,20 @@ Additive migration `20261111120000_stock_alerts`.
 
 ---
 
-## O3–O9
+## O3. Nightly stock stats
 
-Not started: nightly `ProductStockStats` (must upsert, not delete and re-insert, or every product is re-sent every night), `stockAlert` on product rows and counts (a paused product counts only as paused, whatever its stock), pause and resume, the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report.
+Runs in the same nightly call as the stock days, right after them, over each store's window (`StockAlertSettings.windowDays`) ending yesterday.
+
+**Requirements**:
+- Given stock days and sales (Square history and live sales, net of returns), should store per product and store: units sold, weeks with a sale (counted back from yesterday), last sale, the median stock on days in stock, days at 0, stock-outs, and the start of the current run at 0
+- Given a day with a sale, should not count it as a day at 0, even when the stock history says 0 (Square let items go negative before the cutover)
+- Given the last unit sold yesterday, should count the product at 0 from today
+- Given days before a product's first stock day, should not count them at 0, even with sales (a sale proves stock on its own day only)
+- Given a product whose sales left the window, should update its stats rather than keep the old ones
+- Given stats that didn't change, should upsert without re-sending the product to the phones
+
+---
+
+## O4–O9
+
+Not started: `stockAlert` on product rows and counts (a paused product counts only as paused, whatever its stock), pause and resume, the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report.
