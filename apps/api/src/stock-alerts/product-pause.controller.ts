@@ -1,9 +1,9 @@
-import { BadRequestException, Body, Controller, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { PauseReason } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, GuardedRequest, assertActingAtOwnStore } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProductsService } from '../products/products.service';
-import { pauseProduct, pauseProducts } from './stock-pause';
+import { pauseProduct, pauseProducts, resumeProduct } from './stock-pause';
 
 /** Pausing a product per store (stock alerts O5). Each answers with the product's updated row at that store. */
 @Controller('products')
@@ -36,5 +36,16 @@ export class ProductPauseController {
     const ids = [...new Set(body.productIds)];
     const { data } = await this.products.getProducts(locationId, { onlyIds: ids, limit: ids.length });
     return { success: true, data };
+  }
+
+  /** DELETE /products/:id/pause?locationId=: resumes it by hand; one that isn't paused is left as it is. */
+  @Delete(':id/pause')
+  @Roles('OWNER', 'MANAGER')
+  async resume(@Param('id') productId: string, @Query('locationId') queryLocationId: string | undefined, @Req() req: GuardedRequest) {
+    const locationId = queryLocationId || req.currentLocation?.locationId;
+    if (!locationId) throw new BadRequestException('Falta la sucursal');
+    assertActingAtOwnStore(req, locationId);
+    await resumeProduct(this.prisma, { productId, locationId, employeeId: req.employee?.id });
+    return this.products.getProduct(productId, locationId);
   }
 }

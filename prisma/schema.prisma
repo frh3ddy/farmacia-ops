@@ -1327,6 +1327,7 @@ model ProductStoreStatus {
   pausedByEmployeeId  String?
   resumedAt           DateTime?
   resumeCause         ResumeCause?
+  resumedByEmployeeId String? // a manual resume; null when the store's receiving resumed it
 
   product    Product  @relation("ProductStoreStatus", fields: [productId], references: [id], onDelete: Cascade)
   replacedBy Product? @relation("ProductStoreStatusReplacedBy", fields: [replacedByProductId], references: [id], onDelete: SetNull)

@@ -76,7 +76,7 @@ A product is paused per store (`ProductStoreStatus.pausedAt`), by an owner or a 
 - Given a product the store doesn't sell, an unknown replacement, a replacement that is the product itself, a replacement that couldn't be paused itself (Yastás, discontinued, or not sold at the store), or a replacement with a reason other than `REPLACED_BY_EQUIVALENT`, should refuse with 400 and pause nothing; `REPLACED_BY_EQUIVALENT` without a replacement is allowed
 - Given `REPLACED_BY_EQUIVALENT` with a replacement, should put both products in one equivalence group: a new one when neither has a group, or the one that has a group; when both are already in different groups, should keep the replacement on the pause and leave the groups as they are
 - Given several products (1 to 200) and one reason, should pause them all in one transaction, or none if any is refused, answering with each row once in the order sent; a refusal names the product and carries its `productId`
-- Given a manual resume, should clear the pause and record `MANUAL` and when; given a product that isn't paused, should do nothing
+- Given a manual resume, should clear the pause and record `MANUAL`, who (`resumedByEmployeeId`) and when; given a product that isn't paused, should do nothing; an unknown or inactive store, or more than one, is refused as for a pause
 - Given a pause, a bulk pause or a manual resume that succeeds, should answer with the updated product row(s) at that store, in the detail and list shape with `stockAlert`, so the phone updates without a refetch
 - Given a receiving or a received transfer of a paused product at that store, should resume it with `STOCK_RECEIVED` in the same transaction, whatever its stock was; at another store, or by an adjustment, a count, or a return, it should stay paused
 
@@ -84,4 +84,4 @@ A product is paused per store (`ProductStoreStatus.pausedAt`), by an owner or a 
 
 ## O6–O9
 
-Not started: the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report. A future settings screen must touch the store's products when thresholds change, or phones keep the old alert levels.
+Not started (they must read only active pauses, `pausedAt` set: a resumed row keeps its last reason, note and replacement as history): the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report. A future settings screen must touch the store's products when thresholds change, or phones keep the old alert levels.

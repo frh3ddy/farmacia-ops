@@ -74,6 +74,15 @@ export async function pauseProducts(prisma: PrismaClient, { productIds, ...pause
   });
 }
 
+/** Resumes a paused product at one store by hand, recording who. One that isn't paused there is left as it is. */
+export async function resumeProduct(prisma: PrismaClient, { productId, locationId, employeeId }: { productId: string; locationId: string; employeeId?: string }): Promise<void> {
+  await checkStore(prisma, locationId);
+  await prisma.productStoreStatus.updateMany({
+    where: { productId, locationId, pausedAt: { not: null } },
+    data: { pausedAt: null, resumedAt: new Date(), resumeCause: 'MANUAL', resumedByEmployeeId: employeeId ?? null },
+  });
+}
+
 /** Refuses a pause that can't be saved: bad input, an unknown or inactive store, a product that can't be paused there, or a bad replacement. */
 async function checkPause(prisma: PrismaClient, { productId, locationId, reason, note, replacedByProductId }: PauseInput): Promise<void> {
   checkReasonAndNote({ reason, note });
@@ -101,6 +110,7 @@ function checkReasonAndNote({ reason, note }: { reason: PauseReason; note?: stri
 }
 
 async function checkStore(prisma: PrismaClient, locationId: string): Promise<void> {
+  if (typeof locationId !== 'string') throw new BadRequestException('Indica una sola sucursal');
   const store = await prisma.location.findUnique({ where: { id: locationId }, select: { isActive: true } });
   if (!store) throw new NotFoundException('Sucursal no encontrada');
   if (!store.isActive) throw new BadRequestException('La sucursal no está activa');
@@ -110,7 +120,7 @@ async function checkStore(prisma: PrismaClient, locationId: string): Promise<voi
 async function writePause(tx: Prisma.TransactionClient, { productId, locationId, reason, note, replacedByProductId, employeeId }: PauseInput): Promise<void> {
   const pause = {
     pausedAt: new Date(), pauseReason: reason, pauseNote: note?.trim() || null, replacedByProductId: replacedByProductId ?? null,
-    pausedByEmployeeId: employeeId ?? null, resumedAt: null, resumeCause: null,
+    pausedByEmployeeId: employeeId ?? null, resumedAt: null, resumeCause: null, resumedByEmployeeId: null,
   };
   await tx.productStoreStatus.upsert({
     where: { productId_locationId: { productId, locationId } },
