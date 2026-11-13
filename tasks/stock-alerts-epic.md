@@ -1,6 +1,6 @@
 # Stock Alerts Epic
 
-**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 is in production (2026-11-13). O6 is built on `feature/stock-alerts-list`.
+**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 and O6 are in production (2026-11-13). O7–O9 are deferred for later (2026-11-13); their requirements are below.
 **Goal**: alert only on regular sellers that ran out or are running low, ranked by lost sales; let a product be paused per store; suggest pauses from history for a person to review
 
 ## Overview
@@ -84,10 +84,46 @@ A product is paused per store (`ProductStoreStatus.pausedAt`), by an owner or a 
 
 ---
 
-## O6: Alertas lists (built on `feature/stock-alerts-list`)
+## O6: Alertas lists (in production 2026-11-13)
 
 `GET /products?filter=outAlert|lowAlert` (paginated like every chip, costs hidden from cashiers): only alerting products (regular sellers, not paused), highest priority (lost sales a day) first, then newest. `/products/counts` gains `outAlert` for Alertas' Sin stock; its Stock bajo is `lowStock`. Two list filters instead of the design's `GET /inventory/stock-alerts`: they would have been the same list.
 
-## O7–O9
+## O7–O9: deferred (user, 2026-11-13)
 
-Not started (they must read only active pauses, `pausedAt` set: a resumed row keeps its last reason, note and replacement as history): the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report. A future settings screen must touch the store's products when thresholds change, or phones keep the old alert levels.
+Not started; picked up when someone asks. The schema is already in place from O1: `PauseSuggestionDismissal`, `PauseSuggestionKind`, the thresholds on `StockAlertSettings`, `EquivalenceGroup` and `Product.equivalenceGroupId`. Applies to all three:
+
+- They read only active pauses (`pausedAt` set). A resumed row keeps its last reason, note and replacement as history.
+- A future settings screen that changes a store's thresholds must touch that store's products, or the phones keep the old alert levels.
+
+### O7. Pause suggestions
+
+Products a store could pause, found from the nightly stats (O3) and shown for a person to review. Nothing is paused automatically. It needs a few nights of stats with `stockAtEnd` before it can be checked against real data.
+
+- `GET /inventory/pause-suggestions?locationId` → `[{ product, kind, lastSoldAt, unitsInWindow, daysAtZero, stockOuts }]`. Owners and managers only, at their own store.
+- `POST /inventory/pause-suggestions/dismiss` `{ locationId, items[{ productId, kind }] }` saves a `PauseSuggestionDismissal`, recording who dismissed it.
+- Requirements:
+  - Given a product at 0 with no sale in the window, should suggest `NO_SALES_AT_ZERO`, with its last sale date, 0 units and its days at 0.
+  - Given `unitsSold ≤ slowMaxUnits` with `daysAtZero ≥ slowMinDaysAtZero` or at least 2 stock-outs, should suggest `SLOW_WITH_STOCKOUTS`, with its last sale, units, days at 0 and stock-outs.
+  - Given a product that's paused, doesn't track inventory (Yastás), is discontinued, or is sold only at another store, should never suggest it.
+  - Given a dismissed suggestion, should hide it until the window has passed since the dismissal or its evidence changes (for example, it sold again).
+  - Given suggestions to act on, the phone pauses them through O5's `POST /products/pause`, so pausing needs no new route.
+- Open question: compute suggestions on request from `ProductStockStats` (cheapest, always current), or save them in the nightly job? Start with on request.
+
+### O8. Equivalents
+
+Owners and managers say which products stand in for each other. O5 already links two products when one is paused as replaced by the other (`linkEquivalents` in `stock-pause.ts`), and O8 reuses it.
+
+- Routes to list a product's equivalents, link two products, and unlink one product from its group.
+- Requirements:
+  - Given two products in different groups, should not merge the groups on its own. Merging is an explicit, confirmed action, since it makes every product in both groups interchangeable at every store.
+  - Given a group left with one product after an unlink, should remove the group.
+  - Given a product at 0 whose equivalent is in stock at the same store, isn't paused, and sold ≥ `equivalentMinUnits` since the product's `zeroSince`, should add an `EQUIVALENT_SELLING` suggestion to O7, naming the equivalent and its units.
+  - Equivalents are manual links first. A shared `medicationDefinitionId` only suggests a link for a person to confirm; it's never trusted on its own (design §6.5).
+
+### O9. Active-ingredient coverage report
+
+A report showing how many of each store's stocked products have a `medicationDefinitionId`, with the unlinked ones listed. The link is sparse today (design §1), so this shows whether automatic equivalent suggestions (O8) are worth building, and which products to link first.
+
+- Requirements:
+  - Given a store, should count its stocked products: linked, not linked, and not linked but regular sellers (the ones that matter most).
+  - Should be visible to the owner and managers only.
