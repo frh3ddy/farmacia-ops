@@ -4,7 +4,7 @@
 import { assert } from 'riteway/vitest';
 import { startPostgres } from '../testing/pglite';
 import { PrismaService } from '../prisma/prisma.service';
-import { pauseProduct } from './stock-pause';
+import { pauseProduct, pauseProducts } from './stock-pause';
 
 let prisma: PrismaService;
 let stop: () => Promise<void>;
@@ -27,6 +27,16 @@ const product = async (soldOnlyAtLocationId?: string, data: { tracksInventory?: 
   (await prisma.product.create({ data: { name: `P-${Math.random()}`, soldOnlyAtLocationId, ...data } })).id;
 
 const statusOf = (productId: string) => prisma.productStoreStatus.findMany({ where: { productId }, orderBy: { locationId: 'asc' } });
+
+/** A refusal's status and body: what the phone gets back. */
+const errorOf = (p: Promise<unknown>) =>
+  p.then(
+    () => ({ status: 200 }) as { status: number; message?: string; productId?: string },
+    (e: { getStatus: () => number; getResponse: () => { message: string; productId?: string } }) => {
+      const { message, productId } = e.getResponse();
+      return { status: e.getStatus(), message, productId };
+    },
+  );
 
 const refusal = (p: Promise<unknown>) => p.then(() => 'ok', (e: { getStatus?: () => number }) => e.getStatus?.() ?? String(e));
 
@@ -232,6 +242,57 @@ describe('pauseProduct() replaced by an equivalent', () => {
       should: 'keep them there and create no other group',
       actual: [await groupOf(a), await groupOf(b), (await prisma.equivalenceGroup.count()) - before],
       expected: [group, group, 0],
+    });
+  });
+});
+
+describe('pauseProducts()', () => {
+  test('several at once', async () => {
+    const [a, b] = [await product(), await product()];
+    await pauseProducts(prisma, { productIds: [a, b], locationId: centro, reason: 'SLOW_MOVER', employeeId: manager });
+    const rows = await prisma.productStoreStatus.findMany({ where: { productId: { in: [a, b] } } });
+
+    assert({
+      given: 'two products paused together with one reason',
+      should: 'pause both at that store with that reason, by that employee',
+      actual: rows.map((r) => [r.locationId, r.pauseReason, r.pausedByEmployeeId, r.pausedAt !== null]),
+      expected: [[centro, 'SLOW_MOVER', manager, true], [centro, 'SLOW_MOVER', manager, true]],
+    });
+  });
+
+  test('one refused', async () => {
+    const a = await product();
+    const { id: yastas } = await prisma.product.create({ data: { name: 'Recarga Yastás', tracksInventory: false } });
+    const error = await errorOf(pauseProducts(prisma, { productIds: [a, yastas], locationId: centro, reason: 'OTHER', employeeId: manager }));
+
+    assert({
+      given: 'two products where one can\'t be paused',
+      should: 'refuse with 400 naming that product and giving its id, and pause neither',
+      actual: [error, await prisma.productStoreStatus.count({ where: { productId: { in: [a, yastas] } } })],
+      expected: [{ status: 400, message: 'Recarga Yastás: este producto no lleva existencias', productId: yastas }, 0],
+    });
+  });
+
+  test('one unknown', async () => {
+    const a = await product();
+    const error = await errorOf(pauseProducts(prisma, { productIds: [a, 'no-such-product'], locationId: centro, reason: 'OTHER', employeeId: manager }));
+
+    assert({
+      given: 'two products where one doesn\'t exist',
+      should: 'refuse with 404 giving its id, and pause neither',
+      actual: [error.status, error.productId, await prisma.productStoreStatus.count({ where: { productId: a } })],
+      expected: [404, 'no-such-product', 0],
+    });
+  });
+
+  test('bad lists', async () => {
+    const bulk = (productIds: unknown) => refusal(pauseProducts(prisma, { productIds: productIds as string[], locationId: centro, reason: 'OTHER', employeeId: manager }));
+
+    assert({
+      given: 'no list, an empty one, one with an id that isn\'t text, and one over 200 products',
+      should: 'refuse each with 400',
+      actual: [await bulk(undefined), await bulk([]), await bulk([42]), await bulk(Array.from({ length: 201 }, (_, i) => `p-${i}`))],
+      expected: [400, 400, 400, 400],
     });
   });
 });

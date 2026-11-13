@@ -2,15 +2,18 @@ import { assert } from 'riteway/vitest';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AuthGuard, LocationGuard } from '../auth/guards/auth.guard';
 import { ProductPauseController } from './product-pause.controller';
-import { pauseProduct } from './stock-pause';
+import { pauseProduct, pauseProducts } from './stock-pause';
 
-vi.mock('./stock-pause', () => ({ pauseProduct: vi.fn(async () => undefined) }));
+vi.mock('./stock-pause', () => ({ pauseProduct: vi.fn(async () => undefined), pauseProducts: vi.fn(async () => undefined) }));
 
 /** A request from an employee whose session is at `at`, with that store's role. */
 const requestAt = (role: string, at = 'centro') => ({ employee: { id: 'emp-1' }, currentLocation: { locationId: at, role, isActive: true } }) as never;
 
 const routes = () => {
-  const products = { getProduct: vi.fn(async (id: string, locationId: string) => ({ success: true, data: { id, locationId, stockAlert: { paused: true } } })) };
+  const products = {
+    getProduct: vi.fn(async (id: string, locationId: string) => ({ success: true, data: { id, locationId, stockAlert: { paused: true } } })),
+    getProducts: vi.fn(async (_locationId: string, o: { onlyIds: string[] }) => ({ success: true, data: o.onlyIds.map((id) => ({ id })) })),
+  };
   const prisma = {};
   return { products, prisma, controller: new ProductPauseController(prisma as never, products as never) };
 };
@@ -50,6 +53,40 @@ describe('ProductPauseController', () => {
       given: 'a manager pausing at a store other than their session\'s',
       should: 'refuse with 403 and pause nothing',
       actual: [await statusOf(controller.pause('p-1', { locationId: 'oriente', reason: 'OTHER' }, requestAt('MANAGER'))), vi.mocked(pauseProduct).mock.calls.length],
+      expected: [403, 0],
+    });
+  });
+
+  test('several at once', async () => {
+    const { controller, products, prisma } = routes();
+    const result = await controller.pauseMany({ locationId: 'centro', productIds: ['p-2', 'p-1', 'p-2'], reason: 'SLOW_MOVER' }, requestAt('OWNER'));
+
+    assert({
+      given: 'an owner pausing two products at a store, one of them sent twice',
+      should: 'pause them as that employee and answer with each updated row once, in the order sent',
+      actual: [
+        Reflect.getMetadata('roles', ProductPauseController.prototype.pauseMany),
+        vi.mocked(pauseProducts).mock.calls[0],
+        products.getProducts.mock.calls[0],
+        result,
+      ],
+      expected: [
+        ['OWNER', 'MANAGER'],
+        [prisma, { productIds: ['p-2', 'p-1', 'p-2'], locationId: 'centro', reason: 'SLOW_MOVER', employeeId: 'emp-1' }],
+        ['centro', { onlyIds: ['p-2', 'p-1'], limit: 2 }],
+        { success: true, data: [{ id: 'p-2' }, { id: 'p-1' }] },
+      ],
+    });
+  });
+
+  test('several at another store', async () => {
+    const { controller } = routes();
+    vi.mocked(pauseProducts).mockClear();
+
+    assert({
+      given: 'a manager pausing several products at a store other than their session\'s',
+      should: 'refuse with 403 and pause nothing',
+      actual: [await statusOf(controller.pauseMany({ locationId: 'oriente', productIds: ['p-1'], reason: 'OTHER' }, requestAt('MANAGER'))), vi.mocked(pauseProducts).mock.calls.length],
       expected: [403, 0],
     });
   });

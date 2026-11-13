@@ -91,7 +91,16 @@ describe('AllExceptionsFilter response body', () => {
     });
   });
 
-  test('anything else in the body', () => {
+  test('the product a bulk change refused', () => {
+    assert({
+      given: 'a 400 from a bulk pause naming the product it refused',
+      should: 'pass its productId through, so the app can point at it',
+      actual: bodyFor(new HttpException({ success: false, message: 'Recarga Yastás: este producto no lleva existencias', productId: 'p-9' }, HttpStatus.BAD_REQUEST)),
+      expected: { success: false, message: 'Recarga Yastás: este producto no lleva existencias', productId: 'p-9' },
+    });
+  });
+
+    test('anything else in the body', () => {
     assert({
       given: 'an error body with fields the app does not read',
       should: 'drop them',
