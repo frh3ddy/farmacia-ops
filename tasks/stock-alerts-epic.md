@@ -1,6 +1,6 @@
 # Stock Alerts Epic
 
-**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is built and approved on `feature/stock-alert-level` (deploys after the 2026-11-13 03:00 stats run). O5 is planned on `feature/stock-pause`, branched from O4.
+**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 is built and approved on `feature/stock-pause`.
 **Goal**: alert only on regular sellers that ran out or are running low, ranked by lost sales; let a product be paused per store; suggest pauses from history for a person to review
 
 ## Overview
@@ -79,6 +79,8 @@ A product is paused per store (`ProductStoreStatus.pausedAt`), by an owner or a 
 - Given a manual resume, should clear the pause and record `MANUAL`, who (`resumedByEmployeeId`) and when; given a product that isn't paused, should do nothing; an unknown or inactive store, or more than one, is refused as for a pause
 - Given a pause, a bulk pause or a manual resume that succeeds, should answer with the updated product row(s) at that store, in the detail and list shape with `stockAlert`, so the phone updates without a refetch
 - Given a receiving or a received transfer of a paused product at that store, should resume it with `STOCK_RECEIVED` in the same transaction, whatever its stock was, by no one (`resumedByEmployeeId` null); at another store, by an adjustment, a count, or a return, or by a received transfer line written again with the same batch, it should stay paused
+
+**Known gap**: undoing a receiving doesn't pause the product again; pause it again by hand if it still isn't available.
 
 ---
 
