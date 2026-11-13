@@ -196,3 +196,28 @@ describe('the Alertas lists', () => {
     });
   });
 });
+
+describe('paging a list with ties', () => {
+  test('same priority and same age', async () => {
+    const products = new ProductsService(prisma);
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Empates' } });
+    const createdAt = new Date('2026-09-01T12:00:00.000Z');
+    const run = Math.random().toString(36).slice(2);
+    // Ids that sort opposite to the order they're created in, so the database's own order can't pass for id order
+    const tied = async (name: string) => {
+      const { id } = await prisma.product.create({ data: { id: `${name}-${run}`, name, createdAt, soldOnlyAtLocationId: locationId } });
+      await prisma.productStockStats.create({ data: { productId: id, locationId, windowDays: 90, daysAtZero: 0, stockOuts: 0, unitsSold: 4, weeksWithSales: 4, typicalOnHand: 2, computedAt: new Date() } });
+      return id;
+    };
+    const ids = [await tied('empate-c'), await tied('empate-b'), await tied('empate-a')];
+    const pages = async (filter: 'outAlert' | 'outOfStock') =>
+      Promise.all([1, 2, 3].map(async (page) => (await products.getProducts(locationId, { filter, page, limit: 1 })).data[0]?.id));
+
+    assert({
+      given: 'three out-of-stock regular sellers created together with the same sales, paged one at a time',
+      should: 'show each once, in id order, on the Alertas list and on Productos\' out of stock',
+      actual: [await pages('outAlert'), await pages('outOfStock')],
+      expected: [[...ids].sort(), [...ids].sort()],
+    });
+  });
+});
