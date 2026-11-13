@@ -29,14 +29,14 @@ describe('ProductPauseController', () => {
 
   test('a pause', async () => {
     const { controller, prisma } = routes();
-    const result = await controller.pause('p-1', { locationId: 'centro', reason: 'SUPPLIER_UNAVAILABLE', note: 'Sin surtido' }, requestAt('MANAGER'));
+    const result = await controller.pause('p-1', { locationId: 'centro', reason: 'REPLACED_BY_EQUIVALENT', note: 'Ahora se vende el genérico', replacedByProductId: 'p-2' }, requestAt('MANAGER'));
 
     assert({
-      given: 'a manager pausing a product at their store',
-      should: 'pause it as that employee and answer with the product\'s updated row at the store',
+      given: 'a manager pausing a product at their store as replaced by another',
+      should: 'pause it with the replacement as that employee and answer with the product\'s updated row at the store',
       actual: [vi.mocked(pauseProduct).mock.calls[0], result],
       expected: [
-        [prisma, { productId: 'p-1', locationId: 'centro', reason: 'SUPPLIER_UNAVAILABLE', note: 'Sin surtido', employeeId: 'emp-1' }],
+        [prisma, { productId: 'p-1', locationId: 'centro', reason: 'REPLACED_BY_EQUIVALENT', note: 'Ahora se vende el genérico', replacedByProductId: 'p-2', employeeId: 'emp-1' }],
         { success: true, data: { id: 'p-1', locationId: 'centro', stockAlert: { paused: true } } },
       ],
     });

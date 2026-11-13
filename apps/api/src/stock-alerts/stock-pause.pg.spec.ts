@@ -126,4 +126,112 @@ describe('pauseProduct()', () => {
       expected: [[400, 400], null, 'Sin surtido'],
     });
   });
+
+});
+
+describe('pauseProduct() replaced by an equivalent', () => {
+  const groupOf = async (id: string) => (await prisma.product.findUniqueOrThrow({ where: { id } })).equivalenceGroupId;
+  const replace = (productId: string, replacedByProductId: string) =>
+    pauseProduct(prisma, { productId, locationId: centro, reason: 'REPLACED_BY_EQUIVALENT', replacedByProductId, employeeId: manager });
+
+  test('neither in a group', async () => {
+    const [a, b] = [await product(), await product()];
+    await replace(a, b);
+    const [row] = await statusOf(a);
+
+    assert({
+      given: 'a product paused as replaced by another, neither in an equivalence group',
+      should: 'keep the replacement on the pause and put both in one new group',
+      actual: [row.replacedByProductId, await groupOf(a) !== null, (await groupOf(a)) === (await groupOf(b))],
+      expected: [b, true, true],
+    });
+  });
+
+  test('one already in a group', async () => {
+    const [a, b, c] = [await product(), await product(), await product()];
+    const { id: group } = await prisma.equivalenceGroup.create({ data: { products: { connect: [{ id: b }, { id: c }] } } });
+    await replace(a, b);
+
+    assert({
+      given: 'a replacement already in a group with a third product',
+      should: 'add the paused product to that group',
+      actual: [await groupOf(a), await groupOf(b), await groupOf(c), await prisma.equivalenceGroup.count({ where: { products: { some: { id: a } } } })],
+      expected: [group, group, group, 1],
+    });
+  });
+
+  test('both in different groups', async () => {
+    const [a, b, c, d] = [await product(), await product(), await product(), await product()];
+    const { id: first } = await prisma.equivalenceGroup.create({ data: { products: { connect: [{ id: a }, { id: c }] } } });
+    const { id: second } = await prisma.equivalenceGroup.create({ data: { products: { connect: [{ id: b }, { id: d }] } } });
+    await replace(a, b);
+    const [row] = await statusOf(a);
+
+    assert({
+      given: 'a product and its replacement each in a different group',
+      should: 'keep the replacement on the pause and leave both groups as they were',
+      actual: [row.replacedByProductId, await groupOf(a), await groupOf(c), await groupOf(b), await groupOf(d)],
+      expected: [b, first, first, second, second],
+    });
+  });
+
+  test('paused again without a replacement', async () => {
+    const [a, b] = [await product(), await product()];
+    await replace(a, b);
+    await pauseProduct(prisma, { productId: a, locationId: centro, reason: 'SUPPLIER_UNAVAILABLE', employeeId: manager });
+    const [row] = await statusOf(a);
+
+    assert({
+      given: 'a product replaced by another, then paused again for another reason',
+      should: 'drop the replacement from the pause',
+      actual: row.replacedByProductId,
+      expected: null,
+    });
+  });
+
+  test('refused replacements', async () => {
+    const [a, b] = [await product(), await product()];
+    const results = [
+      await refusal(pauseProduct(prisma, { productId: a, locationId: centro, reason: 'SLOW_MOVER', replacedByProductId: b, employeeId: manager })),
+      await refusal(replace(a, 'no-such-product')),
+      await refusal(replace(a, a)),
+      await refusal(replace(a, 42 as never)),
+    ];
+
+    assert({
+      given: 'a replacement with another reason, an unknown replacement, the product itself, and an id that isn\'t text',
+      should: 'refuse each with 400, pausing and grouping nothing',
+      actual: [results, await prisma.productStoreStatus.count({ where: { productId: a } }), await groupOf(a)],
+      expected: [[400, 400, 400, 400], 0, null],
+    });
+  });
+
+  test('replacements that can\'t stand in', async () => {
+    const a = await product();
+    const yastas = await product(undefined, { tracksInventory: false });
+    const discontinued = await product(undefined, { isDiscontinued: true });
+    const elsewhere = await product(oriente);
+    const results = [await refusal(replace(a, yastas)), await refusal(replace(a, discontinued)), await refusal(replace(a, elsewhere))];
+
+    assert({
+      given: 'a Yastás service, a discontinued product, and one only another store sells as the replacement',
+      should: 'refuse each with 400, pausing and grouping nothing',
+      actual: [results, await prisma.productStoreStatus.count({ where: { productId: a } }), await groupOf(a)],
+      expected: [[400, 400, 400], 0, null],
+    });
+  });
+
+  test('both already in the same group', async () => {
+    const [a, b] = [await product(), await product()];
+    const { id: group } = await prisma.equivalenceGroup.create({ data: { products: { connect: [{ id: a }, { id: b }] } } });
+    const before = await prisma.equivalenceGroup.count();
+    await replace(a, b);
+
+    assert({
+      given: 'a product and its replacement already in one group',
+      should: 'keep them there and create no other group',
+      actual: [await groupOf(a), await groupOf(b), (await prisma.equivalenceGroup.count()) - before],
+      expected: [group, group, 0],
+    });
+  });
 });
