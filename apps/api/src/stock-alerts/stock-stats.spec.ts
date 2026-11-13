@@ -130,9 +130,9 @@ describe('stockStats()', () => {
 
     assert({
       given: 'weekly sales and no stock history (stock Square never tracked)',
-      should: 'count the sales, but no day at 0 and no stock-out',
-      actual: [stockStats(input).unitsSold, stockStats(input).daysAtZero, stockStats(input).stockOuts],
-      expected: [2, 0, 0],
+      should: 'count the sales, but no day at 0, no stock-out, and no run at 0',
+      actual: [stockStats(input).unitsSold, stockStats(input).daysAtZero, stockStats(input).stockOuts, stockStats(input).zeroSince],
+      expected: [2, 0, 0, null],
     });
   });
 });
