@@ -14,7 +14,7 @@ import { findSearchMatchIds, sortByIdOrder } from './product-search';
 import { productsWithoutCostSql, type ProductWithoutCost } from './products-without-cost';
 import { soldAt } from './catalog-product-view';
 import { nextSyncCursor, parseSyncCursor } from './product-sync-cursor';
-import { parseBusinessDate } from '../inventory/business-date';
+import { businessDay, parseBusinessDate } from '../inventory/business-date';
 
 /** The initial stock's lote, trimmed and capped like a count lot's; null when blank. */
 const initialLotNumber = (batchNumber?: string) => batchNumber?.trim().slice(0, 100) || null;
@@ -171,16 +171,26 @@ function assertWordList(value: unknown, label: string): asserts value is string[
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The stock and margin chips over the product list (expiring and at-risk come from aging). */
-export const PRODUCT_LIST_FILTERS = ['outOfStock', 'lowStock', 'inStock', 'lowMargin'] as const;
+export const PRODUCT_LIST_FILTERS = ['outOfStock', 'lowStock', 'inStock', 'paused', 'lowMargin'] as const;
 export type ProductListFilter = (typeof PRODUCT_LIST_FILTERS)[number];
 
 /**
  * One row per stocked product this location sells (not Yastás services, not
- * discontinued, not another store's one-store product), with its stock and
- * whether its margin is under 10%. The counts and the filtered list both read it,
- * so a chip's count is always the length of its list.
+ * discontinued, not another store's one-store product), with its stock,
+ * whether its margin is under 10%, and its stock alert. The counts, the filtered
+ * list and the rows' `stockAlert` all read it, so a chip's count is always the
+ * length of its list.
+ *
+ * Stock alert (farmacia-ios docs/stock-alerts-design.md §3): only a regular
+ * seller (sold in ≥ regularMinWeeks of the window's weeks) alerts, and a paused
+ * one never does. Out at 0; low under its cover (rate × coverDays) and under its
+ * typical stock, so one that normally sits at 1 doesn't alert at 1. Out ranks by
+ * rate, low by rate ÷ stock. Its run at 0 is last night's (the nightly stats),
+ * corrected for stock that moved since: none once restocked, and today for one
+ * that was in stock last night (unknown when the stats aren't from today).
  */
-function catalogRowsSql(locationId: string): Prisma.Sql {
+function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql {
+  const today = parseBusinessDate(businessDay(now), 'start');
   return Prisma.sql`
     WITH inv AS (
       SELECT "productId",
@@ -202,36 +212,98 @@ function catalogRowsSql(locationId: string): Prisma.Sql {
                "locationId" IS DISTINCT FROM ${locationId},
                "locationId" IS NOT NULL,
                "createdAt" DESC
+    ),
+    rows AS (
+      SELECT
+        p.id,
+        p."createdAt",
+        COALESCE(inv.qty, 0) AS qty,
+        COALESCE(
+          m."priceCents" IS NOT NULL
+            AND inv.qty IS NOT NULL
+            AND inv.qty > 0
+            AND (m."priceCents" / 100.0 - (inv.total_cost / inv.qty))
+                / NULLIF(m."priceCents" / 100.0, 0) * 100 < 10,
+          false
+        ) AS low_margin,
+        m."squareVariationId" AS square_variation_id,
+        m."locationId" AS mapping_location_id,
+        ps."productId" IS NOT NULL AS paused,
+        ps."pauseReason" AS pause_reason,
+        CASE WHEN COALESCE(inv.qty, 0) > 0 THEN NULL
+             WHEN st."zeroSince" IS NOT NULL THEN st."zeroSince"
+             -- in stock at the end of yesterday, by stats computed today (an older run can't say which day it ran out)
+             WHEN st."stockAtEnd" > 0 AND st."computedAt" >= ${today}::timestamp THEN ${today}::timestamp
+        END AS zero_since,
+        COALESCE(st."weeksWithSales" >= COALESCE(cfg."regularMinWeeks", 4), false) AS regular,
+        st."unitsSold"::float8 / NULLIF(st."windowDays", 0) AS rate,
+        st."typicalOnHand" AS typical,
+        COALESCE(cfg."coverDays", 14) AS cover
+      FROM "Product" p
+      LEFT JOIN inv ON inv."productId" = p.id
+      LEFT JOIN mapping m ON m."productId" = p.id
+      LEFT JOIN "ProductStockStats" st ON st."productId" = p.id AND st."locationId" = ${locationId}
+      LEFT JOIN "ProductStoreStatus" ps ON ps."productId" = p.id AND ps."locationId" = ${locationId} AND ps."pausedAt" IS NOT NULL
+      LEFT JOIN "StockAlertSettings" cfg ON cfg."locationId" = ${locationId} -- defaults when a store has no row
+      WHERE p."tracksInventory"
+        AND NOT p."isDiscontinued"
+        AND (p."soldOnlyAtLocationId" IS NULL OR p."soldOnlyAtLocationId" = ${locationId})
+    ),
+    leveled AS (
+      SELECT *,
+             CASE WHEN paused OR NOT regular THEN 'none'
+                  WHEN qty <= 0 THEN 'out'
+                  WHEN qty < CEIL(rate * cover) AND qty < typical THEN 'low'
+                  ELSE 'none' END AS level
+        FROM rows
     )
-    SELECT
-      p.id,
-      p."createdAt",
-      COALESCE(inv.qty, 0) AS qty,
-      COALESCE(
-        m."priceCents" IS NOT NULL
-          AND inv.qty IS NOT NULL
-          AND inv.qty > 0
-          AND (m."priceCents" / 100.0 - (inv.total_cost / inv.qty))
-              / NULLIF(m."priceCents" / 100.0, 0) * 100 < 10,
-        false
-      ) AS low_margin,
-      m."squareVariationId" AS square_variation_id,
-      m."locationId" AS mapping_location_id
-    FROM "Product" p
-    LEFT JOIN inv ON inv."productId" = p.id
-    LEFT JOIN mapping m ON m."productId" = p.id
-    WHERE p."tracksInventory"
-      AND NOT p."isDiscontinued"
-      AND (p."soldOnlyAtLocationId" IS NULL OR p."soldOnlyAtLocationId" = ${locationId})
+    SELECT *, CASE level WHEN 'out' THEN rate WHEN 'low' THEN rate / GREATEST(qty, 1) ELSE 0 END AS priority
+      FROM leveled
   `;
 }
 
-/** Which catalog rows each filter keeps (thresholds mirror the iOS app). */
+export interface StockAlert {
+  level: 'none' | 'low' | 'out';
+  priority: number;
+  paused: boolean;
+  pauseReason: string | null;
+  zeroSince: string | null;
+}
+
+const NO_ALERT: StockAlert = { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null };
+
+/**
+ * Each product's stock alert at a store. One the store's catalog leaves out
+ * (Yastás, discontinued) has none and shows as not paused, even with a pause.
+ */
+async function stockAlerts(prisma: PrismaService, locationId: string, ids: string[]): Promise<Map<string, StockAlert>> {
+  if (!ids.length) return new Map();
+  const rows = await prisma.$queryRaw<Array<{ id: string; level: StockAlert['level']; priority: number; paused: boolean; pause_reason: string | null; zero_since: Date | null }>>(Prisma.sql`
+    WITH catalog AS (${catalogRowsSql(locationId)})
+    SELECT id, level, priority, paused, pause_reason, zero_since FROM catalog WHERE id IN (${Prisma.join(ids)})
+  `);
+  return new Map(rows.map((r) => [r.id, { level: r.level, priority: r.priority, paused: r.paused, pauseReason: r.pause_reason, zeroSince: r.zero_since?.toISOString() ?? null }]));
+}
+
+/** A product's alert at a store, or null without a store. */
+const alertOf = (alerts: Map<string, StockAlert> | null, id: string) => (alerts ? (alerts.get(id) ?? NO_ALERT) : null);
+
+/**
+ * Which catalog rows each filter keeps. A paused product is only in `paused`,
+ * whatever its stock, so the phone's in stock = total − out − low − paused.
+ * Out of stock is the stock state (any product at 0), low is the alert.
+ */
 const FILTER_SQL: Record<ProductListFilter, Prisma.Sql> = {
-  outOfStock: Prisma.sql`qty <= 0`,
-  lowStock: Prisma.sql`qty > 0 AND qty < 10`,
-  inStock: Prisma.sql`qty >= 10`,
+  outOfStock: Prisma.sql`qty <= 0 AND NOT paused`,
+  lowStock: Prisma.sql`level = 'low'`,
+  inStock: Prisma.sql`qty > 0 AND level <> 'low' AND NOT paused`,
+  paused: Prisma.sql`paused`,
   lowMargin: Prisma.sql`low_margin`,
+};
+
+/** A filtered list's order: newest first, out of stock by its latest stock-out (unknown last). */
+const FILTER_ORDER: Partial<Record<ProductListFilter, Prisma.Sql>> = {
+  outOfStock: Prisma.sql`zero_since DESC NULLS LAST, "createdAt" DESC`,
 };
 
 /** Include for a box's suelto at one store; without a store, none (`in: []` matches no row). */
@@ -1435,6 +1507,8 @@ export class ProductsService {
       }),
     ]);
 
+    const alerts = locationId ? await stockAlerts(this.prisma, locationId, products.map((p) => p.id)) : null;
+
     // Transform products to include computed fields
     const transformedProducts = (rankedIds ? sortByIdOrder(products, rankedIds) : products).map((product) => {
       const mapping = preferredMapping(product.catalogMappings, locationId);
@@ -1455,6 +1529,7 @@ export class ProductsService {
         totalInventory,
         averageCost,
         hasSquareSync: mapping ? isSquareMapping(mapping) : false,
+        stockAlert: alertOf(alerts, product.id),
       };
     });
 
@@ -1485,7 +1560,7 @@ export class ProductsService {
       if (!locationId) throw new BadRequestException('Location ID is required to filter');
       const rows = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         WITH catalog AS (${catalogRowsSql(locationId)})
-        SELECT id FROM catalog WHERE ${FILTER_SQL[filter]} ORDER BY "createdAt" DESC
+        SELECT id FROM catalog WHERE ${FILTER_SQL[filter]} ORDER BY ${FILTER_ORDER[filter] ?? Prisma.sql`"createdAt" DESC`}
       `);
       return rows.map((r) => r.id);
     }
@@ -1503,7 +1578,7 @@ export class ProductsService {
   /**
    * Lightweight stock/margin alert counts for a location (Dashboard alerts).
    * Uses SQL aggregates + window functions instead of transferring full product
-   * rows. Thresholds mirror the iOS app: outOfStock qty<=0, lowStock 1-9,
+   * rows. outOfStock, lowStock and paused as their filters (FILTER_SQL),
    * lowMargin < 10% (margin computed from selling price vs weighted average cost
    * of the location's FIFO batches).
    */
@@ -1517,6 +1592,7 @@ export class ProductsService {
         total: bigint;
         out_of_stock: bigint;
         low_stock: bigint;
+        paused: bigint;
         low_margin: bigint;
         synced: bigint;
         local: bigint;
@@ -1527,6 +1603,7 @@ export class ProductsService {
         COUNT(*)::bigint AS total,
         COUNT(*) FILTER (WHERE ${FILTER_SQL.outOfStock})::bigint AS out_of_stock,
         COUNT(*) FILTER (WHERE ${FILTER_SQL.lowStock})::bigint AS low_stock,
+        COUNT(*) FILTER (WHERE ${FILTER_SQL.paused})::bigint AS paused,
         COUNT(*) FILTER (WHERE ${FILTER_SQL.lowMargin})::bigint AS low_margin,
         COUNT(*) FILTER (WHERE square_variation_id IS NOT NULL AND NOT square_variation_id LIKE 'local_%')::bigint AS synced,
         -- Must match what syncUnsyncedProducts can push: location-scoped local_ mappings only.
@@ -1542,6 +1619,7 @@ export class ProductsService {
         total: Number(row?.total ?? 0),
         outOfStock: Number(row?.out_of_stock ?? 0),
         lowStock: Number(row?.low_stock ?? 0),
+        paused: Number(row?.paused ?? 0),
         lowMargin: Number(row?.low_margin ?? 0),
         synced: Number(row?.synced ?? 0),
         local: Number(row?.local ?? 0),
@@ -1771,6 +1849,7 @@ export class ProductsService {
         totalInventory,
         averageCost,
         hasSquareSync: mapping ? isSquareMapping(mapping) : false,
+        stockAlert: alertOf(locationId ? await stockAlerts(this.prisma, locationId, [product.id]) : null, product.id),
       },
     };
   }

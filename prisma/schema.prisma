@@ -1375,6 +1375,7 @@ model ProductStockStats {
   daysAtZero     Int // days at 0 without a sale, in the window
   stockOuts      Int // times it went from > 0 to 0 in the window
   zeroSince      DateTime? // start of the current run at 0
+  stockAtEnd     Int? // end-of-day stock on the window's last day; null while unknown
   computedAt     DateTime
 
   product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
