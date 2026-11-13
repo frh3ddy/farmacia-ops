@@ -73,7 +73,7 @@ A product is paused per store (`ProductStoreStatus.pausedAt`), by an owner or a 
 - Given a cashier or accountant, or a store the user can't act at, should refuse with 403; staff-facing messages in Spanish
 - Given a Yastás service or a discontinued product, should refuse with 400: neither alerts (Yastás is its own workflow), so a pause means nothing
 - Given a store that doesn't exist (404) or isn't active (400), or a note that isn't text or is over 500 characters (400), should refuse; a note is trimmed, and a blank one is none
-- Given a product the store doesn't sell, an unknown replacement, a replacement that is the product itself, or a replacement with a reason other than `REPLACED_BY_EQUIVALENT`, should refuse with 400 and pause nothing; `REPLACED_BY_EQUIVALENT` without a replacement is allowed
+- Given a product the store doesn't sell, an unknown replacement, a replacement that is the product itself, a replacement that couldn't be paused itself (Yastás, discontinued, or not sold at the store), or a replacement with a reason other than `REPLACED_BY_EQUIVALENT`, should refuse with 400 and pause nothing; `REPLACED_BY_EQUIVALENT` without a replacement is allowed
 - Given `REPLACED_BY_EQUIVALENT` with a replacement, should put both products in one equivalence group: a new one when neither has a group, or the one that has a group; when both are already in different groups, should keep the replacement on the pause and leave the groups as they are
 - Given several products and one reason, should pause them all in one transaction, or none if any is refused
 - Given a manual resume, should clear the pause and record `MANUAL` and when; given a product that isn't paused, should do nothing

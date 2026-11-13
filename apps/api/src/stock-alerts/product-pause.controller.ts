@@ -14,14 +14,14 @@ export class ProductPauseController {
     private readonly products: ProductsService,
   ) {}
 
-  /** POST /products/:id/pause { locationId, reason, note? } */
+  /** POST /products/:id/pause { locationId, reason, note?, replacedByProductId? } */
   @Post(':id/pause')
   @Roles('OWNER', 'MANAGER')
-  async pause(@Param('id') productId: string, @Body() body: { locationId?: string; reason: PauseReason; note?: string }, @Req() req: GuardedRequest) {
+  async pause(@Param('id') productId: string, @Body() body: { locationId?: string; reason: PauseReason; note?: string; replacedByProductId?: string }, @Req() req: GuardedRequest) {
     const locationId = body.locationId || req.currentLocation?.locationId;
     if (!locationId) throw new BadRequestException('Falta la sucursal');
     assertActingAtOwnStore(req, locationId);
-    await pauseProduct(this.prisma, { productId, locationId, reason: body.reason, note: body.note, employeeId: req.employee?.id });
+    await pauseProduct(this.prisma, { productId, locationId, reason: body.reason, note: body.note, replacedByProductId: body.replacedByProductId, employeeId: req.employee?.id });
     return this.products.getProduct(productId, locationId);
   }
 }
