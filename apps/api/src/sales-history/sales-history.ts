@@ -88,28 +88,32 @@ export async function importSalesHistory(
 }
 
 /**
- * A product's lines at a store: imported history, less what the app also
- * recorded live (an order whose payment is a Sale, a return line it took back),
- * plus live sales net of their returns.
+ * Sale lines at a store (one product's, or all with a product): imported
+ * history, less what the app also recorded live (an order whose payment is a
+ * Sale, a return line it took back), plus live sales net of their returns.
  */
-const productLines = (productId: string, locationId: string) => Prisma.sql`
-  SELECT h.quantity, h."soldAt" AS at
+export const salesLines = (locationId: string, productId?: string) => {
+  const history = productId ? Prisma.sql`h."productId" = ${productId}` : Prisma.sql`h."productId" IS NOT NULL`;
+  const live = productId ? Prisma.sql`AND i."productId" = ${productId}` : Prisma.empty;
+  return Prisma.sql`
+  SELECT h."productId", h.quantity, h."soldAt" AS at
     FROM "SalesHistoryLine" h
-   WHERE h."productId" = ${productId} AND h."locationId" = ${locationId}
+   WHERE ${history} AND h."locationId" = ${locationId}
      AND NOT EXISTS (SELECT 1 FROM "Sale" s WHERE s."squareId" = h."squarePaymentId")
      -- a returned line the worker took back live (sale.worker.ts recordSquareReturns)
      AND NOT EXISTS (SELECT 1 FROM "SaleReturn" r WHERE r."clientRequestId" = 'square-return-line:' || h."squareLineUid")
   UNION ALL
-  SELECT i.quantity, s."createdAt"
+  SELECT i."productId", i.quantity, s."createdAt"
     FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-   WHERE i."productId" = ${productId} AND s."locationId" = ${locationId}
+   WHERE s."locationId" = ${locationId} ${live}
   UNION ALL
-  SELECT -ri.quantity, r."returnedAt"
+  SELECT i."productId", -ri.quantity, r."returnedAt"
     FROM "SaleReturnItem" ri
     JOIN "SaleReturn" r ON r.id = ri."returnId"
     JOIN "SaleItem" i ON i.id = ri."saleItemId"
     JOIN "Sale" s ON s.id = i."saleId"
-   WHERE i."productId" = ${productId} AND s."locationId" = ${locationId}`;
+   WHERE s."locationId" = ${locationId} ${live}`;
+};
 
 export interface SalesVelocity {
   lastSoldAt: string | null;
@@ -124,7 +128,7 @@ export async function salesVelocity(prisma: PrismaClient, productId: string, loc
     SELECT max(at) FILTER (WHERE quantity > 0) AS last,
            coalesce(sum(quantity) FILTER (WHERE at >= ${new Date(now.getTime() - 30 * DAY)}), 0)::int AS u30,
            coalesce(sum(quantity) FILTER (WHERE at >= ${new Date(now.getTime() - 90 * DAY)}), 0)::int AS u90
-      FROM (${productLines(productId, locationId)}) lines`;
+      FROM (${salesLines(locationId, productId)}) lines`;
   return {
     lastSoldAt: row.last?.toISOString() ?? null,
     unitsLast30d: row.u30,
