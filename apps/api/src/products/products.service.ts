@@ -304,11 +304,14 @@ const FILTER_SQL: Record<ProductListFilter, Prisma.Sql> = {
   lowAlert: Prisma.sql`level = 'low'`,
 };
 
-/** A filtered list's order: newest first, out of stock by its latest stock-out (unknown last), Alertas' by lost sales a day. */
+/**
+ * A filtered list's order: newest first, out of stock by its latest stock-out (unknown last), Alertas' by lost sales a day.
+ * Ties end on id: each page re-runs the query, and Postgres doesn't keep tied rows in the same order between runs.
+ */
 const FILTER_ORDER: Partial<Record<ProductListFilter, Prisma.Sql>> = {
-  outOfStock: Prisma.sql`zero_since DESC NULLS LAST, "createdAt" DESC`,
-  outAlert: Prisma.sql`priority DESC NULLS LAST, "createdAt" DESC`,
-  lowAlert: Prisma.sql`priority DESC NULLS LAST, "createdAt" DESC`,
+  outOfStock: Prisma.sql`zero_since DESC NULLS LAST, "createdAt" DESC, id`,
+  outAlert: Prisma.sql`priority DESC NULLS LAST, "createdAt" DESC, id`,
+  lowAlert: Prisma.sql`priority DESC NULLS LAST, "createdAt" DESC, id`,
 };
 
 /** Include for a box's suelto at one store; without a store, none (`in: []` matches no row). */
@@ -1565,7 +1568,7 @@ export class ProductsService {
       if (!locationId) throw new BadRequestException('Location ID is required to filter');
       const rows = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         WITH catalog AS (${catalogRowsSql(locationId)})
-        SELECT id FROM catalog WHERE ${FILTER_SQL[filter]} ORDER BY ${FILTER_ORDER[filter] ?? Prisma.sql`"createdAt" DESC`}
+        SELECT id FROM catalog WHERE ${FILTER_SQL[filter]} ORDER BY ${FILTER_ORDER[filter] ?? Prisma.sql`"createdAt" DESC, id`}
       `);
       return rows.map((r) => r.id);
     }
