@@ -79,7 +79,7 @@ async function twoWeeks() {
   await liveSale('2026-11-09', 4);
 }
 
-const fields = (r: { windowDays: number; unitsSold: number; weeksWithSales: number; lastSoldAt: Date | null; typicalOnHand: number; daysAtZero: number; stockOuts: number; zeroSince: Date | null }) => ({
+const fields = (r: { windowDays: number; unitsSold: number; weeksWithSales: number; lastSoldAt: Date | null; typicalOnHand: number; daysAtZero: number; stockOuts: number; zeroSince: Date | null; stockAtEnd: number | null }) => ({
   windowDays: r.windowDays,
   unitsSold: r.unitsSold,
   weeksWithSales: r.weeksWithSales,
@@ -88,6 +88,7 @@ const fields = (r: { windowDays: number; unitsSold: number; weeksWithSales: numb
   daysAtZero: r.daysAtZero,
   stockOuts: r.stockOuts,
   zeroSince: r.zeroSince?.toISOString(),
+  stockAtEnd: r.stockAtEnd,
 });
 
 describe('recordStockStats()', () => {
@@ -109,6 +110,7 @@ describe('recordStockStats()', () => {
         daysAtZero: 7,
         stockOuts: 2,
         zeroSince: '2026-11-10T06:00:00.000Z',
+        stockAtEnd: 0,
       }],
     });
   });

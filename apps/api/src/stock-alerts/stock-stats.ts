@@ -24,6 +24,8 @@ export interface StockStats {
   daysAtZero: number;
   stockOuts: number;
   zeroSince: string | null;
+  /** End-of-day stock on the window's last day; null while its stock is unknown. */
+  stockAtEnd: number | null;
 }
 
 /**
@@ -74,6 +76,7 @@ export function stockStats({ window, levels, sales, lastSoldDay, zeroFrom }: Sto
     stockOuts,
     // At 0 at the end of the window, even if it sold its last unit that day; never while its stock is unknown.
     zeroSince: knownFrom && q === 0 ? (runStarts.pop() ?? null) : null,
+    stockAtEnd: knownFrom ? q : null,
   };
 }
 
@@ -130,14 +133,14 @@ export async function recordStockStats(prisma: PrismaClient, now = new Date()): 
     });
     if (rows.length) {
       await prisma.$executeRaw`
-        INSERT INTO "ProductStockStats" ("productId", "locationId", "windowDays", "unitsSold", "weeksWithSales", "lastSoldAt", "typicalOnHand", "daysAtZero", "stockOuts", "zeroSince", "computedAt")
-        SELECT "productId", "locationId", "windowDays", "unitsSold", "weeksWithSales", "lastSoldAt", "typicalOnHand", "daysAtZero", "stockOuts", "zeroSince", ${now}
+        INSERT INTO "ProductStockStats" ("productId", "locationId", "windowDays", "unitsSold", "weeksWithSales", "lastSoldAt", "typicalOnHand", "daysAtZero", "stockOuts", "zeroSince", "stockAtEnd", "computedAt")
+        SELECT "productId", "locationId", "windowDays", "unitsSold", "weeksWithSales", "lastSoldAt", "typicalOnHand", "daysAtZero", "stockOuts", "zeroSince", "stockAtEnd", ${now}
           FROM jsonb_to_recordset(${JSON.stringify(rows)}::jsonb) AS x("productId" text, "locationId" text, "windowDays" int, "unitsSold" int, "weeksWithSales" int,
-               "lastSoldAt" timestamp, "typicalOnHand" int, "daysAtZero" int, "stockOuts" int, "zeroSince" timestamp)
+               "lastSoldAt" timestamp, "typicalOnHand" int, "daysAtZero" int, "stockOuts" int, "zeroSince" timestamp, "stockAtEnd" int)
         ON CONFLICT ("productId", "locationId") DO UPDATE SET
           "windowDays" = EXCLUDED."windowDays", "unitsSold" = EXCLUDED."unitsSold", "weeksWithSales" = EXCLUDED."weeksWithSales",
           "lastSoldAt" = EXCLUDED."lastSoldAt", "typicalOnHand" = EXCLUDED."typicalOnHand", "daysAtZero" = EXCLUDED."daysAtZero",
-          "stockOuts" = EXCLUDED."stockOuts", "zeroSince" = EXCLUDED."zeroSince", "computedAt" = EXCLUDED."computedAt"`;
+          "stockOuts" = EXCLUDED."stockOuts", "zeroSince" = EXCLUDED."zeroSince", "stockAtEnd" = EXCLUDED."stockAtEnd", "computedAt" = EXCLUDED."computedAt"`;
     }
     saved += rows.length;
   }

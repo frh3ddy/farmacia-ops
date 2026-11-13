@@ -26,7 +26,7 @@ describe('stockStats()', () => {
       given: 'stock days and sales in the window',
       should: 'net units of returns, count the weeks with a sale, take the median level on days in stock, and not count a day with a sale as a day at 0',
       actual: stockStats(twoWeeks()),
-      expected: { unitsSold: 6, weeksWithSales: 2, typicalOnHand: 5, daysAtZero: 7, stockOuts: 2, zeroSince: '2026-11-10' },
+      expected: { unitsSold: 6, weeksWithSales: 2, typicalOnHand: 5, daysAtZero: 7, stockOuts: 2, zeroSince: '2026-11-10', stockAtEnd: 0 },
     });
   });
 
@@ -63,9 +63,9 @@ describe('stockStats()', () => {
 
     assert({
       given: 'stock above 0 on the window\'s last day',
-      should: 'have no run at 0',
-      actual: stockStats(input).zeroSince,
-      expected: null,
+      should: 'have no run at 0, and end at that stock',
+      actual: [stockStats(input).zeroSince, stockStats(input).stockAtEnd],
+      expected: [null, 4],
     });
   });
 
@@ -76,7 +76,7 @@ describe('stockStats()', () => {
       given: 'no stock history and no sales',
       should: 'count no day at 0, since nothing is known about its stock, and an unknown start of the run at 0',
       actual: stockStats(input),
-      expected: { unitsSold: 0, weeksWithSales: 0, typicalOnHand: 0, daysAtZero: 0, stockOuts: 0, zeroSince: null },
+      expected: { unitsSold: 0, weeksWithSales: 0, typicalOnHand: 0, daysAtZero: 0, stockOuts: 0, zeroSince: null, stockAtEnd: null },
     });
   });
 

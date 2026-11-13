@@ -60,6 +60,15 @@ describe('ProductsController.getProducts with a filter', () => {
       actual: [optionsOfLastCall().filter, optionsOfLastCall().search, optionsOfLastCall().onlyIds],
       expected: ['lowStock', 'amox', undefined],
     });
+
+    await list('paused');
+
+    assert({
+      given: 'a cashier filtering the paused products',
+      should: 'pass the filter to the service like the other stock filters',
+      actual: optionsOfLastCall().filter,
+      expected: 'paused',
+    });
   });
 
   test('expiring and at-risk', async () => {

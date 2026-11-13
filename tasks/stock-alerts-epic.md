@@ -1,6 +1,6 @@
 # Stock Alerts Epic
 
-**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is built on `feature/stock-stats`.
+**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is built on `feature/stock-alert-level`.
 **Goal**: alert only on regular sellers that ran out or are running low, ranked by lost sales; let a product be paused per store; suggest pauses from history for a person to review
 
 ## Overview
@@ -46,6 +46,21 @@ Runs in the same nightly call as the stock days, right after them, over each sto
 
 ---
 
-## O4–O9
+## O4. Stock alert on product rows, chips and counts
 
-Not started: `stockAlert` on product rows and counts (a paused product counts only as paused, whatever its stock), pause and resume, the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report.
+`stockAlert { level: none|low|out, priority, paused, pauseReason, zeroSince }` on list, sync and detail rows at a store (null without one). Computed in the catalog SQL the chips and counts read.
+
+**Requirements**:
+- Given a regular seller (sold in ≥ `regularMinWeeks` weeks) at 0, should be `out`, ranked by its rate (units ÷ window days)
+- Given a regular seller under its cover (rate × `coverDays`, rounded up) and under its typical stock, should be `low`, ranked by rate ÷ stock; one that normally sits at 1 shouldn't alert at 1
+- Given a paused product, a slow mover, or no stats, should be `none`; a paused one says it's paused and why
+- Given the chips, should list out of stock as stock at 0 and not paused (latest stock-out first, unknown last), low by alert, paused whatever its stock, and in stock as the rest; `/products/counts` gains `paused`, so in stock = total − out − low − paused
+- Given a pause or a stats change, should reach the phones' delta sync
+- Given stock that moved since last night's stats, should date the run at 0 today for one that was in stock last night (`ProductStockStats.stockAtEnd`, only from stats computed today; unknown after a missed night) and drop it once restocked
+  - Known gap: one that sells out between midnight and the 03:00 stats run is sent to the phones with an unknown start; the server says today after 03:00, but nothing re-sends it until the next night (stores are closed then). If it matters, have `recordStockStats` touch the few products with qty ≤ 0, `stockAtEnd` > 0 and no `zeroSince`.
+
+---
+
+## O5–O9
+
+Not started: pause and resume, the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report. A future settings screen must touch the store's products when thresholds change, or phones keep the old alert levels.
