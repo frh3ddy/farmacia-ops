@@ -78,7 +78,7 @@ A product is paused per store (`ProductStoreStatus.pausedAt`), by an owner or a 
 - Given several products (1 to 200) and one reason, should pause them all in one transaction, or none if any is refused, answering with each row once in the order sent; a refusal names the product and carries its `productId`
 - Given a manual resume, should clear the pause and record `MANUAL`, who (`resumedByEmployeeId`) and when; given a product that isn't paused, should do nothing; an unknown or inactive store, or more than one, is refused as for a pause
 - Given a pause, a bulk pause or a manual resume that succeeds, should answer with the updated product row(s) at that store, in the detail and list shape with `stockAlert`, so the phone updates without a refetch
-- Given a receiving or a received transfer of a paused product at that store, should resume it with `STOCK_RECEIVED` in the same transaction, whatever its stock was; at another store, or by an adjustment, a count, or a return, it should stay paused
+- Given a receiving or a received transfer of a paused product at that store, should resume it with `STOCK_RECEIVED` in the same transaction, whatever its stock was, by no one (`resumedByEmployeeId` null); at another store, by an adjustment, a count, or a return, or by a received transfer line written again with the same batch, it should stay paused
 
 ---
 
