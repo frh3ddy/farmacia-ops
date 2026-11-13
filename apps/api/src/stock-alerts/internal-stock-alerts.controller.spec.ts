@@ -3,8 +3,11 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { WorkerSecretGuard } from '../auth/guards/worker-secret.guard';
 import { InternalStockAlertsController } from './internal-stock-alerts.controller';
 import { recordStockDays } from './stock-days';
+import { recordStockStats } from './stock-stats';
 
-vi.mock('./stock-days', () => ({ recordStockDays: vi.fn().mockResolvedValue(42) }));
+const order: string[] = [];
+vi.mock('./stock-days', () => ({ recordStockDays: vi.fn(async () => (order.push('days'), 42)) }));
+vi.mock('./stock-stats', () => ({ recordStockStats: vi.fn(async () => (order.push('stats'), 7)) }));
 
 describe('InternalStockAlertsController', () => {
   test('who may call it', () => {
@@ -22,9 +25,9 @@ describe('InternalStockAlertsController', () => {
 
     assert({
       given: 'the worker\'s nightly call',
-      should: 'store the missing stock days and say how many rows it wrote',
-      actual: [vi.mocked(recordStockDays).mock.calls[0][0], result],
-      expected: [prisma, { success: true, data: { saved: 42 } }],
+      should: 'store the missing stock days, then the stats from them, and say how many rows each wrote',
+      actual: [vi.mocked(recordStockDays).mock.calls[0][0], vi.mocked(recordStockStats).mock.calls[0][0], order, result],
+      expected: [prisma, prisma, ['days', 'stats'], { success: true, data: { saved: 42, stats: 7 } }],
     });
   });
 });
