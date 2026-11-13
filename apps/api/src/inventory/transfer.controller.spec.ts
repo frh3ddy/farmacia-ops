@@ -1,6 +1,8 @@
 import { assert } from 'riteway/vitest';
 import { TransferController } from './transfer.controller';
 import { TransferService } from './transfer.service';
+import { Reflector } from '@nestjs/core';
+import { AuthGuard } from '../auth/guards/auth.guard';
 
 // A manager assigned only to "centro".
 const managerRequest = () => ({
@@ -122,6 +124,83 @@ describe('TransferController.retrySquareSync', () => {
       should: 'answer with the short Spanish reason in the message and data',
       actual: [message, data.error],
       expected: ['No se sincronizó con Square: El producto no está en el catálogo de Square', 'El producto no está en el catálogo de Square'],
+    });
+  });
+});
+
+describe('TransferController.getStock', () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i}`);
+  /** The status and stable code of a refusal, or 200. */
+  const refusal = (p: Promise<unknown>) => p.then(() => [200], (e: any) => [e.getStatus(), e.getResponse().code]);
+
+  test('a valid request', async () => {
+    const transferService = { stockAt: vi.fn().mockResolvedValue({ p0: 4 }) };
+    const controller = new TransferController(transferService as any);
+
+    assert({
+      given: 'a manager asking for stock at their own store',
+      should: 'answer the stock by product id',
+      actual: [await controller.getStock({ locationId: 'centro', productIds: ['p0', 'p1'] }, managerRequest()), transferService.stockAt.mock.calls],
+      expected: [{ success: true, data: { p0: 4 } }, [['centro', ['p0', 'p1']]]],
+    });
+  });
+
+  test('bad bodies', async () => {
+    const transferService = { stockAt: vi.fn() };
+    const controller = new TransferController(transferService as any);
+    const ask = (body: object) => refusal(controller.getStock(body as any, managerRequest()));
+
+    assert({
+      given: '101 ids, none, duplicates, a non-string id, ids not in a list and no location',
+      should: 'answer 400 with a stable code and query nothing',
+      actual: [
+        await ask({ locationId: 'centro', productIds: ids(101) }),
+        await ask({ locationId: 'centro', productIds: [] }),
+        await ask({ locationId: 'centro', productIds: ['p0', 'p0'] }),
+        await ask({ locationId: 'centro', productIds: ['p0', 7] }),
+        await ask({ locationId: 'centro', productIds: 'p0' }),
+        await ask({ productIds: ['p0'] }),
+        transferService.stockAt.mock.calls.length,
+      ],
+      expected: [
+        [400, 'TOO_MANY_PRODUCT_IDS'],
+        [400, 'INVALID_PRODUCT_IDS'],
+        [400, 'INVALID_PRODUCT_IDS'],
+        [400, 'INVALID_PRODUCT_IDS'],
+        [400, 'INVALID_PRODUCT_IDS'],
+        [400, 'LOCATION_REQUIRED'],
+        0,
+      ],
+    });
+  });
+
+  test('another store', async () => {
+    const transferService = { stockAt: vi.fn() };
+    const controller = new TransferController(transferService as any);
+
+    assert({
+      given: "a manager asking for a store they aren't assigned to",
+      should: 'refuse with 403',
+      actual: await refusal(controller.getStock({ locationId: 'norte', productIds: ['p0'] }, managerRequest())),
+      expected: [403, undefined],
+    });
+  });
+
+  test('a cashier', async () => {
+    const cashier = { role: 'CASHIER', locationId: 'centro', isActive: true };
+    const authService = { validateSession: vi.fn().mockResolvedValue({ session: {}, employee: {}, currentLocation: cashier, accessibleLocations: [cashier] }) };
+    const request = { headers: { 'x-session-token': 's1' } };
+    const context = {
+      switchToHttp: () => ({ getRequest: () => request }),
+      getHandler: () => TransferController.prototype.getStock,
+      getClass: () => TransferController,
+    } as any;
+
+    assert({
+      given: 'a cashier at the store asking for its stock',
+      should: 'be refused by the role check with 403',
+      actual: await new AuthGuard(authService as any, new Reflector()).canActivate(context).then(() => 200, (e: any) => e.getStatus()),
+      expected: 403,
     });
   });
 });

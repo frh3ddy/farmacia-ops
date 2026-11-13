@@ -4,6 +4,8 @@ import { TransferService, ShipmentStatus } from './transfer.service';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 import { readableSync, squareSyncReason } from '../square/square-sync-reason';
 
+const MAX_STOCK_IDS = 100;
+
 interface ShipTransferDto {
   productId: string;
   fromLocationId?: string;
@@ -108,6 +110,35 @@ export class TransferController {
       createdBy: req.employee?.id,
     });
     return { success: true, data };
+  }
+
+  /**
+   * On hand at a store for up to 100 products, for the phone's Transferencias
+   * list to refresh in one call. Unknown ids are left out. POST because the ids
+   * don't fit in a URL.
+   * POST /transfers/stock  { locationId, productIds }
+   */
+  @Post('stock')
+  @Roles('OWNER', 'MANAGER')
+  async getStock(@Body() body: { locationId?: string; productIds?: unknown }, @Req() req: GuardedRequest) {
+    const ids = body.productIds;
+    if (!body.locationId) {
+      throw new HttpException({ success: false, code: 'LOCATION_REQUIRED', message: 'Falta la sucursal' }, HttpStatus.BAD_REQUEST);
+    }
+    if (Array.isArray(ids) && ids.length > MAX_STOCK_IDS) {
+      throw new HttpException(
+        { success: false, code: 'TOO_MANY_PRODUCT_IDS', message: `Máximo ${MAX_STOCK_IDS} productos por consulta` },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id) => typeof id === 'string') || new Set(ids).size !== ids.length) {
+      throw new HttpException(
+        { success: false, code: 'INVALID_PRODUCT_IDS', message: 'La lista de productos debe tener ids distintos' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    assertLocationAccess(req, body.locationId);
+    return { success: true, data: await this.transferService.stockAt(body.locationId, ids as string[]) };
   }
 
   /**
