@@ -1,6 +1,6 @@
 # Stock Alerts Epic
 
-**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is built on `feature/stock-alert-level`.
+**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is built and approved on `feature/stock-alert-level` (deploys after the 2026-11-13 03:00 stats run). O5 is planned on `feature/stock-pause`, branched from O4.
 **Goal**: alert only on regular sellers that ran out or are running low, ranked by lost sales; let a product be paused per store; suggest pauses from history for a person to review
 
 ## Overview
@@ -61,6 +61,27 @@ Runs in the same nightly call as the stock days, right after them, over each sto
 
 ---
 
-## O5–O9
+## O5. Pause and resume
 
-Not started: pause and resume, the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report. A future settings screen must touch the store's products when thresholds change, or phones keep the old alert levels.
+A product is paused per store (`ProductStoreStatus.pausedAt`), by an owner or a manager, with a reason. It resumes by hand, or by itself when the store receives it (a receiving or a received transfer), whatever its stock was: a delivery means it's available again (user, 2026-11-13; this replaces the design's "from 0 to > 0", which left a product paused with units still on the shelf paused for good after a restock). Pausing and resuming already re-send the product to the phones (O1 trigger) and show in `stockAlert`, the `paused` chip and its count (O4).
+
+**Decisions**: the automatic resume is a database trigger on the two receive records only: an `InventoryReceiving` insert, and a `TransferLine` getting its `destinationInventoryId`. No write path can skip it, like the product change stamps. A transfer with several lots links them one at a time; the first resumes it and the rest find it already active. The `TRANSFER_IN` adjustment a transfer also writes is not an "adjustment" for this rule; nothing keys on `InventoryAdjustment` or on a batch's `source`. The equivalence linking is written once here (`linkEquivalents`) and reused by O8. It never merges two groups (user, 2026-11-13): one store's pause shouldn't make other products interchangeable everywhere; merging is O8's, done on purpose.
+
+**Requirements**:
+- Given an owner or manager pausing a product at a store with a reason (and an optional note), should pause it at that store only and record who and when
+- Given a product already paused or resumed before, should overwrite the pause: who, when, reason, note and replacement (null if none given), and clear the last resume's time and cause
+- Given a cashier or accountant, or a store the user can't act at, should refuse with 403; staff-facing messages in Spanish
+- Given a Yastás service or a discontinued product, should refuse with 400: neither alerts (Yastás is its own workflow), so a pause means nothing
+- Given a store that doesn't exist (404) or isn't active (400), or a note that isn't text or is over 500 characters (400), should refuse; a note is trimmed, and a blank one is none
+- Given a product the store doesn't sell, an unknown replacement, a replacement that is the product itself, or a replacement with a reason other than `REPLACED_BY_EQUIVALENT`, should refuse with 400 and pause nothing; `REPLACED_BY_EQUIVALENT` without a replacement is allowed
+- Given `REPLACED_BY_EQUIVALENT` with a replacement, should put both products in one equivalence group: a new one when neither has a group, or the one that has a group; when both are already in different groups, should keep the replacement on the pause and leave the groups as they are
+- Given several products and one reason, should pause them all in one transaction, or none if any is refused
+- Given a manual resume, should clear the pause and record `MANUAL` and when; given a product that isn't paused, should do nothing
+- Given a pause, a bulk pause or a manual resume that succeeds, should answer with the updated product row(s) at that store, in the detail and list shape with `stockAlert`, so the phone updates without a refetch
+- Given a receiving or a received transfer of a paused product at that store, should resume it with `STOCK_RECEIVED` in the same transaction, whatever its stock was; at another store, or by an adjustment, a count, or a return, it should stay paused
+
+---
+
+## O6–O9
+
+Not started: the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report. A future settings screen must touch the store's products when thresholds change, or phones keep the old alert levels.
