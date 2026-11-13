@@ -1,6 +1,6 @@
 # Stock Alerts Epic
 
-**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 is built and approved on `feature/stock-pause`.
+**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 is in production (2026-11-13). O6 is built on `feature/stock-alerts-list`.
 **Goal**: alert only on regular sellers that ran out or are running low, ranked by lost sales; let a product be paused per store; suggest pauses from history for a person to review
 
 ## Overview
@@ -84,6 +84,10 @@ A product is paused per store (`ProductStoreStatus.pausedAt`), by an owner or a 
 
 ---
 
-## O6–O9
+## O6: Alertas lists (built on `feature/stock-alerts-list`)
+
+`GET /products?filter=outAlert|lowAlert` (paginated like every chip, costs hidden from cashiers): only alerting products (regular sellers, not paused), highest priority (lost sales a day) first, then newest. `/products/counts` gains `outAlert` for Alertas' Sin stock; its Stock bajo is `lowStock`. Two list filters instead of the design's `GET /inventory/stock-alerts`: they would have been the same list.
+
+## O7–O9
 
 Not started (they must read only active pauses, `pausedAt` set: a resumed row keeps its last reason, note and replacement as history): the alerts list, pause suggestions, equivalents, and the `medicationDefinitionId` coverage report. A future settings screen must touch the store's products when thresholds change, or phones keep the old alert levels.
