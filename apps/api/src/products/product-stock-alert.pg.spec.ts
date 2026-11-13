@@ -178,3 +178,46 @@ describe('stockAlert.zeroSince after a missed night', () => {
     });
   });
 });
+
+describe('the Alertas lists', () => {
+  test('ranked by lost sales', async () => {
+    const products = new ProductsService(prisma);
+    const s = await store();
+    const outLongAgoBestSeller = await s.product('AgotadoHaceMucho', { qty: 0, stats: { unitsSold: 180, weeksWithSales: 12, typicalOnHand: 30, zeroSince: '2026-10-01T06:00:00.000Z' } });
+    const lowNewerSlower = await s.product('PocoReciente', { qty: 9, stats: { unitsSold: 90, weeksWithSales: 10, typicalOnHand: 20 } });
+    const listed = async (filter: 'outAlert' | 'lowAlert') => (await products.getProducts(s.locationId, { filter, limit: 50 })).data.map((p) => p.id);
+    const c = (await products.getProductCounts(s.locationId)).data;
+
+    assert({
+      given: 'regular sellers out and low, plus out-of-stock products that don\'t alert (never sold, paused)',
+      should: 'list only the alerting ones, highest lost sales a day first whatever their stock-out date or age, and count the out list',
+      actual: [await listed('outAlert'), await listed('lowAlert'), c.outAlert],
+      expected: [[outLongAgoBestSeller, s.out, s.outEarlier, s.outUnknownSince], [s.low, lowNewerSlower], 4],
+    });
+  });
+});
+
+describe('paging a list with ties', () => {
+  test('same priority and same age', async () => {
+    const products = new ProductsService(prisma);
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Empates' } });
+    const createdAt = new Date('2026-09-01T12:00:00.000Z');
+    const run = Math.random().toString(36).slice(2);
+    // Ids that sort opposite to the order they're created in, so the database's own order can't pass for id order
+    const tied = async (name: string) => {
+      const { id } = await prisma.product.create({ data: { id: `${name}-${run}`, name, createdAt, soldOnlyAtLocationId: locationId } });
+      await prisma.productStockStats.create({ data: { productId: id, locationId, windowDays: 90, daysAtZero: 0, stockOuts: 0, unitsSold: 4, weeksWithSales: 4, typicalOnHand: 2, computedAt: new Date() } });
+      return id;
+    };
+    const ids = [await tied('empate-c'), await tied('empate-b'), await tied('empate-a')];
+    const pages = async (filter: 'outAlert' | 'outOfStock') =>
+      Promise.all([1, 2, 3].map(async (page) => (await products.getProducts(locationId, { filter, page, limit: 1 })).data[0]?.id));
+
+    assert({
+      given: 'three out-of-stock regular sellers created together with the same sales, paged one at a time',
+      should: 'show each once, in id order, on the Alertas list and on Productos\' out of stock',
+      actual: [await pages('outAlert'), await pages('outOfStock')],
+      expected: [[...ids].sort(), [...ids].sort()],
+    });
+  });
+});

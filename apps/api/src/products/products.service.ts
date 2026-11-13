@@ -171,7 +171,7 @@ function assertWordList(value: unknown, label: string): asserts value is string[
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The stock and margin chips over the product list (expiring and at-risk come from aging). */
-export const PRODUCT_LIST_FILTERS = ['outOfStock', 'lowStock', 'inStock', 'paused', 'lowMargin'] as const;
+export const PRODUCT_LIST_FILTERS = ['outOfStock', 'lowStock', 'inStock', 'paused', 'lowMargin', 'outAlert', 'lowAlert'] as const;
 export type ProductListFilter = (typeof PRODUCT_LIST_FILTERS)[number];
 
 /**
@@ -292,6 +292,7 @@ const alertOf = (alerts: Map<string, StockAlert> | null, id: string) => (alerts 
  * Which catalog rows each filter keeps. A paused product is only in `paused`,
  * whatever its stock, so the phone's in stock = total − out − low − paused.
  * Out of stock is the stock state (any product at 0), low is the alert.
+ * Alertas' lists (outAlert, lowAlert) are the alerting products only.
  */
 const FILTER_SQL: Record<ProductListFilter, Prisma.Sql> = {
   outOfStock: Prisma.sql`qty <= 0 AND NOT paused`,
@@ -299,11 +300,18 @@ const FILTER_SQL: Record<ProductListFilter, Prisma.Sql> = {
   inStock: Prisma.sql`qty > 0 AND level <> 'low' AND NOT paused`,
   paused: Prisma.sql`paused`,
   lowMargin: Prisma.sql`low_margin`,
+  outAlert: Prisma.sql`level = 'out'`,
+  lowAlert: Prisma.sql`level = 'low'`,
 };
 
-/** A filtered list's order: newest first, out of stock by its latest stock-out (unknown last). */
+/**
+ * A filtered list's order: newest first, out of stock by its latest stock-out (unknown last), Alertas' by lost sales a day.
+ * Ties end on id: each page re-runs the query, and Postgres doesn't keep tied rows in the same order between runs.
+ */
 const FILTER_ORDER: Partial<Record<ProductListFilter, Prisma.Sql>> = {
-  outOfStock: Prisma.sql`zero_since DESC NULLS LAST, "createdAt" DESC`,
+  outOfStock: Prisma.sql`zero_since DESC NULLS LAST, "createdAt" DESC, id`,
+  outAlert: Prisma.sql`priority DESC NULLS LAST, "createdAt" DESC, id`,
+  lowAlert: Prisma.sql`priority DESC NULLS LAST, "createdAt" DESC, id`,
 };
 
 /** Include for a box's suelto at one store; without a store, none (`in: []` matches no row). */
@@ -1560,7 +1568,7 @@ export class ProductsService {
       if (!locationId) throw new BadRequestException('Location ID is required to filter');
       const rows = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         WITH catalog AS (${catalogRowsSql(locationId)})
-        SELECT id FROM catalog WHERE ${FILTER_SQL[filter]} ORDER BY ${FILTER_ORDER[filter] ?? Prisma.sql`"createdAt" DESC`}
+        SELECT id FROM catalog WHERE ${FILTER_SQL[filter]} ORDER BY ${FILTER_ORDER[filter] ?? Prisma.sql`"createdAt" DESC, id`}
       `);
       return rows.map((r) => r.id);
     }
@@ -1578,7 +1586,7 @@ export class ProductsService {
   /**
    * Lightweight stock/margin alert counts for a location (Dashboard alerts).
    * Uses SQL aggregates + window functions instead of transferring full product
-   * rows. outOfStock, lowStock and paused as their filters (FILTER_SQL),
+   * rows. outOfStock, lowStock, paused and outAlert as their filters (FILTER_SQL),
    * lowMargin < 10% (margin computed from selling price vs weighted average cost
    * of the location's FIFO batches).
    */
@@ -1593,6 +1601,7 @@ export class ProductsService {
         out_of_stock: bigint;
         low_stock: bigint;
         paused: bigint;
+        out_alert: bigint;
         low_margin: bigint;
         synced: bigint;
         local: bigint;
@@ -1604,6 +1613,7 @@ export class ProductsService {
         COUNT(*) FILTER (WHERE ${FILTER_SQL.outOfStock})::bigint AS out_of_stock,
         COUNT(*) FILTER (WHERE ${FILTER_SQL.lowStock})::bigint AS low_stock,
         COUNT(*) FILTER (WHERE ${FILTER_SQL.paused})::bigint AS paused,
+        COUNT(*) FILTER (WHERE ${FILTER_SQL.outAlert})::bigint AS out_alert,
         COUNT(*) FILTER (WHERE ${FILTER_SQL.lowMargin})::bigint AS low_margin,
         COUNT(*) FILTER (WHERE square_variation_id IS NOT NULL AND NOT square_variation_id LIKE 'local_%')::bigint AS synced,
         -- Must match what syncUnsyncedProducts can push: location-scoped local_ mappings only.
@@ -1620,6 +1630,8 @@ export class ProductsService {
         outOfStock: Number(row?.out_of_stock ?? 0),
         lowStock: Number(row?.low_stock ?? 0),
         paused: Number(row?.paused ?? 0),
+        /** Alertas' Sin stock; its Stock bajo is lowStock. */
+        outAlert: Number(row?.out_alert ?? 0),
         lowMargin: Number(row?.low_margin ?? 0),
         synced: Number(row?.synced ?? 0),
         local: Number(row?.local ?? 0),
