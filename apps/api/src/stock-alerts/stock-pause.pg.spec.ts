@@ -4,7 +4,7 @@
 import { assert } from 'riteway/vitest';
 import { startPostgres } from '../testing/pglite';
 import { PrismaService } from '../prisma/prisma.service';
-import { pauseProduct, pauseProducts } from './stock-pause';
+import { pauseProduct, pauseProducts, resumeProduct } from './stock-pause';
 
 let prisma: PrismaService;
 let stop: () => Promise<void>;
@@ -58,7 +58,7 @@ describe('pauseProduct()', () => {
   test('paused again after a resume', async () => {
     const id = await product();
     await prisma.productStoreStatus.create({
-      data: { productId: id, locationId: centro, pausedAt: null, pauseReason: 'OTHER', pauseNote: 'vieja', pausedByEmployeeId: manager, resumedAt: new Date('2026-11-01'), resumeCause: 'STOCK_RECEIVED' },
+      data: { productId: id, locationId: centro, pausedAt: null, pauseReason: 'OTHER', pauseNote: 'vieja', pausedByEmployeeId: manager, resumedAt: new Date('2026-11-01'), resumeCause: 'MANUAL', resumedByEmployeeId: manager },
     });
     await pauseProduct(prisma, { productId: id, locationId: centro, reason: 'SLOW_MOVER', employeeId: owner });
     const [row] = await statusOf(id);
@@ -66,8 +66,8 @@ describe('pauseProduct()', () => {
     assert({
       given: 'a product resumed before, paused again without a note',
       should: 'overwrite the pause (reason, no note, who) and clear the last resume',
-      actual: [row.pausedAt !== null, row.pauseReason, row.pauseNote, row.pausedByEmployeeId, row.resumedAt, row.resumeCause],
-      expected: [true, 'SLOW_MOVER', null, owner, null, null],
+      actual: [row.pausedAt !== null, row.pauseReason, row.pauseNote, row.pausedByEmployeeId, row.resumedAt, row.resumeCause, row.resumedByEmployeeId],
+      expected: [true, 'SLOW_MOVER', null, owner, null, null, null],
     });
   });
 
@@ -293,6 +293,67 @@ describe('pauseProducts()', () => {
       should: 'refuse each with 400',
       actual: [await bulk(undefined), await bulk([]), await bulk([42]), await bulk(Array.from({ length: 201 }, (_, i) => `p-${i}`))],
       expected: [400, 400, 400, 400],
+    });
+  });
+});
+
+describe('resumeProduct()', () => {
+  test('a manual resume', async () => {
+    const id = await product();
+    await pauseProduct(prisma, { productId: id, locationId: centro, reason: 'SUPPLIER_UNAVAILABLE', employeeId: manager });
+    await pauseProduct(prisma, { productId: id, locationId: oriente, reason: 'SUPPLIER_UNAVAILABLE', employeeId: manager });
+    const before = new Date();
+    await resumeProduct(prisma, { productId: id, locationId: centro, employeeId: owner });
+    const [atCentro, atOriente] = await statusOf(id).then((rows) => [rows.find((r) => r.locationId === centro)!, rows.find((r) => r.locationId === oriente)!]);
+
+    assert({
+      given: 'a product paused at two stores, resumed by hand at one',
+      should: 'resume it at that store only, recording it was by hand, by whom and when',
+      actual: [atCentro.pausedAt, atCentro.resumeCause, atCentro.resumedByEmployeeId, atCentro.resumedAt! >= before, atOriente.pausedAt !== null],
+      expected: [null, 'MANUAL', owner, true, true],
+    });
+  });
+
+  test('not paused', async () => {
+    const neverPaused = await product();
+    const resumedBefore = await product();
+    const resumedAt = new Date('2026-11-01T18:00:00Z');
+    await prisma.productStoreStatus.create({ data: { productId: resumedBefore, locationId: centro, resumedAt, resumeCause: 'STOCK_RECEIVED' } });
+    await resumeProduct(prisma, { productId: neverPaused, locationId: centro, employeeId: owner });
+    await resumeProduct(prisma, { productId: resumedBefore, locationId: centro, employeeId: owner });
+    const [row] = await statusOf(resumedBefore);
+
+    assert({
+      given: 'a product never paused and one resumed before, resumed by hand',
+      should: 'change nothing: no new row, and the earlier resume kept as it was',
+      actual: [await prisma.productStoreStatus.count({ where: { productId: neverPaused } }), row.resumedAt?.toISOString(), row.resumeCause],
+      expected: [0, resumedAt.toISOString(), 'STOCK_RECEIVED'],
+    });
+  });
+
+  test('stores', async () => {
+    const id = await product();
+    const { id: closed } = await prisma.location.create({ data: { squareId: 'SQ-Y', name: 'Cerrada 2', isActive: false } });
+    const resume = (locationId: unknown) => refusal(resumeProduct(prisma, { productId: id, locationId: locationId as string, employeeId: owner }));
+
+    assert({
+      given: 'a resume at a store that doesn\'t exist, at an inactive one, and with two stores where one goes',
+      should: 'refuse with 404, 400 and 400, as a pause does',
+      actual: [await resume('no-such-store'), await resume(closed), await resume([centro, oriente])],
+      expected: [404, 400, 400],
+    });
+  });
+});
+
+describe('a store given as more than one value', () => {
+  test('pause', async () => {
+    const id = await product();
+
+    assert({
+      given: 'a pause with two stores where one goes (?locationId=a&locationId=b)',
+      should: 'refuse with 400 rather than fail in the database',
+      actual: await refusal(pauseProduct(prisma, { productId: id, locationId: [centro, oriente] as never, reason: 'OTHER', employeeId: manager })),
+      expected: 400,
     });
   });
 });

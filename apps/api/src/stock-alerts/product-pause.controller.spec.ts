@@ -2,9 +2,9 @@ import { assert } from 'riteway/vitest';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AuthGuard, LocationGuard } from '../auth/guards/auth.guard';
 import { ProductPauseController } from './product-pause.controller';
-import { pauseProduct, pauseProducts } from './stock-pause';
+import { pauseProduct, pauseProducts, resumeProduct } from './stock-pause';
 
-vi.mock('./stock-pause', () => ({ pauseProduct: vi.fn(async () => undefined), pauseProducts: vi.fn(async () => undefined) }));
+vi.mock('./stock-pause', () => ({ pauseProduct: vi.fn(async () => undefined), pauseProducts: vi.fn(async () => undefined), resumeProduct: vi.fn(async () => undefined) }));
 
 /** A request from an employee whose session is at `at`, with that store's role. */
 const requestAt = (role: string, at = 'centro') => ({ employee: { id: 'emp-1' }, currentLocation: { locationId: at, role, isActive: true } }) as never;
@@ -87,6 +87,30 @@ describe('ProductPauseController', () => {
       given: 'a manager pausing several products at a store other than their session\'s',
       should: 'refuse with 403 and pause nothing',
       actual: [await statusOf(controller.pauseMany({ locationId: 'oriente', productIds: ['p-1'], reason: 'OTHER' }, requestAt('MANAGER'))), vi.mocked(pauseProducts).mock.calls.length],
+      expected: [403, 0],
+    });
+  });
+
+  test('a resume', async () => {
+    const { controller, prisma } = routes();
+    const result = await controller.resume('p-1', 'centro', requestAt('MANAGER'));
+
+    assert({
+      given: 'a manager resuming a product at their store',
+      should: 'resume it there as that employee and answer with the product\'s updated row, for owners and managers only',
+      actual: [Reflect.getMetadata('roles', ProductPauseController.prototype.resume), vi.mocked(resumeProduct).mock.calls[0], result],
+      expected: [['OWNER', 'MANAGER'], [prisma, { productId: 'p-1', locationId: 'centro', employeeId: 'emp-1' }], { success: true, data: { id: 'p-1', locationId: 'centro', stockAlert: { paused: true } } }],
+    });
+  });
+
+  test('a resume at another store', async () => {
+    const { controller } = routes();
+    vi.mocked(resumeProduct).mockClear();
+
+    assert({
+      given: 'a manager resuming at a store other than their session\'s',
+      should: 'refuse with 403 and resume nothing',
+      actual: [await statusOf(controller.resume('p-1', 'oriente', requestAt('MANAGER'))), vi.mocked(resumeProduct).mock.calls.length],
       expected: [403, 0],
     });
   });
