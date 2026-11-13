@@ -11,9 +11,9 @@ import { Request, Response } from 'express';
 // Normalizes every thrown error into the { success: false, message } shape
 // controllers used to hand-roll in a try/catch on every endpoint.
 
-// Error fields clients act on (a stable `code`, lockout timing). Whitelisted so
+// Error fields clients act on (a stable `code`, lockout timing, the product a bulk change refused). Whitelisted so
 // nothing else an exception body carries leaks into the response.
-const APP_FIELDS = ['code', 'lockedUntil', 'secondsRemaining'] as const;
+const APP_FIELDS = ['code', 'lockedUntil', 'secondsRemaining', 'productId'] as const;
 
 function appFields(body: unknown): Record<string, unknown> {
   if (typeof body !== 'object' || body === null) return {};

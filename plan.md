@@ -34,3 +34,4 @@
 - 📋 [Yastás Float Top-Up](tasks/yastas-float-top-up-epic.md) — record a float top-up from Yastás; warn when a store's balance goes negative
 - ✅ [Product Delta Sync](tasks/product-delta-sync-epic.md) — triggers stamp each product with the transaction that changed it (raw SQL included) and mark removals; `GET /products/sync` pages them by cursor, so the phone is never stale
 - 📋 [Product Barcode](tasks/product-barcode-epic.md) — Square's `upc` stored as `Product.gtin` and matched by the scanner; one-time import; barcode on create; owner edits SKU and barcode (Square first)
+- 🚧 [Stock Alerts](tasks/stock-alerts-epic.md) — alerts only for regular sellers that ran out or are running low, ranked by lost sales; per-store pause that resumes on restock; pause suggestions from history for a person to review

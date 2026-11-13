@@ -1,0 +1,359 @@
+/**
+ * Pausing a product per store and resuming it (see testing/pglite.ts).
+ */
+import { assert } from 'riteway/vitest';
+import { startPostgres } from '../testing/pglite';
+import { PrismaService } from '../prisma/prisma.service';
+import { pauseProduct, pauseProducts, resumeProduct } from './stock-pause';
+
+let prisma: PrismaService;
+let stop: () => Promise<void>;
+let centro: string;
+let oriente: string;
+let manager: string;
+let owner: string;
+
+beforeAll(async () => {
+  ({ prisma, stop } = await startPostgres());
+  ({ id: centro } = await prisma.location.create({ data: { squareId: 'SQ-C', name: 'Centro' } }));
+  ({ id: oriente } = await prisma.location.create({ data: { squareId: 'SQ-O', name: 'Oriente' } }));
+  ({ id: manager } = await prisma.employee.create({ data: { name: 'Gerente' } }));
+  ({ id: owner } = await prisma.employee.create({ data: { name: 'Dueño' } }));
+}, 120_000);
+
+afterAll(() => stop?.());
+
+const product = async (soldOnlyAtLocationId?: string, data: { tracksInventory?: boolean; isDiscontinued?: boolean } = {}) =>
+  (await prisma.product.create({ data: { name: `P-${Math.random()}`, soldOnlyAtLocationId, ...data } })).id;
+
+const statusOf = (productId: string) => prisma.productStoreStatus.findMany({ where: { productId }, orderBy: { locationId: 'asc' } });
+
+/** A refusal's status and body: what the phone gets back. */
+const errorOf = (p: Promise<unknown>) =>
+  p.then(
+    () => ({ status: 200 }) as { status: number; message?: string; productId?: string },
+    (e: { getStatus: () => number; getResponse: () => { message: string; productId?: string } }) => {
+      const { message, productId } = e.getResponse();
+      return { status: e.getStatus(), message, productId };
+    },
+  );
+
+const refusal = (p: Promise<unknown>) => p.then(() => 'ok', (e: { getStatus?: () => number }) => e.getStatus?.() ?? String(e));
+
+describe('pauseProduct()', () => {
+  test('a pause at one store', async () => {
+    const id = await product();
+    const before = new Date();
+    await pauseProduct(prisma, { productId: id, locationId: centro, reason: 'SUPPLIER_UNAVAILABLE', note: 'Sin surtido del proveedor', employeeId: manager });
+    const [row, ...others] = await statusOf(id);
+
+    assert({
+      given: 'a manager pausing a product at their store with a reason and a note',
+      should: 'pause it at that store only, recording the reason, the note, who and when',
+      actual: [others.length, row.locationId, row.pauseReason, row.pauseNote, row.pausedByEmployeeId, row.pausedAt! >= before],
+      expected: [0, centro, 'SUPPLIER_UNAVAILABLE', 'Sin surtido del proveedor', manager, true],
+    });
+  });
+
+  test('paused again after a resume', async () => {
+    const id = await product();
+    await prisma.productStoreStatus.create({
+      data: { productId: id, locationId: centro, pausedAt: null, pauseReason: 'OTHER', pauseNote: 'vieja', pausedByEmployeeId: manager, resumedAt: new Date('2026-11-01'), resumeCause: 'MANUAL', resumedByEmployeeId: manager },
+    });
+    await pauseProduct(prisma, { productId: id, locationId: centro, reason: 'SLOW_MOVER', employeeId: owner });
+    const [row] = await statusOf(id);
+
+    assert({
+      given: 'a product resumed before, paused again without a note',
+      should: 'overwrite the pause (reason, no note, who) and clear the last resume',
+      actual: [row.pausedAt !== null, row.pauseReason, row.pauseNote, row.pausedByEmployeeId, row.resumedAt, row.resumeCause, row.resumedByEmployeeId],
+      expected: [true, 'SLOW_MOVER', null, owner, null, null, null],
+    });
+  });
+
+  test('refusals', async () => {
+    const otherStores = await product(oriente);
+    const id = await product();
+    const results = [
+      await refusal(pauseProduct(prisma, { productId: otherStores, locationId: centro, reason: 'OTHER', employeeId: manager })),
+      await refusal(pauseProduct(prisma, { productId: 'no-such-product', locationId: centro, reason: 'OTHER', employeeId: manager })),
+      await refusal(pauseProduct(prisma, { productId: id, locationId: centro, reason: 'BECAUSE' as never, employeeId: manager })),
+    ];
+
+    assert({
+      given: 'a product only another store sells, an unknown product, and an unknown reason',
+      should: 'refuse each (400, or 404 for the unknown product) and pause nothing',
+      actual: [results, await prisma.productStoreStatus.count({ where: { productId: { in: [otherStores, id] } } })],
+      expected: [[400, 404, 400], 0],
+    });
+  });
+
+  test('products that never alert', async () => {
+    const yastas = await product(undefined, { tracksInventory: false });
+    const discontinued = await product(undefined, { isDiscontinued: true });
+
+    assert({
+      given: 'a Yastás service (no stock) and a discontinued product',
+      should: 'refuse both with 400: neither alerts, so there is nothing to pause',
+      actual: [
+        await refusal(pauseProduct(prisma, { productId: yastas, locationId: centro, reason: 'OTHER', employeeId: manager })),
+        await refusal(pauseProduct(prisma, { productId: discontinued, locationId: centro, reason: 'OTHER', employeeId: manager })),
+        await prisma.productStoreStatus.count({ where: { productId: { in: [yastas, discontinued] } } }),
+      ],
+      expected: [400, 400, 0],
+    });
+  });
+
+  test('stores', async () => {
+    const id = await product();
+    const { id: closed } = await prisma.location.create({ data: { squareId: 'SQ-X', name: 'Cerrada', isActive: false } });
+
+    assert({
+      given: 'a store that doesn\'t exist and an inactive one',
+      should: 'refuse with 404 and 400, and pause nothing',
+      actual: [
+        await refusal(pauseProduct(prisma, { productId: id, locationId: 'no-such-store', reason: 'OTHER', employeeId: owner })),
+        await refusal(pauseProduct(prisma, { productId: id, locationId: closed, reason: 'OTHER', employeeId: owner })),
+        await prisma.productStoreStatus.count({ where: { productId: id } }),
+      ],
+      expected: [404, 400, 0],
+    });
+  });
+
+  test('notes', async () => {
+    const id = await product();
+    const pause = (note: unknown) => pauseProduct(prisma, { productId: id, locationId: centro, reason: 'OTHER', note: note as string, employeeId: manager });
+    const refused = [await refusal(pause(42)), await refusal(pause('x'.repeat(501)))];
+    await pause('   ');
+    const [blank] = await statusOf(id);
+    await pause('  Sin surtido  ');
+    const [trimmed] = await statusOf(id);
+
+    assert({
+      given: 'a note that isn\'t text, one over 500 characters, a blank one, and one with spaces around it',
+      should: 'refuse the first two with 400, store the blank one as none, and trim the last',
+      actual: [refused, blank.pauseNote, trimmed.pauseNote],
+      expected: [[400, 400], null, 'Sin surtido'],
+    });
+  });
+
+});
+
+describe('pauseProduct() replaced by an equivalent', () => {
+  const groupOf = async (id: string) => (await prisma.product.findUniqueOrThrow({ where: { id } })).equivalenceGroupId;
+  const replace = (productId: string, replacedByProductId: string) =>
+    pauseProduct(prisma, { productId, locationId: centro, reason: 'REPLACED_BY_EQUIVALENT', replacedByProductId, employeeId: manager });
+
+  test('neither in a group', async () => {
+    const [a, b] = [await product(), await product()];
+    await replace(a, b);
+    const [row] = await statusOf(a);
+
+    assert({
+      given: 'a product paused as replaced by another, neither in an equivalence group',
+      should: 'keep the replacement on the pause and put both in one new group',
+      actual: [row.replacedByProductId, await groupOf(a) !== null, (await groupOf(a)) === (await groupOf(b))],
+      expected: [b, true, true],
+    });
+  });
+
+  test('one already in a group', async () => {
+    const [a, b, c] = [await product(), await product(), await product()];
+    const { id: group } = await prisma.equivalenceGroup.create({ data: { products: { connect: [{ id: b }, { id: c }] } } });
+    await replace(a, b);
+
+    assert({
+      given: 'a replacement already in a group with a third product',
+      should: 'add the paused product to that group',
+      actual: [await groupOf(a), await groupOf(b), await groupOf(c), await prisma.equivalenceGroup.count({ where: { products: { some: { id: a } } } })],
+      expected: [group, group, group, 1],
+    });
+  });
+
+  test('both in different groups', async () => {
+    const [a, b, c, d] = [await product(), await product(), await product(), await product()];
+    const { id: first } = await prisma.equivalenceGroup.create({ data: { products: { connect: [{ id: a }, { id: c }] } } });
+    const { id: second } = await prisma.equivalenceGroup.create({ data: { products: { connect: [{ id: b }, { id: d }] } } });
+    await replace(a, b);
+    const [row] = await statusOf(a);
+
+    assert({
+      given: 'a product and its replacement each in a different group',
+      should: 'keep the replacement on the pause and leave both groups as they were',
+      actual: [row.replacedByProductId, await groupOf(a), await groupOf(c), await groupOf(b), await groupOf(d)],
+      expected: [b, first, first, second, second],
+    });
+  });
+
+  test('paused again without a replacement', async () => {
+    const [a, b] = [await product(), await product()];
+    await replace(a, b);
+    await pauseProduct(prisma, { productId: a, locationId: centro, reason: 'SUPPLIER_UNAVAILABLE', employeeId: manager });
+    const [row] = await statusOf(a);
+
+    assert({
+      given: 'a product replaced by another, then paused again for another reason',
+      should: 'drop the replacement from the pause',
+      actual: row.replacedByProductId,
+      expected: null,
+    });
+  });
+
+  test('refused replacements', async () => {
+    const [a, b] = [await product(), await product()];
+    const results = [
+      await refusal(pauseProduct(prisma, { productId: a, locationId: centro, reason: 'SLOW_MOVER', replacedByProductId: b, employeeId: manager })),
+      await refusal(replace(a, 'no-such-product')),
+      await refusal(replace(a, a)),
+      await refusal(replace(a, 42 as never)),
+    ];
+
+    assert({
+      given: 'a replacement with another reason, an unknown replacement, the product itself, and an id that isn\'t text',
+      should: 'refuse each with 400, pausing and grouping nothing',
+      actual: [results, await prisma.productStoreStatus.count({ where: { productId: a } }), await groupOf(a)],
+      expected: [[400, 400, 400, 400], 0, null],
+    });
+  });
+
+  test('replacements that can\'t stand in', async () => {
+    const a = await product();
+    const yastas = await product(undefined, { tracksInventory: false });
+    const discontinued = await product(undefined, { isDiscontinued: true });
+    const elsewhere = await product(oriente);
+    const results = [await refusal(replace(a, yastas)), await refusal(replace(a, discontinued)), await refusal(replace(a, elsewhere))];
+
+    assert({
+      given: 'a Yastás service, a discontinued product, and one only another store sells as the replacement',
+      should: 'refuse each with 400, pausing and grouping nothing',
+      actual: [results, await prisma.productStoreStatus.count({ where: { productId: a } }), await groupOf(a)],
+      expected: [[400, 400, 400], 0, null],
+    });
+  });
+
+  test('both already in the same group', async () => {
+    const [a, b] = [await product(), await product()];
+    const { id: group } = await prisma.equivalenceGroup.create({ data: { products: { connect: [{ id: a }, { id: b }] } } });
+    const before = await prisma.equivalenceGroup.count();
+    await replace(a, b);
+
+    assert({
+      given: 'a product and its replacement already in one group',
+      should: 'keep them there and create no other group',
+      actual: [await groupOf(a), await groupOf(b), (await prisma.equivalenceGroup.count()) - before],
+      expected: [group, group, 0],
+    });
+  });
+});
+
+describe('pauseProducts()', () => {
+  test('several at once', async () => {
+    const [a, b] = [await product(), await product()];
+    await pauseProducts(prisma, { productIds: [a, b], locationId: centro, reason: 'SLOW_MOVER', employeeId: manager });
+    const rows = await prisma.productStoreStatus.findMany({ where: { productId: { in: [a, b] } } });
+
+    assert({
+      given: 'two products paused together with one reason',
+      should: 'pause both at that store with that reason, by that employee',
+      actual: rows.map((r) => [r.locationId, r.pauseReason, r.pausedByEmployeeId, r.pausedAt !== null]),
+      expected: [[centro, 'SLOW_MOVER', manager, true], [centro, 'SLOW_MOVER', manager, true]],
+    });
+  });
+
+  test('one refused', async () => {
+    const a = await product();
+    const { id: yastas } = await prisma.product.create({ data: { name: 'Recarga Yastás', tracksInventory: false } });
+    const error = await errorOf(pauseProducts(prisma, { productIds: [a, yastas], locationId: centro, reason: 'OTHER', employeeId: manager }));
+
+    assert({
+      given: 'two products where one can\'t be paused',
+      should: 'refuse with 400 naming that product and giving its id, and pause neither',
+      actual: [error, await prisma.productStoreStatus.count({ where: { productId: { in: [a, yastas] } } })],
+      expected: [{ status: 400, message: 'Recarga Yastás: este producto no lleva existencias', productId: yastas }, 0],
+    });
+  });
+
+  test('one unknown', async () => {
+    const a = await product();
+    const error = await errorOf(pauseProducts(prisma, { productIds: [a, 'no-such-product'], locationId: centro, reason: 'OTHER', employeeId: manager }));
+
+    assert({
+      given: 'two products where one doesn\'t exist',
+      should: 'refuse with 404 giving its id, and pause neither',
+      actual: [error.status, error.productId, await prisma.productStoreStatus.count({ where: { productId: a } })],
+      expected: [404, 'no-such-product', 0],
+    });
+  });
+
+  test('bad lists', async () => {
+    const bulk = (productIds: unknown) => refusal(pauseProducts(prisma, { productIds: productIds as string[], locationId: centro, reason: 'OTHER', employeeId: manager }));
+
+    assert({
+      given: 'no list, an empty one, one with an id that isn\'t text, and one over 200 products',
+      should: 'refuse each with 400',
+      actual: [await bulk(undefined), await bulk([]), await bulk([42]), await bulk(Array.from({ length: 201 }, (_, i) => `p-${i}`))],
+      expected: [400, 400, 400, 400],
+    });
+  });
+});
+
+describe('resumeProduct()', () => {
+  test('a manual resume', async () => {
+    const id = await product();
+    await pauseProduct(prisma, { productId: id, locationId: centro, reason: 'SUPPLIER_UNAVAILABLE', employeeId: manager });
+    await pauseProduct(prisma, { productId: id, locationId: oriente, reason: 'SUPPLIER_UNAVAILABLE', employeeId: manager });
+    const before = new Date();
+    await resumeProduct(prisma, { productId: id, locationId: centro, employeeId: owner });
+    const [atCentro, atOriente] = await statusOf(id).then((rows) => [rows.find((r) => r.locationId === centro)!, rows.find((r) => r.locationId === oriente)!]);
+
+    assert({
+      given: 'a product paused at two stores, resumed by hand at one',
+      should: 'resume it at that store only, recording it was by hand, by whom and when',
+      actual: [atCentro.pausedAt, atCentro.resumeCause, atCentro.resumedByEmployeeId, atCentro.resumedAt! >= before, atOriente.pausedAt !== null],
+      expected: [null, 'MANUAL', owner, true, true],
+    });
+  });
+
+  test('not paused', async () => {
+    const neverPaused = await product();
+    const resumedBefore = await product();
+    const resumedAt = new Date('2026-11-01T18:00:00Z');
+    await prisma.productStoreStatus.create({ data: { productId: resumedBefore, locationId: centro, resumedAt, resumeCause: 'STOCK_RECEIVED' } });
+    await resumeProduct(prisma, { productId: neverPaused, locationId: centro, employeeId: owner });
+    await resumeProduct(prisma, { productId: resumedBefore, locationId: centro, employeeId: owner });
+    const [row] = await statusOf(resumedBefore);
+
+    assert({
+      given: 'a product never paused and one resumed before, resumed by hand',
+      should: 'change nothing: no new row, and the earlier resume kept as it was',
+      actual: [await prisma.productStoreStatus.count({ where: { productId: neverPaused } }), row.resumedAt?.toISOString(), row.resumeCause],
+      expected: [0, resumedAt.toISOString(), 'STOCK_RECEIVED'],
+    });
+  });
+
+  test('stores', async () => {
+    const id = await product();
+    const { id: closed } = await prisma.location.create({ data: { squareId: 'SQ-Y', name: 'Cerrada 2', isActive: false } });
+    const resume = (locationId: unknown) => refusal(resumeProduct(prisma, { productId: id, locationId: locationId as string, employeeId: owner }));
+
+    assert({
+      given: 'a resume at a store that doesn\'t exist, at an inactive one, and with two stores where one goes',
+      should: 'refuse with 404, 400 and 400, as a pause does',
+      actual: [await resume('no-such-store'), await resume(closed), await resume([centro, oriente])],
+      expected: [404, 400, 400],
+    });
+  });
+});
+
+describe('a store given as more than one value', () => {
+  test('pause', async () => {
+    const id = await product();
+
+    assert({
+      given: 'a pause with two stores where one goes (?locationId=a&locationId=b)',
+      should: 'refuse with 400 rather than fail in the database',
+      actual: await refusal(pauseProduct(prisma, { productId: id, locationId: [centro, oriente] as never, reason: 'OTHER', employeeId: manager })),
+      expected: 400,
+    });
+  });
+});
