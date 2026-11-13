@@ -33,14 +33,51 @@ export interface PauseInput {
  * overwrites the pause and clears the last resume. Replaced by an equivalent,
  * the two products are linked as equivalents (linkEquivalents).
  */
-export async function pauseProduct(prisma: PrismaClient, { productId, locationId, reason, note, replacedByProductId, employeeId }: PauseInput): Promise<void> {
-  if (!Object.values(PauseReason).includes(reason)) throw new BadRequestException('Motivo de pausa no válido');
-  if (note !== undefined && note !== null && (typeof note !== 'string' || note.trim().length > NOTE_MAX)) {
-    throw new BadRequestException(`La nota debe ser texto de hasta ${NOTE_MAX} caracteres`);
+export async function pauseProduct(prisma: PrismaClient, input: PauseInput): Promise<void> {
+  await checkPause(prisma, input);
+  await prisma.$transaction(async (tx) => {
+    await writePause(tx, input);
+    if (input.replacedByProductId) await linkEquivalents(tx, input.productId, input.replacedByProductId, input.employeeId);
+  });
+}
+
+const BULK_MAX = 200;
+
+export interface BulkPauseInput {
+  productIds: string[];
+  locationId: string;
+  reason: PauseReason;
+  employeeId?: string;
+}
+
+/**
+ * Pauses several products at one store with one reason: all of them, or none
+ * if any is refused. A refusal names the product and carries its id, so the
+ * phone can point at it. The store and the products are read once.
+ */
+export async function pauseProducts(prisma: PrismaClient, { productIds, ...pause }: BulkPauseInput): Promise<void> {
+  if (!Array.isArray(productIds) || !productIds.length || productIds.length > BULK_MAX || productIds.some((id) => typeof id !== 'string')) {
+    throw new BadRequestException(`Indica de 1 a ${BULK_MAX} productos`);
   }
-  const store = await prisma.location.findUnique({ where: { id: locationId }, select: { isActive: true } });
-  if (!store) throw new NotFoundException('Sucursal no encontrada');
-  if (!store.isActive) throw new BadRequestException('La sucursal no está activa');
+  checkReasonAndNote(pause);
+  await checkStore(prisma, pause.locationId);
+  const ids = [...new Set(productIds)];
+  const found = new Map((await prisma.product.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, ...STOCKED } })).map((p) => [p.id, p]));
+  for (const productId of ids) {
+    const product = found.get(productId);
+    if (!product) throw new NotFoundException({ success: false, message: 'Producto no encontrado', productId });
+    const why = notStockedAt(product, pause.locationId);
+    if (why) throw new BadRequestException({ success: false, message: `${product.name}: este producto ${why}`, productId });
+  }
+  await prisma.$transaction(async (tx) => {
+    for (const productId of ids) await writePause(tx, { productId, ...pause });
+  });
+}
+
+/** Refuses a pause that can't be saved: bad input, an unknown or inactive store, a product that can't be paused there, or a bad replacement. */
+async function checkPause(prisma: PrismaClient, { productId, locationId, reason, note, replacedByProductId }: PauseInput): Promise<void> {
+  checkReasonAndNote({ reason, note });
+  await checkStore(prisma, locationId);
   const product = await prisma.product.findUnique({ where: { id: productId }, select: STOCKED });
   if (!product) throw new NotFoundException('Producto no encontrado');
   const why = notStockedAt(product, locationId);
@@ -54,18 +91,31 @@ export async function pauseProduct(prisma: PrismaClient, { productId, locationId
     const whyNot = notStockedAt(replacement, locationId);
     if (whyNot) throw new BadRequestException(`El reemplazo ${whyNot}`);
   }
+}
 
+function checkReasonAndNote({ reason, note }: { reason: PauseReason; note?: string }): void {
+  if (!Object.values(PauseReason).includes(reason)) throw new BadRequestException('Motivo de pausa no válido');
+  if (note !== undefined && note !== null && (typeof note !== 'string' || note.trim().length > NOTE_MAX)) {
+    throw new BadRequestException(`La nota debe ser texto de hasta ${NOTE_MAX} caracteres`);
+  }
+}
+
+async function checkStore(prisma: PrismaClient, locationId: string): Promise<void> {
+  const store = await prisma.location.findUnique({ where: { id: locationId }, select: { isActive: true } });
+  if (!store) throw new NotFoundException('Sucursal no encontrada');
+  if (!store.isActive) throw new BadRequestException('La sucursal no está activa');
+}
+
+/** Saves a checked pause, overwriting any earlier one and clearing the last resume. */
+async function writePause(tx: Prisma.TransactionClient, { productId, locationId, reason, note, replacedByProductId, employeeId }: PauseInput): Promise<void> {
   const pause = {
     pausedAt: new Date(), pauseReason: reason, pauseNote: note?.trim() || null, replacedByProductId: replacedByProductId ?? null,
     pausedByEmployeeId: employeeId ?? null, resumedAt: null, resumeCause: null,
   };
-  await prisma.$transaction(async (tx) => {
-    await tx.productStoreStatus.upsert({
-      where: { productId_locationId: { productId, locationId } },
-      create: { productId, locationId, ...pause },
-      update: pause,
-    });
-    if (replacedByProductId) await linkEquivalents(tx, productId, replacedByProductId, employeeId);
+  await tx.productStoreStatus.upsert({
+    where: { productId_locationId: { productId, locationId } },
+    create: { productId, locationId, ...pause },
+    update: pause,
   });
 }
 
