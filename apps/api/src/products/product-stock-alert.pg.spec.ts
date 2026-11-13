@@ -178,3 +178,21 @@ describe('stockAlert.zeroSince after a missed night', () => {
     });
   });
 });
+
+describe('the Alertas lists', () => {
+  test('ranked by lost sales', async () => {
+    const products = new ProductsService(prisma);
+    const s = await store();
+    const outLongAgoBestSeller = await s.product('AgotadoHaceMucho', { qty: 0, stats: { unitsSold: 180, weeksWithSales: 12, typicalOnHand: 30, zeroSince: '2026-10-01T06:00:00.000Z' } });
+    const lowNewerSlower = await s.product('PocoReciente', { qty: 9, stats: { unitsSold: 90, weeksWithSales: 10, typicalOnHand: 20 } });
+    const listed = async (filter: 'outAlert' | 'lowAlert') => (await products.getProducts(s.locationId, { filter, limit: 50 })).data.map((p) => p.id);
+    const c = (await products.getProductCounts(s.locationId)).data;
+
+    assert({
+      given: 'regular sellers out and low, plus out-of-stock products that don\'t alert (never sold, paused)',
+      should: 'list only the alerting ones, highest lost sales a day first whatever their stock-out date or age, and count the out list',
+      actual: [await listed('outAlert'), await listed('lowAlert'), c.outAlert],
+      expected: [[outLongAgoBestSeller, s.out, s.outEarlier, s.outUnknownSince], [s.low, lowNewerSlower], 4],
+    });
+  });
+});
