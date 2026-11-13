@@ -503,6 +503,18 @@ export class TransferService {
     return (await this.findShipment({ id: shipment.id }))!;
   }
 
+  /**
+   * On hand at a store by product id: the sum of the store's lots, the figure
+   * getProduct(id, locationId) reports as totalInventory. An id with no product is left out.
+   */
+  async stockAt(locationId: string, productIds: string[]): Promise<Record<string, number>> {
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, inventories: { where: { locationId }, select: { quantity: true } } },
+    });
+    return Object.fromEntries(products.map((p) => [p.id, p.inventories.reduce((sum, inv) => sum + inv.quantity, 0)]));
+  }
+
   /** Shipments to or from a store (or all), newest first, by the status their transfers give them. */
   async getShipments(options: { locationId?: string; status?: ShipmentStatus }) {
     const shipments = await this.prisma.shipment.findMany({
