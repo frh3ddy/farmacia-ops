@@ -68,14 +68,14 @@ describe('stockAlert on product rows', () => {
       should: 'alert only the regular sellers out or under their cover, out ranked by its rate and low by rate over stock, and the paused one only as paused',
       actual: rows.map((r) => r.stockAlert),
       expected: [
-        { level: 'out', priority: 1, paused: false, pauseReason: null, zeroSince: '2026-11-10T06:00:00.000Z' },
-        { level: 'out', priority: 0.1, paused: false, pauseReason: null, zeroSince: null },
-        { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null },
-        { level: 'low', priority: 0.2, paused: false, pauseReason: null, zeroSince: null },
-        { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null },
-        { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null },
-        { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null },
-        { level: 'none', priority: 0, paused: true, pauseReason: 'SUPPLIER_UNAVAILABLE', zeroSince: null },
+        { level: 'out', priority: 1, paused: false, pauseReason: null, zeroSince: '2026-11-10T06:00:00.000Z', rate: 1, lastSoldAt: null },
+        { level: 'out', priority: 0.1, paused: false, pauseReason: null, zeroSince: null, rate: 0.1, lastSoldAt: null },
+        { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null, rate: null, lastSoldAt: null },
+        { level: 'low', priority: 0.2, paused: false, pauseReason: null, zeroSince: null, rate: 1, lastSoldAt: null },
+        { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null, rate: 30 / 90, lastSoldAt: null },
+        { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null, rate: 3 / 90, lastSoldAt: null },
+        { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null, rate: 1, lastSoldAt: null },
+        { level: 'none', priority: 0, paused: true, pauseReason: 'SUPPLIER_UNAVAILABLE', zeroSince: null, rate: 1, lastSoldAt: null },
       ],
     });
   });
@@ -88,7 +88,7 @@ describe('stockAlert on product rows', () => {
       given: 'a paused product\'s detail at its store, and the same product without a store',
       should: 'carry its alert at the store, and none without one',
       actual: [(await products.getProduct(s.pausedInStock, s.locationId)).data.stockAlert, (await products.getProduct(s.pausedInStock)).data.stockAlert],
-      expected: [{ level: 'none', priority: 0, paused: true, pauseReason: 'SLOW_MOVER', zeroSince: null }, null],
+      expected: [{ level: 'none', priority: 0, paused: true, pauseReason: 'SLOW_MOVER', zeroSince: null, rate: 1, lastSoldAt: null }, null],
     });
   });
 });
@@ -218,6 +218,31 @@ describe('paging a list with ties', () => {
       should: 'show each once, in id order, on the Alertas list and on Productos\' out of stock',
       actual: [await pages('outAlert'), await pages('outOfStock')],
       expected: [[...ids].sort(), [...ids].sort()],
+    });
+  });
+});
+
+describe('stockAlert.rate and lastSoldAt', () => {
+  test('the nightly stats\' sales rate on every row', async () => {
+    const products = new ProductsService(prisma);
+    const s = await store();
+    const soldNothing = await s.product('SinVentasEnVentana', { qty: 3, stats: { unitsSold: 0, weeksWithSales: 0, typicalOnHand: 3 } });
+    await prisma.productStockStats.update({ where: { productId_locationId: { productId: s.plenty, locationId: s.locationId } }, data: { lastSoldAt: new Date('2026-11-12T20:15:00.000Z') } });
+    const ids = [s.out, s.plenty, s.pausedAtZero, soldNothing, s.neverSold];
+    const rows = (await products.getProducts(s.locationId, { onlyIds: ids, limit: 50 })).data;
+    const pick = (a: { rate: number | null; lastSoldAt: string | null } | null) => a && { rate: a.rate, lastSoldAt: a.lastSoldAt };
+
+    assert({
+      given: 'an out alert, one in stock with its last sale, a paused one, one with stats but no sale in the window, and one without stats',
+      should: 'give each with stats its units a day over the window (0 with no sales) and its last sale, at any level, and none without stats',
+      actual: rows.map((r) => pick(r.stockAlert)),
+      expected: [
+        { rate: 1, lastSoldAt: null },
+        { rate: 1, lastSoldAt: '2026-11-12T20:15:00.000Z' },
+        { rate: 1, lastSoldAt: null },
+        { rate: 0, lastSoldAt: null },
+        { rate: null, lastSoldAt: null },
+      ],
     });
   });
 });
