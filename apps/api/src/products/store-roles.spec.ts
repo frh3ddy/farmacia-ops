@@ -89,3 +89,22 @@ describe("ProductsController.getStockByStore", () => {
     });
   });
 });
+
+describe('ProductsController loose link at a chosen store', () => {
+  test('linking a box with its suelto', async () => {
+    const { service, controller, req, statusOf } = routesForManagerAtCentroCashierAtNorte();
+    const link = vi.fn(async () => ({ id: 'p1' }));
+    Object.assign(service, { setLooseProductLink: link });
+    const owner = { ...req, currentLocation: { locationId: 'centro', role: 'OWNER', isActive: true } };
+    const refused = await statusOf(controller.setLooseProductLink('p1', { looseProductId: 'p2', locationId: 'norte' }, req));
+    await controller.setLooseProductLink('p1', { looseProductId: 'p2' }, req);
+    await controller.setLooseProductLink('p1', { looseProductId: 'p2', quantity: 20, locationId: 'norte' }, owner);
+
+    assert({
+      given: 'a manager at Centro linking at Norte, then without a store, and an owner at Centro linking at Norte',
+      should: 'refuse the manager at Norte with 403, link the manager at Centro, and link the owner at Norte',
+      actual: [refused, link.mock.calls],
+      expected: [403, [['p1', 'p2', undefined, 'centro'], ['p1', 'p2', 20, 'norte']]],
+    });
+  });
+});
