@@ -237,6 +237,7 @@ function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql {
         END AS zero_since,
         COALESCE(st."weeksWithSales" >= COALESCE(cfg."regularMinWeeks", 4), false) AS regular,
         st."unitsSold"::float8 / NULLIF(st."windowDays", 0) AS rate,
+        st."lastSoldAt" AS last_sold_at,
         st."typicalOnHand" AS typical,
         COALESCE(cfg."coverDays", 14) AS cover
       FROM "Product" p
@@ -268,9 +269,12 @@ export interface StockAlert {
   paused: boolean;
   pauseReason: string | null;
   zeroSince: string | null;
+  /** Units sold a day over the nightly stats' window (0 with no sales there); null without stats. */
+  rate: number | null;
+  lastSoldAt: string | null;
 }
 
-const NO_ALERT: StockAlert = { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null };
+const NO_ALERT: StockAlert = { level: 'none', priority: 0, paused: false, pauseReason: null, zeroSince: null, rate: null, lastSoldAt: null };
 
 /**
  * Each product's stock alert at a store. One the store's catalog leaves out
@@ -278,11 +282,18 @@ const NO_ALERT: StockAlert = { level: 'none', priority: 0, paused: false, pauseR
  */
 async function stockAlerts(prisma: PrismaService, locationId: string, ids: string[]): Promise<Map<string, StockAlert>> {
   if (!ids.length) return new Map();
-  const rows = await prisma.$queryRaw<Array<{ id: string; level: StockAlert['level']; priority: number; paused: boolean; pause_reason: string | null; zero_since: Date | null }>>(Prisma.sql`
+  const rows = await prisma.$queryRaw<
+    Array<{ id: string; level: StockAlert['level']; priority: number; paused: boolean; pause_reason: string | null; zero_since: Date | null; rate: number | null; last_sold_at: Date | null }>
+  >(Prisma.sql`
     WITH catalog AS (${catalogRowsSql(locationId)})
-    SELECT id, level, priority, paused, pause_reason, zero_since FROM catalog WHERE id IN (${Prisma.join(ids)})
+    SELECT id, level, priority, paused, pause_reason, zero_since, rate, last_sold_at FROM catalog WHERE id IN (${Prisma.join(ids)})
   `);
-  return new Map(rows.map((r) => [r.id, { level: r.level, priority: r.priority, paused: r.paused, pauseReason: r.pause_reason, zeroSince: r.zero_since?.toISOString() ?? null }]));
+  return new Map(
+    rows.map((r) => [
+      r.id,
+      { level: r.level, priority: r.priority, paused: r.paused, pauseReason: r.pause_reason, zeroSince: r.zero_since?.toISOString() ?? null, rate: r.rate, lastSoldAt: r.last_sold_at?.toISOString() ?? null },
+    ]),
+  );
 }
 
 /** A product's alert at a store, or null without a store. */
