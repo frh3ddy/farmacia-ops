@@ -23,15 +23,13 @@ The app records sales only since go-live, so "how fast it sells", a dead-stock c
 
 ---
 
-## Sales Velocity
+## Sales Velocity (removed 2026-11-14)
 
-`GET /products/:id/sales-velocity?locationId=` → `{ lastSoldAt, unitsLast30d, unitsLast90d, daysSinceLastSale }`, any role (units only, no costs).
+`GET /products/:id/sales-velocity` was removed once nothing called it: the product detail reads `stockAlert.rate` and `lastSoldAt` on the product row, like Alertas. Its count of sales, `salesLines`, stays: the nightly stock stats read it.
 
 **Requirements**:
 - Given imported history and live sales, should count each order once, net of returns, at that store only
 - Given an order recorded live and imported too, should count the live one: matched by payment (`Sale.squareId` is the payment id, not the order id), by refund for an exchange, and by return line (`square-return-line:<uid>`)
-- Given a sale last night read this morning, should say 1 day: calendar days on the store clock
-- Given an unknown product, should refuse with 404
 
 ---
 
@@ -53,5 +51,4 @@ The app records sales only since go-live, so "how fast it sells", a dead-stock c
 - [x] Production import: dry run (111,332 orders, 136,415 lines, 19,756 without a product), then `--yes` saved 136,416 (2026-11-11)
 - [ ] Check busy hours' query plan against the imported data (`EXPLAIN`)
 - [ ] Split tender: only the first tender is matched to a live Sale (`ponytail:` comment); store every tender if the stores take split payments
-- [ ] `oldestUnitDays` on sales velocity (days since the oldest lot on hand was received), when farmacia-ios asks: dead stock warns only at 90+
-- [ ] Store-wide dead-stock list, if iOS needs one (`GET /inventory/reports/dead-stock`); today it's per product on the detail
+- [~] Dropped with the route: `oldestUnitDays` and a store-wide dead-stock list. The Lotes section flags stock 90+ days old; "stop carrying it?" is stock alerts' O7
