@@ -279,14 +279,29 @@ const NO_ALERT: StockAlert = { level: 'none', priority: 0, paused: false, pauseR
 /**
  * Each product's stock alert at a store. One the store's catalog leaves out
  * (Yastás, discontinued) has none and shows as not paused, even with a pause.
+ * Its last sale is last night's stats' or a sale here today, whichever is
+ * later, so a sale shows at once. Every sale moves a batch (a shortfall is
+ * covered by a new one, sale.worker.ts), so the phones get the row again.
+ * ponytail: after a missed night, sales between the last run and today wait
+ * for the next run; read since the stats' computedAt if that matters.
  */
-async function stockAlerts(prisma: PrismaService, locationId: string, ids: string[]): Promise<Map<string, StockAlert>> {
+async function stockAlerts(prisma: PrismaService, locationId: string, ids: string[], now = new Date()): Promise<Map<string, StockAlert>> {
   if (!ids.length) return new Map();
+  const today = parseBusinessDate(businessDay(now), 'start');
   const rows = await prisma.$queryRaw<
     Array<{ id: string; level: StockAlert['level']; priority: number; paused: boolean; pause_reason: string | null; zero_since: Date | null; rate: number | null; last_sold_at: Date | null }>
   >(Prisma.sql`
-    WITH catalog AS (${catalogRowsSql(locationId)})
-    SELECT id, level, priority, paused, pause_reason, zero_since, rate, last_sold_at FROM catalog WHERE id IN (${Prisma.join(ids)})
+    WITH catalog AS (${catalogRowsSql(locationId, now)}),
+    sold_today AS (
+      SELECT i."productId", MAX(s."createdAt") AS at
+        FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
+       WHERE s."locationId" = ${locationId} AND s."createdAt" >= ${today}::timestamp
+         AND i.quantity > 0 AND i."productId" IN (${Prisma.join(ids)})
+       GROUP BY 1
+    )
+    SELECT c.id, level, priority, paused, pause_reason, zero_since, rate, GREATEST(c.last_sold_at, t.at) AS last_sold_at
+      FROM catalog c LEFT JOIN sold_today t ON t."productId" = c.id
+     WHERE c.id IN (${Prisma.join(ids)})
   `);
   return new Map(
     rows.map((r) => [
