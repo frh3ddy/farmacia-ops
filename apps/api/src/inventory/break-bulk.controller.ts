@@ -1,6 +1,6 @@
-import { Controller, Get, Post, Body, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { BreakBulkService } from './break-bulk.service';
-import { AuthGuard, LocationGuard, Roles, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest, RoleGuardedRequest, assertActingAtOwnStore } from '../auth/guards/auth.guard';
 
 interface BreakBulkDto {
   boxProductId: string;
@@ -36,6 +36,7 @@ export class BreakBulkController {
     if (!locationId) {
       throw new HttpException({ success: false, message: 'Location ID is required' }, HttpStatus.BAD_REQUEST);
     }
+    assertActingAtOwnStore(req, locationId);
 
     const result = await this.breakBulkService.breakBulk({
       boxProductId: body.boxProductId,
@@ -54,10 +55,12 @@ export class BreakBulkController {
     };
   }
 
-  /** Boxes opened by sales at the session's store, and shortfalls covered without a box. */
+  /** GET ?locationId= (default the session's store): boxes opened by sales there, and shortfalls covered without a box. */
   @Get('automatic')
   @Roles('OWNER', 'MANAGER')
-  async automatic(@Req() req: RoleGuardedRequest) {
-    return { success: true, data: await this.breakBulkService.automaticOpenings(req.currentLocation.locationId) };
+  async automatic(@Query('locationId') queryLocationId: string | undefined, @Req() req: RoleGuardedRequest) {
+    const locationId = queryLocationId || req.currentLocation.locationId;
+    assertActingAtOwnStore(req, locationId);
+    return { success: true, data: await this.breakBulkService.automaticOpenings(locationId) };
   }
 }

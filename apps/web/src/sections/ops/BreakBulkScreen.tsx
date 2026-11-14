@@ -22,7 +22,10 @@ export function ProductPicker({
   selected,
   onSelect,
   placeholder,
+  locationId,
 }: {
+  /** The store whose stock and links the results show; the session's when left out. */
+  locationId?: string;
   label: string;
   selected: ProductOption | null;
   onSelect: (product: ProductOption) => void;
@@ -44,7 +47,7 @@ export function ProductPicker({
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      apiFetch<ProductListResponse>(`/products?search=${encodeURIComponent(trimmed)}&limit=8`, {
+      apiFetch<ProductListResponse>(`/products?search=${encodeURIComponent(trimmed)}&limit=8${locationId ? `&locationId=${locationId}` : ""}`, {
         signal: controller.signal,
       })
         .then(body => setResults(body.data))
@@ -54,7 +57,7 @@ export function ProductPicker({
         .finally(() => setLoading(false));
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, locationId]);
 
   return (
     <div>
@@ -117,8 +120,7 @@ export function ProductPicker({
   );
 }
 
-function LinkProductsCard() {
-  const { user } = useAuth();
+function LinkProductsCard({ locationId, locationName }: { locationId: string; locationName: string }) {
   const [boxProduct, setBoxProduct] = useState<ProductOption | null>(null);
   const [looseProduct, setLooseProduct] = useState<ProductOption | null>(null);
   const [quantity, setQuantity] = useState("");
@@ -147,7 +149,7 @@ function LinkProductsCard() {
     try {
       await apiFetch(`/products/${boxProduct.id}/loose-link`, {
         method: "PATCH",
-        body: JSON.stringify({ looseProductId: looseProduct.id, quantity: quantityNum }),
+        body: JSON.stringify({ looseProductId: looseProduct.id, quantity: quantityNum, locationId }),
       });
       setSuccessMessage(`"${boxProduct.name}" vinculado con "${looseProduct.name}".`);
       setBoxProduct(null);
@@ -168,7 +170,7 @@ function LinkProductsCard() {
           Ambos productos ya existen por separado en Square — esto solo los relaciona aquí para poder abrir cajas.
         </p>
         <p className="mt-1 text-xs font-medium text-(--color-ink-secondary)">
-          Se vincula solo en {user?.currentLocation?.locationName ?? "esta sucursal"}; cada sucursal elige su propio suelto.
+          Se vincula solo en {locationName}; cada sucursal elige su propio suelto.
         </p>
       </div>
 
@@ -183,8 +185,8 @@ function LinkProductsCard() {
         </div>
       )}
 
-      <ProductPicker label="Producto de caja" selected={boxProduct} onSelect={setBoxProduct} placeholder="Paracetamol 500mg Caja…" />
-      <ProductPicker label="Producto suelto" selected={looseProduct} onSelect={setLooseProduct} placeholder="Paracetamol 500mg Suelto…" />
+      <ProductPicker locationId={locationId} label="Producto de caja" selected={boxProduct} onSelect={setBoxProduct} placeholder="Paracetamol 500mg Caja…" />
+      <ProductPicker locationId={locationId} label="Producto suelto" selected={looseProduct} onSelect={setLooseProduct} placeholder="Paracetamol 500mg Suelto…" />
 
       <div>
         <label className={labelClass}>Cantidad (piezas por caja)</label>
@@ -209,7 +211,7 @@ function LinkProductsCard() {
   );
 }
 
-function BreakBulkCard() {
+function BreakBulkCard({ locationId }: { locationId: string }) {
   const [boxProduct, setBoxProduct] = useState<ProductOption | null>(null);
   const [boxQuantity, setBoxQuantity] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -239,7 +241,7 @@ function BreakBulkCard() {
         data: { looseUnitsCreated: number; costPerLooseUnit: number };
       }>("/inventory/break-bulk", {
         method: "POST",
-        body: JSON.stringify({ boxProductId: boxProduct.id, boxQuantity: quantity }),
+        body: JSON.stringify({ boxProductId: boxProduct.id, boxQuantity: quantity, locationId }),
       });
       setResult(body.data);
       setBoxProduct(null);
@@ -271,7 +273,7 @@ function BreakBulkCard() {
         </div>
       )}
 
-      <ProductPicker label="Producto de caja" selected={boxProduct} onSelect={setBoxProduct} placeholder="Paracetamol 500mg Caja…" />
+      <ProductPicker locationId={locationId} label="Producto de caja" selected={boxProduct} onSelect={setBoxProduct} placeholder="Paracetamol 500mg Caja…" />
 
       {boxProduct && !boxProduct.looseProductId && (
         <p className="text-xs text-(--color-warning)">
@@ -312,15 +314,21 @@ type AutomaticOpening = {
 };
 
 /** Boxes sales opened, and shortfalls covered without one: what to check on the shelf. */
-function AutomaticOpeningsCard() {
+function AutomaticOpeningsCard({ locationId }: { locationId: string }) {
   const [rows, setRows] = useState<AutomaticOpening[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<{ data: AutomaticOpening[] }>("/inventory/break-bulk/automatic")
-      .then((body) => setRows(body.data))
-      .catch((e) => setError(e instanceof ApiError ? e.message : "No se pudo cargar la lista"));
-  }, []);
+    let current = true; // a store picked since this request ignores its answer
+    setRows(null);
+    setError(null);
+    apiFetch<{ data: AutomaticOpening[] }>(`/inventory/break-bulk/automatic?locationId=${locationId}`)
+      .then((body) => current && setRows(body.data))
+      .catch((e) => current && setError(e instanceof ApiError ? e.message : "No se pudo cargar la lista"));
+    return () => {
+      current = false;
+    };
+  }, [locationId]);
 
   return (
     <div className="space-y-3 rounded-md border border-(--color-border-standard) bg-(--color-surface-raised) p-4">
@@ -350,13 +358,37 @@ function AutomaticOpeningsCard() {
   );
 }
 
+/** Sueltos at one store: the session's, or another one an owner picks (only an owner may work at another store). */
 export function BreakBulkScreen() {
+  const { user } = useAuth();
+  const [locationId, setLocationId] = useState(user.currentLocation?.locationId ?? "");
+  const stores = user.accessibleLocations ?? [];
+  const locationName = stores.find((l) => l.locationId === locationId)?.locationName ?? user.currentLocation?.locationName ?? "esta sucursal";
+  const canPick = user.currentLocation?.role === "OWNER" && stores.length > 1;
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-xl font-semibold text-(--color-ink)">Sueltos</h1>
-      <LinkProductsCard />
-      <BreakBulkCard />
-      <AutomaticOpeningsCard />
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-xl font-semibold text-(--color-ink)">Sueltos</h1>
+        {canPick && (
+          <select
+            aria-label="Sucursal"
+            value={locationId}
+            onChange={(e) => setLocationId(e.target.value)}
+            className="rounded-sm border border-(--color-border-standard) bg-(--color-surface-inset) px-3 py-1.5 text-sm text-(--color-ink)"
+          >
+            {stores.map((l) => (
+              <option key={l.locationId} value={l.locationId}>
+                {l.locationName}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {/* Keyed by store, so a product picked at one store isn't carried to another */}
+      <LinkProductsCard key={`link-${locationId}`} locationId={locationId} locationName={locationName} />
+      <BreakBulkCard key={`break-${locationId}`} locationId={locationId} />
+      <AutomaticOpeningsCard locationId={locationId} />
     </div>
   );
 }

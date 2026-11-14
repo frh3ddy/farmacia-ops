@@ -515,9 +515,10 @@ export class ProductsController {
   }
 
   /**
-   * Link a box to its suelto at the session's store, so break-bulk
+   * Link a box to its suelto at a store, so break-bulk
    * (POST /inventory/break-bulk) there knows where converted stock goes.
-   * Other stores keep their own links. Pass looseProductId: null to remove
+   * Other stores keep their own links (locationId, default the session's store;
+   * a manager only at their own). Pass looseProductId: null to remove
    * this store's link.
    * quantity (base units per box) is also settable here since break-bulk
    * needs both — pass it if the product doesn't already have one set.
@@ -527,10 +528,12 @@ export class ProductsController {
   @Roles('OWNER', 'MANAGER')
   async setLooseProductLink(
     @Param('id') id: string,
-    @Body() body: { looseProductId: string | null; quantity?: number },
+    @Body() body: { looseProductId: string | null; quantity?: number; locationId?: string },
     @Req() req: RoleGuardedRequest,
   ) {
-    const product = await this.productsService.setLooseProductLink(id, body.looseProductId, body.quantity, req.currentLocation.locationId);
+    const locationId = body.locationId || req.currentLocation.locationId;
+    assertActingAtOwnStore(req, locationId);
+    const product = await this.productsService.setLooseProductLink(id, body.looseProductId, body.quantity, locationId);
     return { success: true, data: { product } };
   }
 
