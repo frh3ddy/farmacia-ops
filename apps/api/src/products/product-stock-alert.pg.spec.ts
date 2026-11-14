@@ -267,3 +267,32 @@ describe('stockAlert.rate and lastSoldAt', () => {
     });
   });
 });
+
+describe('stockAlert.lastSoldAt with today\'s sales', () => {
+  test('a sale since last night\'s stats', async () => {
+    const products = new ProductsService(prisma);
+    const s = await store();
+    const { id: otherStore } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Otra' } });
+    const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000);
+    const soldAt = new Date(Date.now() - 1000);
+    const sell = (productId: string, locationId: string) =>
+      prisma.sale.create({
+        data: { squareId: `pay-${Math.random()}`, locationId, totalRevenue: 10, totalCost: 5, grossProfit: 5, createdAt: soldAt, items: { create: [{ productId, quantity: 1, price: 10, cost: 5 }] } },
+      });
+    const lastNight = (productId: string) =>
+      prisma.productStockStats.update({ where: { productId_locationId: { productId, locationId: s.locationId } }, data: { lastSoldAt: twoDaysAgo } });
+    await lastNight(s.plenty);
+    await lastNight(s.low);
+    await sell(s.plenty, s.locationId);
+    await sell(s.low, otherStore);
+    await sell(s.neverSold, s.locationId);
+    const rows = (await products.getProducts(s.locationId, { onlyIds: [s.plenty, s.low, s.neverSold], limit: 50 })).data;
+
+    assert({
+      given: 'a product sold here today, one sold today only at another store, and one without stats sold here today',
+      should: 'give the first and the last today\'s sale as their last sale, and the second last night\'s',
+      actual: rows.map((r) => r.stockAlert?.lastSoldAt),
+      expected: [soldAt.toISOString(), twoDaysAgo.toISOString(), soldAt.toISOString()],
+    });
+  });
+});
