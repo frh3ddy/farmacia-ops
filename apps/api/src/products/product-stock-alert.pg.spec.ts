@@ -142,6 +142,27 @@ describe('stockAlert in the phones\' sync', () => {
   });
 });
 
+describe('stockAlert.lastSoldAt in the phones\' sync', () => {
+  test('a nightly run that moves only the last sale', async () => {
+    const products = new ProductsService(prisma);
+    const s = await store();
+    let cursor: string | undefined;
+    for (let more = true; more; ) ({ cursor, hasMore: more } = await products.syncProducts(s.locationId, cursor, 500));
+    await prisma.productStockStats.update({
+      where: { productId_locationId: { productId: s.plenty, locationId: s.locationId } },
+      data: { lastSoldAt: new Date('2026-11-12T20:15:00.000Z'), computedAt: new Date() },
+    });
+    const next = await products.syncProducts(s.locationId, cursor, 500);
+
+    assert({
+      given: 'a phone caught up with the sync, then a nightly run that changes only a product\'s last sale (a sale in, another out of the window)',
+      should: 'send that product in the next sync with its new last sale',
+      actual: next.data.map((p) => [p.id, p.stockAlert?.lastSoldAt]),
+      expected: [[s.plenty, '2026-11-12T20:15:00.000Z']],
+    });
+  });
+});
+
 describe('stockAlert.zeroSince during the day', () => {
   test('stock that changed since last night\'s stats', async () => {
     const products = new ProductsService(prisma);
