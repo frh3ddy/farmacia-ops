@@ -55,6 +55,10 @@ const send = (transfers: TransferService, items: { productId: string; quantity: 
     ...extra,
   });
 
+/** A Square request's changes as [variation, location, to state, quantity], sorted. */
+const movesOf = (request: any) =>
+  request.changes.map(({ adjustment: x }: any) => [x.catalogObjectId, x.toLocationId, x.toState, x.quantity]).sort();
+
 /** The refusal's status and body, or 'done'. */
 const refusal = (p: Promise<unknown>) => p.then(() => 'done', (e: any) => ({ status: e.status, ...e.getResponse?.() }));
 
@@ -91,15 +95,18 @@ describe('TransferService.shipBatch (Postgres, Square recorded)', () => {
 
     assert({
       given: 'two products sent with receive on send',
-      should: 'move them to the destination in the same step and tell Square once per product',
+      should: "move them to the destination in the same step and tell Square in one call with every product's move",
       actual: [
         shipment.status,
         shipment.transfers.map((t: any) => t.status),
         shipment.transfers.map((t: any) => t.squareSynced),
         [await stockAt(norte, a), await stockAt(norte, b)],
-        batchCreateChanges.mock.calls.length,
+        batchCreateChanges.mock.calls.map(([r]) => movesOf(r)),
       ],
-      expected: ['RECEIVED', ['RECEIVED', 'RECEIVED'], [true, true], [3, 4], 2],
+      expected: ['RECEIVED', ['RECEIVED', 'RECEIVED'], [true, true], [3, 4], [[
+        [`v-${a}`, 'SQ-CENTRO', 'NONE', '3'], [`v-${a}`, 'SQ-NORTE', 'IN_STOCK', '3'],
+        [`v-${b}`, 'SQ-CENTRO', 'NONE', '4'], [`v-${b}`, 'SQ-NORTE', 'IN_STOCK', '4'],
+      ].sort()]],
     });
   });
 
@@ -255,6 +262,131 @@ describe('TransferService.shipBatch input', () => {
   });
 });
 
+describe('TransferService shipment Square sync (Postgres, Square recorded)', () => {
+  test('Square rejects the shipment\'s call', async () => {
+    const { transfers, batchCreateChanges } = services();
+    const [a, b] = [await productWith(), await productWith()];
+    // A rejected batch applies nothing; sent alone, only b's move is refused.
+    batchCreateChanges.mockImplementation(async (r: any) =>
+      r.changes.some((c: any) => c.adjustment.catalogObjectId === `v-${b}`) ? { errors: [{ detail: 'Item not found' }] } : { counts: [] });
+
+    const shipment = await send(transfers, [{ productId: a, quantity: 3 }, { productId: b, quantity: 4 }], { receiveOnSend: true });
+    const ids = Object.fromEntries(shipment.transfers.map((t: any) => [t.product.id, t.id]));
+
+    assert({
+      given: 'a receive-on-send whose one Square call is rejected because of one product',
+      should: "resend each product alone under its transfer's key and record each product's own outcome",
+      actual: [
+        shipment.status,
+        [a, b].map((p) => shipment.transfers.find((t: any) => t.product.id === p)).map((t: any) => [t.squareSynced, t.squareSyncError]),
+        batchCreateChanges.mock.calls.slice(1).map(([r]) => r.idempotencyKey).sort(),
+      ],
+      expected: ['RECEIVED', [[true, null], [false, 'Item not found']], [`${ids[a]}:adjust`, `${ids[b]}:adjust`].sort()],
+    });
+  });
+
+  test('Square down for the shipment\'s call', async () => {
+    const { transfers, batchCreateChanges } = services();
+    batchCreateChanges.mockRejectedValue(new Error('socket hang up'));
+    const [a, b] = [await productWith(), await productWith()];
+
+    const shipment = await send(transfers, [{ productId: a, quantity: 3 }, { productId: b, quantity: 4 }], { receiveOnSend: true });
+
+    assert({
+      given: 'a receive-on-send whose Square call fails without an answer',
+      should: 'not resend (Square may have applied it), and record the failure on every product for a retry',
+      actual: [shipment.status, shipment.transfers.map((t: any) => [t.squareSynced, t.squareSyncError]), batchCreateChanges.mock.calls.length],
+      expected: ['RECEIVED', [[false, 'socket hang up'], [false, 'socket hang up']], 1],
+    });
+  });
+
+  test('a product not in Square', async () => {
+    const { transfers, batchCreateChanges } = services();
+    const a = await productWith();
+    const unmapped = await productWith();
+    await prisma.catalogMapping.deleteMany({ where: { productId: unmapped } });
+
+    const shipment = await send(transfers, [{ productId: a, quantity: 3 }, { productId: unmapped, quantity: 2 }], { receiveOnSend: true });
+    const byProduct = (p: string) => shipment.transfers.find((t: any) => t.product.id === p) as any;
+
+    assert({
+      given: 'a receive-on-send with one product that has no Square item',
+      should: 'send the other product and record the missing item on that product alone',
+      actual: [
+        [byProduct(a).squareSynced, byProduct(a).squareSyncError],
+        [byProduct(unmapped).squareSynced, byProduct(unmapped).squareSyncError],
+        batchCreateChanges.mock.calls.map(([r]) => movesOf(r).length),
+      ],
+      expected: [[true, null], [false, 'Product not mapped to Square catalog'], [2]],
+    });
+  });
+
+  test('more changes than one Square call takes', async () => {
+    const { transfers, batchCreateChanges } = services();
+    const products: string[] = [];
+    for (let i = 0; i < 51; i++) products.push(await productWith());
+
+    const shipment = await send(transfers, products.map((productId) => ({ productId, quantity: 1 })), { receiveOnSend: true });
+    const sent = batchCreateChanges.mock.calls.map(([r]) => r.changes);
+    const callsPerProduct = products.map((p) => sent.filter((cs: any[]) => cs.some((c) => c.adjustment.catalogObjectId === `v-${p}`)).length);
+
+    assert({
+      given: 'a receive-on-send of 51 products, two Square changes each',
+      should: "split them into calls of at most 100 changes, never splitting one product's changes, and sync all",
+      actual: [
+        sent.map((cs: any[]) => cs.length <= 100),
+        callsPerProduct.every((n) => n === 1),
+        shipment.transfers.every((t: any) => t.squareSynced),
+      ],
+      expected: [[true, true], true, true],
+    });
+  });
+
+  test('a retry after Square did not answer', async () => {
+    const { transfers, batchCreateChanges } = services();
+    const [a, b] = [await productWith(), await productWith()];
+    batchCreateChanges.mockRejectedValueOnce(new Error('socket hang up'));
+    const shipment = await send(transfers, [{ productId: a, quantity: 3 }, { productId: b, quantity: 4 }], { receiveOnSend: true });
+    const [landed, notLanded] = [a, b].map((p) => shipment.transfers.find((t: any) => t.product.id === p)!.id);
+    // Square applied only a's move before going silent (as if a's alone had been sent).
+    const batchGetChanges = vi.fn(async (r: any) =>
+      r.catalogObjectIds.includes(`v-${a}`) ? [{ type: 'ADJUSTMENT', adjustment: { referenceId: `transfer-in-${landed}` } }] : []);
+    (transfers as any).squareClient.inventory.batchGetChanges = batchGetChanges;
+
+    const results = [await transfers.retrySquareSync(landed), await transfers.retrySquareSync(notLanded)];
+    const resent = batchCreateChanges.mock.calls.slice(1).map(([r]) => r.idempotencyKey);
+    const after = await prisma.transfer.findMany({ where: { id: { in: [landed, notLanded] } } });
+
+    assert({
+      given: 'a shipment whose Square call went unanswered, retried product by product',
+      should: "mark a product Square already has as synced without resending it, and resend the other under its transfer's key",
+      actual: [results, resent, [landed, notLanded].map((id) => after.find((t) => t.id === id)!.squareSynced)],
+      expected: [[{ synced: true }, { synced: true }], [`${notLanded}:adjust`], [true, true]],
+    });
+  });
+});
+
+describe('TransferService.retrySquareSync after a shipment (Postgres, Square recorded)', () => {
+  test('Square down while checking what it already has', async () => {
+    const { transfers, batchCreateChanges } = services();
+    const a = await productWith();
+    batchCreateChanges.mockRejectedValueOnce(new Error('socket hang up'));
+    const shipment = await send(transfers, [{ productId: a, quantity: 3 }, { productId: await productWith(), quantity: 1 }], { receiveOnSend: true });
+    const id = shipment.transfers.find((t: any) => t.product.id === a)!.id;
+    (transfers as any).squareClient.inventory.batchGetChanges = vi.fn().mockRejectedValue(new Error('Square is down'));
+
+    const result = await transfers.retrySquareSync(id).catch((e: any) => `threw ${e.message}`);
+    const after = await prisma.transfer.findUniqueOrThrow({ where: { id } });
+
+    assert({
+      given: 'a retry of a product sent with its shipment while Square cannot say what it already has',
+      should: 'report and record the failure without resending',
+      actual: [result, [after.squareSynced, after.squareSyncError], batchCreateChanges.mock.calls.length],
+      expected: [{ synced: false, error: 'Square is down' }, [false, 'Square is down'], 1],
+    });
+  });
+});
+
 describe('TransferService.receiveShipment (Postgres, Square recorded)', () => {
   test('one line arrived short', async () => {
     const { transfers, batchCreateChanges } = services();
@@ -266,9 +398,9 @@ describe('TransferService.receiveShipment (Postgres, Square recorded)', () => {
 
     assert({
       given: 'a shipment received with one line counted short',
-      should: 'receive every product at its sent quantity except that line, and tell Square once per product',
-      actual: [received.status, [await stockAt(norte, a), await stockAt(norte, b)], batchCreateChanges.mock.calls.length],
-      expected: ['RECEIVED', [3, 1], 2],
+      should: 'receive every product at its sent quantity except that line, and tell Square in one call',
+      actual: [received.status, [await stockAt(norte, a), await stockAt(norte, b)], batchCreateChanges.mock.calls.length, received.transfers.map((t: any) => t.squareSynced)],
+      expected: ['RECEIVED', [3, 1], 1, [true, true]],
     });
   });
 
