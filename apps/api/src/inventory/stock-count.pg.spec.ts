@@ -273,6 +273,102 @@ describe('StockCountService.zero with a stale list', () => {
   });
 });
 
+/** Units received at a store from a supplier, as InventoryReceivingService records them: the batch, then the receiving. */
+async function receive(productId: string, locationId: string, receivedAt = new Date()) {
+  const batch = await prisma.inventory.create({ data: { productId, locationId, quantity: 4, unitCost: 10, receivedAt, source: 'PURCHASE' } });
+  await prisma.inventoryReceiving.create({ data: { productId, locationId, quantity: 4, unitCost: 10, totalCost: 40, inventoryBatchId: batch.id, receivedAt } });
+}
+
+/** Units added at a store by an adjustment of a type (a customer return, a box opened, a transfer in, …): the batch, then the adjustment. */
+async function add(productId: string, locationId: string, type: 'RETURN' | 'BREAK_BULK_IN' | 'TRANSFER_IN' | 'FOUND' | 'AUTO_SALE_COVER') {
+  const batch = await prisma.inventory.create({ data: { productId, locationId, quantity: 1, unitCost: 10, receivedAt: new Date(), source: 'ADJUSTMENT' } });
+  await prisma.inventoryAdjustment.create({ data: { productId, locationId, type, quantity: 1, unitCost: 10, totalCost: 10, createdBatchId: batch.id } });
+}
+
+describe('StockCountService.uncounted with stock added during the count', () => {
+  test('received, returned, opened from a box, transferred in, and before the count', async () => {
+    const locationId = await store();
+    const [bySupplier, returned, opened, transferred, before, covered] = await Promise.all(
+      ['Proveedor', 'Devuelto', 'Suelto', 'Traspaso', 'Antes', 'Cubierto'].map((name) => product(locationId, 2, name)),
+    );
+    await receive(before, locationId, new Date(Date.now() - 60_000));
+    const { id } = await counts.start(locationId, 'owner');
+    await receive(bySupplier, locationId);
+    await add(returned, locationId, 'RETURN');
+    await add(opened, locationId, 'BREAK_BULK_IN');
+    await add(transferred, locationId, 'TRANSFER_IN');
+    await add(covered, locationId, 'AUTO_SALE_COVER');
+
+    const rows = await counts.uncounted(id, locationId);
+    const added = (productId: string) => rows.find((r) => r.productId === productId)?.receivedAt instanceof Date;
+
+    assert({
+      given: 'stock received, returned by a customer, opened from a box and transferred in since the count started; one received before it; one covering a sale with no stock',
+      should: 'mark when stock came in for the first four, and not the last two',
+      actual: [bySupplier, returned, opened, transferred, before, covered].map(added),
+      expected: [true, true, true, true, false, false],
+    });
+  });
+});
+
+describe('StockCountService.uncounted with another store\'s count', () => {
+  test('a count id from another store', async () => {
+    const locationId = await store();
+    const productId = await product(locationId, 2);
+    const { id: elsewhere } = await counts.start(await store(), 'owner');
+    await receive(productId, locationId);
+
+    assert({
+      given: "another store's count id, after stock was received here",
+      should: 'mark nothing: only this store\'s count says when counting started',
+      actual: (await counts.uncounted(elsewhere, locationId)).find((r) => r.productId === productId)?.receivedAt,
+      expected: null,
+    });
+  });
+});
+
+describe('StockCountService.zero with stock received during the count', () => {
+  test('zeroing the whole list', async () => {
+    const locationId = await store();
+    const received = await product(locationId, 2);
+    const plain = await product(locationId, 3);
+    const { id } = await counts.start(locationId, 'owner');
+    await receive(received, locationId);
+
+    const zeroed = await counts.zero(id, locationId, [received, plain], 'owner');
+
+    assert({
+      given: 'an uncounted product that received stock during the count, zeroed with the rest of the list',
+      should: 'skip it, keep its stock and say why, and zero the others',
+      actual: [zeroed, await stock(received, locationId), await stock(plain, locationId)],
+      expected: [
+        [
+          { productId: received, ok: false, code: 'RECEIVED_DURING_COUNT', error: 'Entró existencia durante el conteo: cuéntalo antes de ponerlo en 0' },
+          { productId: plain, ok: true },
+        ],
+        6,
+        0,
+      ],
+    });
+  });
+
+  test('zeroing it on purpose', async () => {
+    const locationId = await store();
+    const received = await product(locationId, 2);
+    const { id } = await counts.start(locationId, 'owner');
+    await receive(received, locationId);
+
+    const zeroed = await counts.zero(id, locationId, [received], 'owner', { includeReceived: true });
+
+    assert({
+      given: 'a product received during the count, zeroed with the received ones included',
+      should: 'zero it',
+      actual: [zeroed, await stock(received, locationId)],
+      expected: [[{ productId: received, ok: true }], 0],
+    });
+  });
+});
+
 describe('StockCountService lots', () => {
   /** A store with an open count and a product in two batches: 3 at $10 (oldest) and 7 at $20. */
   async function twoBatches() {
