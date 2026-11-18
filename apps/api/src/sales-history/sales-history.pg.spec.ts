@@ -1,13 +1,12 @@
 /**
  * Square sales history against a real Postgres engine (see testing/pglite.ts):
- * the one-time import of closed orders, and the sales velocity and busy hours
+ * the one-time import of closed orders, and the sales count and busy hours
  * read from it together with the sales the app records live.
  */
 import { assert } from 'riteway/vitest';
 import { startPostgres } from '../testing/pglite';
 import { PrismaService } from '../prisma/prisma.service';
-import { busyHours, importSalesHistory, salesVelocity } from './sales-history';
-import { ProductsController } from '../products/products.controller';
+import { busyHours, importSalesHistory, salesLines } from './sales-history';
 import { InventoryReportsController } from '../inventory/inventory-reports.controller';
 import { InventoryReportsService } from '../inventory/inventory-reports.service';
 
@@ -214,7 +213,15 @@ describe('importSalesHistory (Postgres, Square recorded)', () => {
   });
 });
 
-describe('salesVelocity (Postgres)', () => {
+describe('salesLines (Postgres)', () => {
+  /** What the nightly stats read: a product's units at a store since a moment, net of returns, and its last sale. */
+  const sold = async (productId: string, since: Date) => {
+    const [row] = await prisma.$queryRaw<Array<{ last: Date | null; units: number }>>`
+      SELECT max(at) FILTER (WHERE quantity > 0) AS last, coalesce(sum(quantity) FILTER (WHERE at >= ${since}), 0)::int AS units
+        FROM (${salesLines(centro, productId)}) l`;
+    return row;
+  };
+
   test('history and live sales together', async () => {
     const productId = await product();
     await historyLine({ productId, locationId: centro, at: ago(10), quantity: 3 });
@@ -229,8 +236,8 @@ describe('salesVelocity (Postgres)', () => {
     assert({
       given: "a store's history, a live sale also imported, and returns in both",
       should: 'count each order once, net of returns, at that store only',
-      actual: await salesVelocity(prisma, productId, centro, now),
-      expected: { lastSoldAt: ago(1).toISOString(), unitsLast30d: 3, unitsLast90d: 8, daysSinceLastSale: 1 },
+      actual: [(await sold(productId, ago(30))).last, (await sold(productId, ago(30))).units, (await sold(productId, ago(90))).units],
+      expected: [ago(1), 3, 8],
     });
   });
 
@@ -245,7 +252,7 @@ describe('salesVelocity (Postgres)', () => {
     assert({
       given: 'a sale and its Square return, each recorded live and imported',
       should: 'count the 2 sold and the 1 returned once each',
-      actual: (await salesVelocity(prisma, productId, centro, now)).unitsLast30d,
+      actual: (await sold(productId, ago(30))).units,
       expected: 1,
     });
   });
@@ -263,32 +270,8 @@ describe('salesVelocity (Postgres)', () => {
     assert({
       given: "an exchange's new line, recorded live as a sale keyed on its refund and imported too",
       should: 'count it once',
-      actual: (await salesVelocity(prisma, productId, centro, now)).unitsLast30d,
+      actual: (await sold(productId, ago(30))).units,
       expected: 1,
-    });
-  });
-
-  test('days since the last sale, by the store calendar', async () => {
-    const productId = await product();
-    // Sunday 2026-11-08 at 20:00 in Mexico City, read Monday at 08:00: 12 hours, but the day before.
-    await historyLine({ productId, locationId: centro, at: new Date('2026-11-09T02:00:00Z'), quantity: 1 });
-
-    assert({
-      given: 'a sale last night, read this morning',
-      should: 'say it sold 1 day ago',
-      actual: (await salesVelocity(prisma, productId, centro, new Date('2026-11-09T14:00:00Z'))).daysSinceLastSale,
-      expected: 1,
-    });
-  });
-
-  test('a product never sold', async () => {
-    const productId = await product();
-
-    assert({
-      given: 'a product with no sales at the store',
-      should: 'say it has never sold',
-      actual: await salesVelocity(prisma, productId, centro, now),
-      expected: { lastSoldAt: null, unitsLast30d: 0, unitsLast90d: 0, daysSinceLastSale: null },
     });
   });
 });
@@ -351,35 +334,7 @@ describe('busyHours in summer (Postgres)', () => {
 describe('sales history endpoints (Postgres)', () => {
   const at = (locationId: string, role = 'MANAGER') =>
     ({ currentLocation: { locationId, role }, accessibleLocations: [{ locationId, isActive: true }] }) as any;
-  const products = () => new ProductsController({} as any, prisma, {} as any, {} as any, {} as any);
   const reports = () => new InventoryReportsController(new InventoryReportsService(prisma));
-
-  test('sales velocity at the session store', async () => {
-    const productId = await product();
-    const threeDaysAgo = new Date(Date.now() - 3 * DAY); // the endpoint reads up to the real clock
-    await historyLine({ productId, locationId: centro, at: threeDaysAgo, quantity: 4 });
-    await historyLine({ productId, locationId: norte, at: threeDaysAgo, quantity: 9 });
-
-    const response = await products().getSalesVelocity(at(centro, 'CASHIER'), productId);
-
-    assert({
-      given: 'a request without a store',
-      should: "answer with the product's velocity at the session's store",
-      actual: [response.success, response.data.unitsLast30d],
-      expected: [true, 4],
-    });
-  });
-
-  test('sales velocity of a product that does not exist', async () => {
-    const error = await products().getSalesVelocity(at(centro), 'no-such-product').catch((e) => e);
-
-    assert({
-      given: 'an unknown product id',
-      should: 'refuse with 404',
-      actual: error.getStatus?.(),
-      expected: 404,
-    });
-  });
 
   test('busy hours over a number of days', async () => {
     await historyLine({ locationId: centro, at: new Date(Date.now() - 20 * DAY), quantity: 1 });

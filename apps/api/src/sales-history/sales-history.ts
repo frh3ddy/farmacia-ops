@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import type { Square, SquareClient } from 'square';
-import { BUSINESS_TIME_ZONE, businessDay } from '../inventory/business-date';
+import { BUSINESS_TIME_ZONE } from '../inventory/business-date';
 import { preferredMapping } from '../inventory/square-sync';
 
 const DAY = 86_400_000;
@@ -114,29 +114,6 @@ export const salesLines = (locationId: string, productId?: string) => {
     JOIN "Sale" s ON s.id = i."saleId"
    WHERE s."locationId" = ${locationId} ${live}`;
 };
-
-export interface SalesVelocity {
-  lastSoldAt: string | null;
-  unitsLast30d: number;
-  unitsLast90d: number;
-  daysSinceLastSale: number | null;
-}
-
-/** How fast a product sells at a store: units net of returns, and its last sale. */
-export async function salesVelocity(prisma: PrismaClient, productId: string, locationId: string, now = new Date()): Promise<SalesVelocity> {
-  const [row] = await prisma.$queryRaw<Array<{ last: Date | null; u30: number; u90: number }>>`
-    SELECT max(at) FILTER (WHERE quantity > 0) AS last,
-           coalesce(sum(quantity) FILTER (WHERE at >= ${new Date(now.getTime() - 30 * DAY)}), 0)::int AS u30,
-           coalesce(sum(quantity) FILTER (WHERE at >= ${new Date(now.getTime() - 90 * DAY)}), 0)::int AS u90
-      FROM (${salesLines(locationId, productId)}) lines`;
-  return {
-    lastSoldAt: row.last?.toISOString() ?? null,
-    unitsLast30d: row.u30,
-    unitsLast90d: row.u90,
-    // Calendar days on the store clock: a sale last night was 1 day ago this morning.
-    daysSinceLastSale: row.last ? (Date.parse(businessDay(now)) - Date.parse(businessDay(row.last))) / DAY : null,
-  };
-}
 
 export interface BusyHours {
   timezone: string;
