@@ -109,3 +109,22 @@ describe('StockCountController reason and notes', () => {
     });
   });
 });
+
+describe('StockCountController.zero', () => {
+  test('including products received during the count', async () => {
+    const counts = { zero: vi.fn().mockResolvedValue([]) };
+    const controller = new StockCountController(counts as any);
+    const req = { employee: { id: 'owner' }, currentLocation: { role: 'OWNER', locationId: 'lolita' } } as any;
+
+    await controller.zero('c1', { productIds: ['p1'], includeReceived: true }, req);
+    await controller.zero('c1', { productIds: ['p1'], includeReceived: 'yes' as any }, req);
+    await controller.zero('c1', { productIds: ['p1'] }, req);
+
+    assert({
+      given: 'includeReceived as true, as something else, and left out',
+      should: 'include the received products only when it is exactly true',
+      actual: counts.zero.mock.calls.map((call) => call[4]),
+      expected: [{ includeReceived: true }, { includeReceived: false }, { includeReceived: false }],
+    });
+  });
+});
