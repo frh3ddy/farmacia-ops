@@ -140,3 +140,19 @@ the app warns instead (agreed with dev-79).
 - Given a lote or caducidad with no initial stock, should refuse with 400 before creating anything
 - Given a caducidad that isn't a YYYY-MM-DD day, or a lote that isn't text, should refuse with 400
 - Given a product created with them during a Conteo inicial, the count form's lots should show that lot
+
+## Stock added during a Conteo inicial (2026-11-18)
+
+Stock that comes in while a count is open doesn't count the product (a box arriving isn't a count of the shelf), so it stays in No contados with the new units, and "Poner todos en 0" would zero them.
+
+- `GET /inventory/stock-counts/:id/uncounted` rows carry `receivedAt`: when stock was last added at the store since the count started, else null
+- `POST /inventory/stock-counts/:id/zero` skips those products (`RECEIVED_DURING_COUNT`, "Entró existencia durante el conteo: cuéntalo antes de ponerlo en 0") unless `includeReceived: true`, which the app's per-row "Poner en 0" sends
+- Stock added: a receiving, or any adjustment adding units (customer return, box opened, transfer in, Encontrado, positive correction). Not the count's own corrections (`OPENING_COUNT`) nor the batch covering a sale with no stock (`AUTO_SALE_COVER`, sold at once). A product created with stock during a count is already counted.
+- The names say "received" though they mean any addition: kept, since the app had taken the contract
+- No lock between the check and the zeroing: stock landing mid-request can still be zeroed; a recount fixes it
+
+**Requirements**:
+- Given stock received, returned, opened from a box or transferred in since the count started, should mark it; not stock from before it, nor a sale's cover
+- Given another store's count id, should mark nothing
+- Given the whole list zeroed, should skip the marked products and keep their stock, and zero the rest
+- Given includeReceived exactly true, should zero them too

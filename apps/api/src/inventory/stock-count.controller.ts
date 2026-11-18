@@ -78,8 +78,9 @@ export class StockCountController {
 
   @Post(':id/zero')
   @Roles('OWNER')
-  async zero(@Param('id') id: string, @Body() body: { locationId?: string; productIds: string[] }, @Req() req: RoleGuardedRequest) {
+  async zero(@Param('id') id: string, @Body() body: { locationId?: string; productIds: string[]; includeReceived?: boolean }, @Req() req: RoleGuardedRequest) {
     const productIds = Array.isArray(body?.productIds) ? body.productIds : [];
-    return { success: true, data: await this.counts.zero(id, storeOf(req, body?.locationId), productIds, req.employee.id) };
+    const includeReceived = body?.includeReceived === true;
+    return { success: true, data: await this.counts.zero(id, storeOf(req, body?.locationId), productIds, req.employee.id, { includeReceived }) };
   }
 }

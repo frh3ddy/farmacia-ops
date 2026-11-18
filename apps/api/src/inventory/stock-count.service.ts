@@ -332,7 +332,10 @@ export class StockCountService {
       ORDER BY 2 ASC NULLS LAST, 3 ASC NULLS FIRST`;
   }
 
-  /** Products with stock at the store that this count hasn't reached, largest value at cost first. */
+  /**
+   * Products with stock at the store that this count hasn't reached, largest value at cost first.
+   * receivedAt: when stock was last added to them since the count started (stockAddedDuringCount), else null.
+   */
   async uncounted(id: string, locationId: string) {
     const rows = await this.prisma.$queryRaw<
       Array<{
@@ -351,19 +354,49 @@ export class StockCountService {
         )
       GROUP BY i."productId", p.name
       ORDER BY value DESC, p.name`;
+    const received = await this.stockAddedDuringCount(id, locationId);
     return rows.map((r) => ({
       ...r,
       value: new Prisma.Decimal(r.value).toString(),
+      receivedAt: received.get(r.productId) ?? null,
     }));
   }
 
-  /** Each product counted as 0, one at a time, so one failure doesn't stop the rest. */
-  async zero(id: string, locationId: string, productIds: string[], countedBy: string) {
+  /**
+   * Each product's last stock added at the store since the count started: a receiving, or any
+   * adjustment that adds units (customer return, box opened, transfer in, Encontrado, …). Not the
+   * count's own corrections, nor the batch that covers a sale with no stock (it sells at once).
+   */
+  private async stockAddedDuringCount(id: string, locationId: string): Promise<Map<string, Date>> {
+    const rows = await this.prisma.$queryRaw<Array<{ productId: string; at: Date }>>`
+      WITH count AS (SELECT "startedAt" FROM "StockCount" WHERE id = ${id} AND "locationId" = ${locationId})
+      SELECT "productId", max(at) AS at FROM (
+        SELECT r."productId", r."receivedAt" AS at FROM "InventoryReceiving" r, count
+         WHERE r."locationId" = ${locationId} AND r."receivedAt" >= count."startedAt"
+        UNION ALL
+        SELECT a."productId", a."adjustedAt" FROM "InventoryAdjustment" a, count
+         WHERE a."locationId" = ${locationId} AND a."adjustedAt" >= count."startedAt"
+           AND a.quantity > 0 AND a.type NOT IN ('OPENING_COUNT', 'AUTO_SALE_COVER')
+      ) added
+      GROUP BY 1`;
+    return new Map(rows.map((r) => [r.productId, r.at]));
+  }
+
+  /**
+   * Each product counted as 0, one at a time, so one failure doesn't stop the rest. A product
+   * that got stock during the count is skipped unless includeReceived: its new units are on the shelf.
+   */
+  async zero(id: string, locationId: string, productIds: string[], countedBy: string, { includeReceived = false } = {}) {
     // Each product is a transaction plus a Square call: a store's whole list in one
     // request would outlast the app's 60 s timeout while the server kept zeroing.
     if (productIds.length > 100) throw new BadRequestException('Envía como máximo 100 productos por solicitud');
-    const results: Array<{ productId: string; ok: boolean; code?: 'ALREADY_COUNTED'; error?: string }> = [];
+    const results: Array<{ productId: string; ok: boolean; code?: 'ALREADY_COUNTED' | 'RECEIVED_DURING_COUNT'; error?: string }> = [];
+    const received = includeReceived ? new Map() : await this.stockAddedDuringCount(id, locationId);
     for (const productId of productIds) {
+      if (received.has(productId)) {
+        results.push({ productId, ok: false, code: 'RECEIVED_DURING_COUNT', error: 'Entró existencia durante el conteo: cuéntalo antes de ponerlo en 0' });
+        continue;
+      }
       try {
         await this.recordCount(id, {
           locationId,
