@@ -6,9 +6,14 @@ import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { assertCutOver } from './cutover-gate';
 import { assertSoldAtLocation } from './sold-at-location';
 import { buildTransferLines, resolveQuantityReceived } from './transfer';
-import { SquareClient } from 'square';
+import { Square, SquareClient, SquareError } from 'square';
 import { createSquareClient } from '../square/square-client';
-import { findSquareVariationId, sendInventoryChanges } from './square-sync';
+import { preferredMapping, sendInventoryChanges, type SquareSyncResult } from './square-sync';
+
+type SquareReceipt = {
+  transfer: { id: string; fromLocationId: string; toLocationId: string; productId: string; quantity: number };
+  received: number;
+};
 
 export interface ShipTransferInput {
   productId: string;
@@ -142,36 +147,34 @@ export class TransferService {
    * (MERCHANT_SUBSCRIPTION_NOT_FOUND). The shipment itself isn't pushed, so
    * Square holds the units at the origin until now.
    */
-  private async syncReceiveToSquare(
-    transfer: { id: string; fromLocationId: string; toLocationId: string; productId: string; quantity: number },
-    received: number,
-  ): Promise<{ synced: boolean; error?: string }> {
-    const client = this.getSquareClient();
-    if (!client) return { synced: false, error: 'Square client not configured' };
+  private async squareChanges(receipts: SquareReceipt[]): Promise<Array<{ changes: Square.InventoryChange[] } | { error: string }>> {
+    const locationIds = [...new Set(receipts.flatMap(({ transfer: t }) => [t.fromLocationId, t.toLocationId]))];
+    const [locations, mappings] = await Promise.all([
+      this.prisma.location.findMany({ where: { id: { in: locationIds } }, select: { id: true, squareId: true } }),
+      this.prisma.catalogMapping.findMany({
+        where: { productId: { in: receipts.map(({ transfer: t }) => t.productId) }, NOT: { squareVariationId: { startsWith: 'local_' } } },
+        select: { productId: true, squareVariationId: true, locationId: true },
+      }),
+    ]);
+    const squareIdOf = new Map(locations.map((l) => [l.id, l.squareId]));
+    // Each store's change names the variation that store maps to (same pick as findSquareVariationId).
+    const variationAt = (productId: string, locationId: string) =>
+      preferredMapping(mappings.filter((m) => m.productId === productId), locationId)?.squareVariationId;
+    const occurredAt = new Date().toISOString();
 
-    try {
-      const locations = await this.prisma.location.findMany({
-        where: { id: { in: [transfer.fromLocationId, transfer.toLocationId] } },
-        select: { id: true, squareId: true },
-      });
-      const squareIdOf = new Map(locations.map((l) => [l.id, l.squareId]));
+    return receipts.map(({ transfer, received }) => {
       const from = squareIdOf.get(transfer.fromLocationId);
       const to = squareIdOf.get(transfer.toLocationId);
-      if (!from || !to) return { synced: false, error: 'Location not linked to Square' };
+      if (!from || !to) return { error: 'Location not linked to Square' };
+      const fromVariationId = variationAt(transfer.productId, transfer.fromLocationId);
+      const toVariationId = variationAt(transfer.productId, transfer.toLocationId);
+      if (!fromVariationId || !toVariationId) return { error: 'Product not mapped to Square catalog' };
 
-      // Each store's change names the variation that store maps to.
-      const [fromVariationId, toVariationId] = await Promise.all([
-        findSquareVariationId(this.prisma, transfer.productId, transfer.fromLocationId),
-        findSquareVariationId(this.prisma, transfer.productId, transfer.toLocationId),
-      ]);
-      if (!fromVariationId || !toVariationId) return { synced: false, error: 'Product not mapped to Square catalog' };
-
-      const occurredAt = new Date().toISOString();
       const change = (
         catalogObjectId: string, locationId: string,
         fromState: 'IN_STOCK' | 'NONE', toState: 'IN_STOCK' | 'NONE' | 'WASTE', quantity: number, reference: string,
-      ) => ({
-        type: 'ADJUSTMENT' as const,
+      ): Square.InventoryChange => ({
+        type: 'ADJUSTMENT',
         adjustment: {
           catalogObjectId,
           fromLocationId: locationId,
@@ -184,31 +187,105 @@ export class TransferService {
         },
       });
       const lost = transfer.quantity - received;
-      const changes = [
-        ...(received > 0
-          ? [
-              change(fromVariationId, from, 'IN_STOCK', 'NONE', received, 'out'),
-              change(toVariationId, to, 'NONE', 'IN_STOCK', received, 'in'),
-            ]
-          : []),
-        ...(lost > 0 ? [change(fromVariationId, from, 'IN_STOCK', 'WASTE', lost, 'lost')] : []),
-      ];
-      if (changes.length === 0) return { synced: true };
+      return {
+        changes: [
+          ...(received > 0
+            ? [
+                change(fromVariationId, from, 'IN_STOCK', 'NONE', received, 'out'),
+                change(toVariationId, to, 'NONE', 'IN_STOCK', received, 'in'),
+              ]
+            : []),
+          ...(lost > 0 ? [change(fromVariationId, from, 'IN_STOCK', 'WASTE', lost, 'lost')] : []),
+        ],
+      };
+    });
+  }
 
-      return await sendInventoryChanges(client, {
-        // Keyed on the transfer itself (not randomUUID()) so a retry
-        // (retrySquareSync) replays the same key — Square returns the
-        // original result instead of double-applying the stock change.
-        // ':adjust' leaves the key used by the old between-stores move, so a
-        // transfer Square refused for the plan isn't answered from that refusal.
-        idempotencyKey: `${transfer.id}:adjust`,
-        changes,
-      }, this.logger, 'transfer receive');
+  /**
+   * Tells Square about received transfers in as few calls as it takes (at
+   * most 100 changes each, a transfer's changes never split). Per transfer,
+   * the received units leave the origin (IN_STOCK → NONE) and arrive at the
+   * destination (NONE → IN_STOCK), and any shortfall — lost in transit — is
+   * waste at the origin. Every change stays at one location: a move between
+   * locations (IN_STOCK → IN_STOCK) is a Square transfer, which needs a paid
+   * plan (MERCHANT_SUBSCRIPTION_NOT_FOUND). The shipment itself isn't pushed,
+   * so Square holds the units at the origin until now.
+   *
+   * A transfer sent alone is keyed on itself, so retrySquareSync replays the
+   * same key and Square answers with the first result instead of applying it
+   * twice (':adjust' leaves the key of the old between-stores move). A call
+   * Square rejects applies nothing, so its transfers are resent alone, each
+   * keeping its own outcome. A call that fails without an answer may have
+   * applied; it isn't resent, and retrySquareSync checks Square first.
+   */
+  private async syncReceivesToSquare(receipts: SquareReceipt[]): Promise<SquareSyncResult[]> {
+    const client = this.getSquareClient();
+    if (!client) return receipts.map(() => ({ synced: false, error: 'Square client not configured' }));
+    const failed = (error: unknown): SquareSyncResult => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[TRANSFER] Failed to sync receive to Square: ${message}`);
+      return { synced: false, error: message };
+    };
+
+    let built: Awaited<ReturnType<TransferService['squareChanges']>>;
+    try {
+      built = await this.squareChanges(receipts);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`[TRANSFER] Failed to sync receive to Square: ${errorMessage}`);
-      return { synced: false, error: errorMessage };
+      return receipts.map(() => failed(error));
     }
+    const results: SquareSyncResult[] = built.map((b) => ('error' in b ? { synced: false, error: b.error } : { synced: true }));
+
+    const send = (indexes: number[]) =>
+      sendInventoryChanges(client, {
+        idempotencyKey: indexes.length === 1 ? `${receipts[indexes[0]].transfer.id}:adjust` : `${receipts[indexes[0]].transfer.id}:batch:${indexes.length}`,
+        changes: indexes.flatMap((i) => (built[i] as { changes: Square.InventoryChange[] }).changes),
+      }, this.logger, indexes.length === 1 ? 'transfer receive' : `${indexes.length} transfer receives`);
+
+    const chunks: number[][] = [];
+    let size = 0;
+    built.forEach((b, i) => {
+      if ('error' in b || b.changes.length === 0) return;
+      if (chunks.length === 0 || size + b.changes.length > 100) (chunks.push([]), (size = 0));
+      chunks[chunks.length - 1].push(i);
+      size += b.changes.length;
+    });
+
+    for (const chunk of chunks) {
+      let outcome: SquareSyncResult;
+      try {
+        outcome = await send(chunk);
+      } catch (error) {
+        const rejected = error instanceof SquareError && error.statusCode !== undefined && error.statusCode < 500;
+        if (!rejected || chunk.length === 1) {
+          for (const i of chunk) results[i] = failed(error);
+          continue;
+        }
+        outcome = { synced: false };
+      }
+      if (outcome.synced || chunk.length === 1) {
+        for (const i of chunk) results[i] = outcome;
+        continue;
+      }
+      for (const i of chunk) results[i] = await send([i]).catch(failed);
+    }
+    return results;
+  }
+
+  /** Whether Square already holds a change sent for this transfer (by its reference ids). */
+  private async inSquareAlready(transfer: SquareReceipt['transfer'], received: number, since: Date): Promise<boolean> {
+    const client = this.getSquareClient();
+    const [built] = await this.squareChanges([{ transfer, received }]);
+    if (!client || 'error' in built || built.changes.length === 0) return false;
+    const adjustments = built.changes.map((c) => c.adjustment!);
+    const references = new Set(adjustments.map((a) => a.referenceId));
+    const changes = await client.inventory.batchGetChanges({
+      catalogObjectIds: [...new Set(adjustments.map((a) => a.catalogObjectId!))],
+      locationIds: [...new Set(adjustments.map((a) => a.toLocationId!))],
+      types: ['ADJUSTMENT'],
+      updatedAfter: new Date(since.getTime() - 5 * 60_000).toISOString(), // slack for clock skew
+    });
+    for await (const change of changes) if (references.has(change.adjustment?.referenceId)) return true;
+    return false;
   }
 
   async ship(input: ShipTransferInput) {
@@ -471,7 +548,7 @@ export class TransferService {
     }
 
     if (input.receiveOnSend) {
-      for (const transfer of shipped) await this.recordSquareSync(transfer, transfer.quantity);
+      await this.recordSquareSyncs(shipped.map((transfer) => ({ transfer, received: transfer.quantity })));
     }
     this.logger.log(`[TRANSFER] Shipped ${shipped.length} product(s) from ${input.fromLocationId} to ${input.toLocationId}${input.receiveOnSend ? ', received on send' : ''}`);
     return (await this.findShipment({ clientRequestId: input.clientRequestId }))!;
@@ -498,7 +575,7 @@ export class TransferService {
       return totals;
     }, { timeout: 60_000 });
 
-    for (const [i, transfer] of shipment.transfers.entries()) await this.recordSquareSync(transfer, received[i]);
+    await this.recordSquareSyncs(shipment.transfers.map((transfer, i) => ({ transfer, received: received[i] })));
     this.logger.log(`[TRANSFER] Received shipment ${shipment.id} at ${shipment.toLocationId}`);
     return (await this.findShipment({ id: shipment.id }))!;
   }
@@ -561,24 +638,38 @@ export class TransferService {
       throw new BadRequestException('Esta transferencia no tiene un envío fallido a Square que reintentar');
     }
     const received = transfer.lines.reduce((sum, l) => sum + (l.quantityReceived ?? 0), 0);
+    // Sent with its shipment, the call may have reached Square without an answer: don't apply it twice.
+    if (transfer.shipmentId && transfer.receivedAt) {
+      const already = await this.inSquareAlready(transfer, received, transfer.receivedAt).catch((error: unknown) =>
+        ({ synced: false, error: error instanceof Error ? error.message : String(error) }));
+      if (already !== false) {
+        const result = already === true ? { synced: true } : already;
+        await this.recordSquareResults([transfer], [result]);
+        return result;
+      }
+    }
     return this.recordSquareSync(transfer, received);
   }
 
   /** Sends a received transfer to Square and records the outcome on it. */
-  private async recordSquareSync(
-    transfer: Parameters<TransferService['syncReceiveToSquare']>[0],
-    received: number,
-  ): Promise<{ synced: boolean; error?: string }> {
-    const result = await this.syncReceiveToSquare(transfer, received);
-    await this.prisma.transfer.update({
-      where: { id: transfer.id },
-      data: {
-        squareSynced: result.synced,
-        squareSyncedAt: result.synced ? new Date() : null,
-        squareSyncError: result.error ?? null,
-      },
-    });
-    return result;
+  private async recordSquareSync(transfer: SquareReceipt['transfer'], received: number): Promise<SquareSyncResult> {
+    return (await this.recordSquareSyncs([{ transfer, received }]))[0];
+  }
+
+  /** Sends received transfers to Square together and records each one's outcome on it. */
+  private async recordSquareSyncs(receipts: SquareReceipt[]): Promise<SquareSyncResult[]> {
+    const results = await this.syncReceivesToSquare(receipts);
+    await this.recordSquareResults(receipts.map((r) => r.transfer), results);
+    return results;
+  }
+
+  private async recordSquareResults(transfers: { id: string }[], results: SquareSyncResult[]) {
+    const now = new Date();
+    await this.prisma.$transaction(transfers.map((t, i) =>
+      this.prisma.transfer.update({
+        where: { id: t.id },
+        data: { squareSynced: results[i].synced, squareSyncedAt: results[i].synced ? now : null, squareSyncError: results[i].error ?? null },
+      })));
   }
 
   async getTransfers(options: { locationId?: string; status?: TransferStatus }) {
