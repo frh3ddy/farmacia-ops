@@ -9,6 +9,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PGlite, type Extension } from '@electric-sql/pglite';
 import type { Prisma } from '@prisma/client';
+import { assert } from 'riteway/vitest';
 import { findSearchMatchIds, searchTokens, normalizeQuery, substringMatchSql } from './product-search';
 
 // tsconfig's commonjs/node10 module resolution can't see package `exports`
@@ -153,6 +154,18 @@ describe('tier 2: typo tolerance', () => {
     await findSearchMatchIds('parasetamol', counting);
     expect(calls).toHaveLength(2);
     expect(calls[1].text).toContain('word_similarity');
+  });
+
+  test('an all-digit search with no matches', async () => {
+    const calls: Prisma.Sql[] = [];
+    await findSearchMatchIds('98765', (sql) => (calls.push(sql), run(sql)));
+
+    assert({
+      given: 'an all-digit search that nothing matches',
+      should: 'skip the fuzzy tier (numbers are never near-misses) and run only the substring and barcode-ending queries',
+      actual: calls.length,
+      expected: 2,
+    });
   });
 });
 

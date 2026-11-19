@@ -157,7 +157,8 @@ export async function findSearchMatchIds(search: string, run: RunQuery, location
   const query = normalizeQuery(search);
 
   let rows = await run(substringMatchSql(tokens, query, locationId));
-  if (rows.length === 0) rows = await run(fuzzyMatchSql(tokens, query, locationId));
+  // All-number tokens are never near-misses, so the fuzzy tier would repeat tier 1.
+  if (rows.length === 0 && !tokens.every(isNumeric)) rows = await run(fuzzyMatchSql(tokens, query, locationId));
   const ids = rows.map((r) => r.id);
   // All digits, 4+: also the end of a barcode, listed first (it may still be a strength or a SKU).
   if (!/^\d{4,}$/.test(query)) return ids;
