@@ -278,8 +278,8 @@ export class InventoryReceivingController {
   // --------------------------------------------------------------------------
   @Post(':id/cost')
   @Roles('OWNER')
-  async correctCost(@Param('id') id: string, @Body() body: { unitCost: number }) {
-    await this.receivingService.correctCost(id, body?.unitCost);
+  async correctCost(@Param('id') id: string, @Body() body: { unitCost: number }, @Req() req: RoleGuardedRequest) {
+    await this.receivingService.correctCost(id, body?.unitCost, req.employee.id);
     return { success: true, message: 'Costo corregido' };
   }
 

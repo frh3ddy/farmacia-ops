@@ -111,7 +111,14 @@ async function calculateFIFOCost(
   client: Prisma.TransactionClient,
   coverWhy?: string,
 ): Promise<FifoConsumptionResult> {
-  // Step 1: Query inventory batches (FIFO order - NON-NEGOTIABLE)
+  // Step 1: Lock the batches first, so a cost correction in progress (the api's
+  // correctCost holds the same rows) commits before we read the cost below.
+  await client.$queryRaw`
+    SELECT id FROM "Inventory"
+    WHERE "productId" = ${productId} AND "locationId" = ${locationId} AND quantity > 0
+    ORDER BY "receivedAt" ASC
+    FOR UPDATE`;
+  // Query inventory batches (FIFO order - NON-NEGOTIABLE)
   const batches = await client.inventory.findMany({
     where: {
       productId: productId,

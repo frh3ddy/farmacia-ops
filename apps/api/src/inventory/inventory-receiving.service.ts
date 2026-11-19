@@ -514,7 +514,7 @@ export class InventoryReceivingService {
    * once units were transferred, opened into loose units or sold and
    * returned: those carry the old cost into other batches.
    */
-  async correctCost(receivingId: string, unitCost: number): Promise<void> {
+  async correctCost(receivingId: string, unitCost: number, correctedBy?: string): Promise<void> {
     if (typeof unitCost !== 'number' || !Number.isFinite(unitCost) || unitCost < 0) {
       throw new BadRequestException('El costo debe ser un número igual o mayor que 0');
     }
@@ -541,6 +541,22 @@ export class InventoryReceivingService {
       }
 
       await tx.inventoryReceiving.update({ where: { id: receivingId }, data: { unitCost: cost, totalCost: cost.mul(receiving.quantity) } });
+      // The old cost lives nowhere else once this commits: keep it, and who changed it.
+      await tx.auditLog.create({
+        data: {
+          employeeId: correctedBy,
+          locationId: receiving.locationId,
+          action: 'CORRECT_RECEIVING_COST',
+          entityType: 'InventoryReceiving',
+          entityId: receivingId,
+          details: {
+            oldUnitCost: receiving.unitCost.toString(),
+            newUnitCost: cost.toString(),
+            salesRecosted: new Set(consumptions.flatMap((c) => c.saleItem?.saleId ?? [])).size,
+            adjustmentsRecosted: new Set(consumptions.flatMap((c) => c.adjustmentId ?? [])).size,
+          },
+        },
+      });
       await tx.inventory.updateMany({ where: { id: { in: batchIds } }, data: { unitCost: cost } });
 
       for (const c of consumptions) {
