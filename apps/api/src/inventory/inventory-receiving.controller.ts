@@ -274,6 +274,16 @@ export class InventoryReceivingController {
   }
 
   // --------------------------------------------------------------------------
+  // Correct a receiving saved with the wrong cost - OWNER only
+  // --------------------------------------------------------------------------
+  @Post(':id/cost')
+  @Roles('OWNER')
+  async correctCost(@Param('id') id: string, @Body() body: { unitCost: number }, @Req() req: RoleGuardedRequest) {
+    await this.receivingService.correctCost(id, body?.unitCost, req.employee.id);
+    return { success: true, message: 'Costo corregido' };
+  }
+
+  // --------------------------------------------------------------------------
   // Retry Square sync - OWNER only
   // --------------------------------------------------------------------------
   @Post(':id/retry-square-sync')

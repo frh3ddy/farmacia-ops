@@ -7,6 +7,7 @@ import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
+import { Client } from 'pg';
 import type { Job } from 'bullmq';
 import { getPrisma, processMatchJob, processRefundJob, processReturnJob, processSaleJob } from './sale.worker';
 import { SaleValidationError } from './errors';
@@ -786,5 +787,38 @@ describe('a sale short of sueltos with a box in stock', () => {
     // given the api opening nothing because no box has stock
     // should cover the shortfall as today, labeled why
     expect([cover?.quantity, cover?.notes?.includes('sin caja con existencias'), await stock(suelto.id, location.id)]).toEqual([3, true, 0]);
+  });
+});
+
+describe('a sale and a cost correction at the same time', () => {
+  test("the sale's read of its batches", async () => {
+    const prisma = getPrisma();
+    const location = await prisma.location.create({ data: { squareId: 'SQ-LOCK', name: 'Lock' } });
+    await prisma.cutoverLock.create({ data: { locationId: location.id, cutoverDate: new Date('2026-09-01') } });
+    const product = await prisma.product.create({ data: { name: 'Dolprin lock' } });
+    await prisma.catalogMapping.create({ data: { squareVariationId: 'v-dolprin-lock', productId: product.id } });
+    await prisma.inventory.create({ data: { productId: product.id, locationId: location.id, quantity: 5, unitCost: 26.71, receivedAt: new Date('2026-10-01') } });
+
+    // PGlite is one connection, so the race itself can't interleave here; check its guard,
+    // the row lock that makes a sale wait for a cost correction and then read the new cost.
+    const sent: string[] = [];
+    const query = Client.prototype.query;
+    const spy = jest.spyOn(Client.prototype, 'query').mockImplementation(function (this: Client, ...args: any[]) {
+      const config = args[0];
+      sent.push(typeof config === 'string' ? config : config?.text ?? '');
+      return (query as any).apply(this, args);
+    });
+    await processSaleJob(job([line('v-dolprin-lock', '1', 5000)], 'p-lock', 'SQ-LOCK'));
+    spy.mockRestore();
+
+    expect({
+      given: 'a sale taking units from stock',
+      should: 'lock the batches it costs from while it reads them, so a cost correction in progress finishes first',
+      actual: sent.some((text) => /FROM "Inventory"[\s\S]*FOR UPDATE/.test(text)),
+    }).toEqual({
+      given: 'a sale taking units from stock',
+      should: 'lock the batches it costs from while it reads them, so a cost correction in progress finishes first',
+      actual: true,
+    });
   });
 });
