@@ -150,3 +150,19 @@ describe('InventoryReceivingController.retrySquareSync', () => {
     });
   });
 });
+
+describe('InventoryReceivingController.correctCost', () => {
+  test("an owner correcting a receiving's cost", async () => {
+    const service = { correctCost: vi.fn().mockResolvedValue(undefined) };
+    const controller = new InventoryReceivingController(service as any, {} as any);
+
+    const { message } = await controller.correctCost('r1', { unitCost: 26.71 });
+
+    assert({
+      given: 'the corrected unit cost for a receiving, sent by the owner only',
+      should: 'save it and confirm in Spanish',
+      actual: [Reflect.getMetadata('roles', InventoryReceivingController.prototype.correctCost), service.correctCost.mock.calls, message],
+      expected: [['OWNER'], [['r1', 26.71]], 'Costo corregido'],
+    });
+  });
+});
