@@ -503,6 +503,77 @@ export class InventoryReceivingService {
   }
 
   // --------------------------------------------------------------------------
+  // Correct a saved cost
+  // --------------------------------------------------------------------------
+
+  /**
+   * Fixes a receiving saved with the wrong unit cost: the receiving, its batch
+   * and the lot pieces split from it, what was already sold or lost from it
+   * (consumptions, sale lines and totals, loss values), and the supplier's
+   * current cost when this is its latest receiving of the product. Refused
+   * once units were transferred, opened into loose units or sold and
+   * returned: those carry the old cost into other batches.
+   */
+  async correctCost(receivingId: string, unitCost: number): Promise<void> {
+    if (typeof unitCost !== 'number' || !Number.isFinite(unitCost) || unitCost < 0) {
+      throw new BadRequestException('El costo debe ser un número igual o mayor que 0');
+    }
+    const cost = new Prisma.Decimal(unitCost);
+
+    await this.prisma.$transaction(async (tx) => {
+      const receiving = await tx.inventoryReceiving.findUnique({ where: { id: receivingId } });
+      if (!receiving) throw new NotFoundException(`Receiving ${receivingId} not found`);
+
+      const pieces = await tx.inventory.findMany({ where: { splitFromId: receiving.inventoryBatchId }, select: { id: true } });
+      const batchIds = [receiving.inventoryBatchId, ...pieces.map((p) => p.id)];
+      // Hold the batches so a sale can't take units at the old cost mid-correction.
+      await tx.$queryRaw`SELECT id FROM "Inventory" WHERE id IN (${Prisma.join(batchIds)}) FOR UPDATE`;
+
+      const consumptions = await tx.inventoryConsumption.findMany({
+        where: { inventoryId: { in: batchIds } },
+        include: { adjustment: { select: { type: true } }, saleItem: { select: { saleId: true, _count: { select: { returns: true } } } } },
+      });
+      const transferred = await tx.transferLine.count({ where: { sourceInventoryId: { in: batchIds } } });
+      if (transferred > 0 || consumptions.some((c) => c.adjustment?.type === 'BREAK_BULK_OUT' || (c.saleItem?._count.returns ?? 0) > 0)) {
+        throw new ConflictException(
+          'No se puede corregir el costo: parte de esta recepción ya se transfirió, se abrió en piezas o se devolvió. Pide la corrección a soporte.',
+        );
+      }
+
+      await tx.inventoryReceiving.update({ where: { id: receivingId }, data: { unitCost: cost, totalCost: cost.mul(receiving.quantity) } });
+      await tx.inventory.updateMany({ where: { id: { in: batchIds } }, data: { unitCost: cost } });
+
+      for (const c of consumptions) {
+        const totalCost = cost.mul(c.quantity);
+        const delta = totalCost.sub(c.totalCost);
+        await tx.inventoryConsumption.update({ where: { id: c.id }, data: { unitCost: cost, totalCost } });
+        if (c.saleItemId && c.saleItem) {
+          await tx.saleItem.update({ where: { id: c.saleItemId }, data: { cost: { increment: delta } } });
+          await tx.sale.update({ where: { id: c.saleItem.saleId }, data: { totalCost: { increment: delta }, grossProfit: { decrement: delta } } });
+        }
+        if (c.adjustmentId) {
+          const adjustment = await tx.inventoryAdjustment.update({ where: { id: c.adjustmentId }, data: { totalCost: { increment: delta } } });
+          await tx.inventoryAdjustment.update({
+            where: { id: c.adjustmentId },
+            data: { unitCost: adjustment.totalCost.div(Math.abs(adjustment.quantity) || 1) },
+          });
+        }
+      }
+
+      if (!receiving.supplierId) return;
+      const later = await tx.inventoryReceiving.count({
+        where: { productId: receiving.productId, supplierId: receiving.supplierId, receivedAt: { gt: receiving.receivedAt } },
+      });
+      if (later > 0) return;
+      const key = { supplierId: receiving.supplierId, productId: receiving.productId };
+      await tx.supplierProduct.updateMany({ where: key, data: { cost } });
+      await tx.supplierCostHistory.updateMany({ where: { ...key, isCurrent: true }, data: { isCurrent: false } });
+      await tx.supplierCostHistory.create({ data: { ...key, unitCost: cost, effectiveAt: new Date(), source: 'MANUAL', isCurrent: true } });
+    });
+    this.logger.log(`[RECEIVING] Cost of receiving ${receivingId} corrected to ${unitCost}`);
+  }
+
+  // --------------------------------------------------------------------------
   // Retry Square sync
   // --------------------------------------------------------------------------
 
