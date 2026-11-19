@@ -128,6 +128,20 @@ export function fuzzyMatchSql(tokens: string[], query: string, locationId?: stri
     LIMIT ${MAX_RESULTS}`;
 }
 
+/**
+ * A typed barcode ending (the digits printed under the bars, for a box that
+ * won't scan): products whose barcode ends with it. Ending only, so "0600"
+ * never hits the middle of 7503006001234.
+ * ponytail: sequential scan on gtin, fine at a few thousand products; index reverse(gtin) if Product grows large.
+ */
+export function barcodeEndSql(digits: string, locationId?: string): Prisma.Sql {
+  return Prisma.sql`
+    SELECT p.id FROM "Product" p
+    WHERE p.gtin LIKE ${`%${escapeLike(digits)}`} ${soldAtSql(locationId)}
+    ORDER BY ${availableFirstSql(locationId)}, p.name ASC
+    LIMIT ${MAX_RESULTS}`;
+}
+
 /** Runs a built query — `prisma.$queryRaw` in the service, PGlite in tests. */
 export type RunQuery = (sql: Prisma.Sql) => Promise<{ id: string }[]>;
 
@@ -144,7 +158,11 @@ export async function findSearchMatchIds(search: string, run: RunQuery, location
 
   let rows = await run(substringMatchSql(tokens, query, locationId));
   if (rows.length === 0) rows = await run(fuzzyMatchSql(tokens, query, locationId));
-  return rows.map((r) => r.id);
+  const ids = rows.map((r) => r.id);
+  // All digits, 4+: also the end of a barcode, listed first (it may still be a strength or a SKU).
+  if (!/^\d{4,}$/.test(query)) return ids;
+  const barcode = (await run(barcodeEndSql(query, locationId))).map((r) => r.id);
+  return [...new Set([...barcode, ...ids])].slice(0, MAX_RESULTS);
 }
 
 /** Restore the SQL relevance order after Prisma re-fetches the rows by id. */
