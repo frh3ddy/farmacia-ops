@@ -45,7 +45,7 @@ beforeAll(async () => {
   db = await PGlite.create({ extensions: { pg_trgm } });
   // Only the columns the search touches — the rest of the schema is irrelevant here.
   await db.exec(`CREATE TABLE "Product" (
-    id text PRIMARY KEY, name text NOT NULL, "squareProductName" text, sku text,
+    id text PRIMARY KEY, name text NOT NULL, "squareProductName" text, sku text, gtin text,
     "tracksInventory" boolean NOT NULL DEFAULT true, "soldOnlyAtLocationId" text
   )`);
   await db.exec(`CREATE TABLE "Inventory" (id serial PRIMARY KEY, "productId" text NOT NULL, "locationId" text NOT NULL, quantity int NOT NULL)`);
