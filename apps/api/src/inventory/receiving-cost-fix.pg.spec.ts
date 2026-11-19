@@ -171,6 +171,22 @@ describe('InventoryReceivingService.correctCost', () => {
     });
   });
 
+  test('the record of who changed it', async () => {
+    const r = await received(62.67);
+    await sell(r, 2);
+    await takeOut(r, 1, 'DAMAGE');
+    const { id: employeeId } = await prisma.employee.create({ data: { name: 'Dueño' } });
+    await service.correctCost(r.receivingId, 26.71, employeeId);
+    const logs = await prisma.auditLog.findMany({ where: { entityType: 'InventoryReceiving', entityId: r.receivingId } });
+
+    assert({
+      given: 'a cost corrected by the owner',
+      should: 'keep a record of the old and new cost, who changed it, and what it recosted',
+      actual: logs.map((l) => [l.action, l.employeeId, l.locationId, l.details]),
+      expected: [['CORRECT_RECEIVING_COST', employeeId, r.locationId, { oldUnitCost: '62.67', newUnitCost: '26.71', salesRecosted: 1, adjustmentsRecosted: 1 }]],
+    });
+  });
+
   test('a cost that is not a valid number', async () => {
     const r = await received(62.67);
     const errors = await Promise.all([-1, Number.NaN].map((c) => service.correctCost(r.receivingId, c).then(() => null, (e: Error) => e.message)));
