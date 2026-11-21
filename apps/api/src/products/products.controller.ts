@@ -19,6 +19,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import { pauseSuggestions } from '../stock-alerts/pause-suggestions';
+import { reviewsPauseSuggestionsAt } from '../stock-alerts/pause-suggestions.controller';
 import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts, PRODUCT_LIST_FILTERS, ProductListFilter } from './products.service';
 import { InventoryAgingService } from '../inventory-aging/inventory-aging.service';
 import { CatalogSearchService } from './catalog-search.service';
@@ -386,8 +387,7 @@ export class ProductsController {
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProductCounts(targetLocationId);
-    const role = req.accessibleLocations?.find((a) => a.locationId === targetLocationId && a.isActive)?.role ?? req.currentLocation?.role;
-    if (targetLocationId && (role === 'OWNER' || role === 'MANAGER')) {
+    if (targetLocationId && reviewsPauseSuggestionsAt(req, targetLocationId)) {
       // Alertas' pause-suggestions card; the list is theirs only.
       const { totalCount } = await pauseSuggestions(this.prisma, targetLocationId, { limit: 1 });
       return { ...result, data: { ...result.data, pauseSuggestions: totalCount } };

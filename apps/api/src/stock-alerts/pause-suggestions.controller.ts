@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ForbiddenException, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { PauseSuggestionKind } from '@prisma/client';
-import { AuthGuard, LocationGuard, Roles, GuardedRequest, assertActingAtOwnStore } from '../auth/guards/auth.guard';
+import { AuthGuard, LocationGuard, Roles, GuardedRequest } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { dismissPauseSuggestions, pauseSuggestions } from './pause-suggestions';
 
@@ -42,7 +42,18 @@ export class PauseSuggestionsController {
   private storeOf(locationId: string | undefined, req: GuardedRequest): string {
     const store = locationId || req.currentLocation?.locationId;
     if (!store) throw new BadRequestException('Falta la sucursal');
-    assertActingAtOwnStore(req, store);
+    if (!reviewsPauseSuggestionsAt(req, store)) {
+      throw new ForbiddenException({ success: false, message: 'Solo el dueño puede hacer esto en otras sucursales' });
+    }
     return store;
   }
+}
+
+/**
+ * Who may see and dismiss a store's pause suggestions (and its Alertas count):
+ * an owner anywhere, a manager at the session's store only, as pausing.
+ */
+export function reviewsPauseSuggestionsAt(req: Pick<GuardedRequest, 'currentLocation'>, locationId: string): boolean {
+  const here = req.currentLocation;
+  return here?.role === 'OWNER' || (here?.role === 'MANAGER' && here.locationId === locationId);
 }

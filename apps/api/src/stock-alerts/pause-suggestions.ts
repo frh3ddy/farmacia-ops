@@ -21,13 +21,16 @@ const KINDS: PauseSuggestionKind[] = ['NO_SALES_AT_ZERO', 'SLOW_WITH_STOCKOUTS',
  * docs/stock-alerts-design.md §3), from last night's ProductStockStats and the
  * store's thresholds, computed on request. Never applied by itself.
  *
- * - NO_SALES_AT_ZERO: at 0, last sale before the window and none since the stats ran.
- * - SLOW_WITH_STOCKOUTS: units ≤ slowMaxUnits and (days at 0 ≥ slowMinDaysAtZero or
- *   ≥ 2 stock-outs), unless it fits NO_SALES_AT_ZERO (same product, stronger
- *   evidence; checked on the rule, so dismissing that one doesn't bring this one back).
  * - EQUIVALENT_SELLING: at 0, and a product in its EquivalenceGroup that isn't
  *   paused, is in stock here and sold ≥ equivalentMinUnits since it ran out. Only
  *   manual groups: a shared medicationDefinitionId is never trusted on its own (§6.5).
+ * - NO_SALES_AT_ZERO: at 0, last sale before the window and none since the stats ran.
+ * - SLOW_WITH_STOCKOUTS: units ≤ slowMaxUnits and (days at 0 ≥ slowMinDaysAtZero or
+ *   ≥ 2 stock-outs).
+ *
+ * One row per product: the first kind above whose rule it fits. Checked on the
+ * rules, not on what's shown, so dismissing that kind hides the product rather
+ * than bringing it back under a weaker one.
  *
  * Only what the store's catalog rows list (tracked, not discontinued, sold
  * here), not paused, with stats. A dismissal hides its kind until the window has
@@ -77,10 +80,12 @@ export async function pauseSuggestions(prisma: PrismaClient, locationId: string,
        ORDER BY b.id, u.units DESC, e.id
     ),
     suggested AS (
-      SELECT b.*, 'NO_SALES_AT_ZERO' AS kind, 1 AS rank, NULL AS eq_id, NULL AS eq_name, NULL::int AS eq_units FROM base b WHERE b.no_sales
+      -- One kind per product, by rule (not by what's shown): equivalent selling, then no sales, then slow.
+      SELECT b.*, 'NO_SALES_AT_ZERO' AS kind, 1 AS rank, NULL AS eq_id, NULL AS eq_name, NULL::int AS eq_units FROM base b
+       WHERE b.no_sales AND b.id NOT IN (SELECT id FROM equivalent)
       UNION ALL
       SELECT b.*, 'SLOW_WITH_STOCKOUTS', 2, NULL, NULL, NULL FROM base b
-       WHERE NOT b.no_sales AND b.units <= ${settings?.slowMaxUnits ?? 2}
+       WHERE NOT b.no_sales AND b.id NOT IN (SELECT id FROM equivalent) AND b.units <= ${settings?.slowMaxUnits ?? 2}
          AND (b.days_at_zero >= ${settings?.slowMinDaysAtZero ?? 30} OR b.stock_outs >= 2)
       UNION ALL
       SELECT b.*, 'EQUIVALENT_SELLING', 0, q.eq_id, q.eq_name, q.eq_units FROM base b JOIN equivalent q ON q.id = b.id
