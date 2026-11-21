@@ -5,6 +5,7 @@ import { assert } from 'riteway/vitest';
 import { startPostgres } from '../testing/pglite';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryReceivingService } from './inventory-receiving.service';
+import { nextMovementCursor } from './movement-list';
 
 let prisma: PrismaService;
 let stop: () => Promise<void>;
@@ -259,5 +260,72 @@ describe('InventoryReceivingService.receiveInventory lot', () => {
       actual: [batch.expiryDate?.toISOString().slice(0, 10), batch.lotNumber],
       expected: ['2027-01-01', 'A12'],
     });
+  });
+});
+
+describe('InventoryReceivingService movement lists (Postgres)', () => {
+  async function storeWithReceivings(rows: Array<{ receivedBy: string | null; at: string }>) {
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Movimientos' } });
+    const { id: productId } = await prisma.product.create({ data: { name: `P-${Math.random()}` } });
+    for (const { receivedBy, at } of rows) {
+      const batch = await prisma.inventory.create({ data: { productId, locationId, quantity: 1, unitCost: 1, receivedAt: new Date(at) } });
+      await prisma.inventoryReceiving.create({
+        data: { locationId, productId, inventoryBatchId: batch.id, quantity: 1, unitCost: 1, totalCost: 1, receivedBy, receivedAt: new Date(at) },
+      });
+    }
+    return { locationId, productId };
+  }
+
+  test('who received each one', async () => {
+    const { id: employeeId } = await prisma.employee.create({ data: { name: 'Lupita' } });
+    const { locationId, productId } = await storeWithReceivings([
+      { receivedBy: employeeId, at: '2026-10-03T00:00:00Z' },
+      { receivedBy: 'SYSTEM', at: '2026-10-02T00:00:00Z' },
+      { receivedBy: null, at: '2026-10-01T00:00:00Z' },
+    ]);
+
+    const byLocation = await service.getReceivingsByLocation(locationId);
+    const byProduct = await service.getReceivingsByProduct(productId);
+
+    assert({
+      given: 'receivings by an employee, by the system and by no one',
+      should: "name the employee, and give no name when there's no employee",
+      actual: [byLocation.map((r) => r.receivedByName), byProduct.map((r) => r.receivedByName)],
+      expected: [['Lupita', null, null], ['Lupita', null, null]],
+    });
+  });
+
+  test('paging with a cursor', async () => {
+    const { locationId } = await storeWithReceivings([
+      { receivedBy: null, at: '2026-10-03T00:00:00Z' },
+      { receivedBy: null, at: '2026-10-02T00:00:00Z' },
+      { receivedBy: null, at: '2026-10-02T00:00:00Z' },
+      { receivedBy: null, at: '2026-10-01T00:00:00Z' },
+    ]);
+    const all = await service.getReceivingsByLocation(locationId);
+
+    const first = await service.getReceivingsByLocation(locationId, { limit: 2 });
+    const cursor = nextMovementCursor(first, 2, 'receivedAt');
+    const second = await service.getReceivingsByLocation(locationId, { limit: 2, cursor: cursor ?? undefined });
+    const end = nextMovementCursor(second.slice(0, 1), 2, 'receivedAt');
+
+    assert({
+      given: 'two receivings at the same time split across a page boundary',
+      should: 'list each once, newest first then by id, with no cursor after a short page',
+      actual: [[...first, ...second].map((r) => r.id), end],
+      expected: [all.map((r) => r.id), null],
+    });
+    assert({
+      given: 'receivings at the same time',
+      should: 'order them by id, highest first',
+      actual: all[1].id > all[2].id,
+      expected: true,
+    });
+  });
+
+  test('an unreadable cursor', async () => {
+    const { locationId } = await storeWithReceivings([]);
+    const error = await service.getReceivingsByLocation(locationId, { cursor: 'nope' }).catch((e) => e);
+    assert({ given: 'a cursor the server never made', should: 'refuse with 400', actual: error.status, expected: 400 });
   });
 });

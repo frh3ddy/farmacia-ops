@@ -7,6 +7,7 @@ import { assert } from 'riteway/vitest';
 import { startPostgres } from '../testing/pglite';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
+import { nextMovementCursor } from './movement-list';
 
 let prisma: PrismaService;
 let stop: () => Promise<void>;
@@ -674,5 +675,59 @@ describe('InventoryAdjustmentService.getAdjustmentsByLocation (Postgres)', () =>
       actual: counts,
       expected: [100, 100, 100, 500],
     });
+  });
+});
+
+describe('InventoryAdjustmentService movement lists (Postgres)', () => {
+  async function storeWithAdjustments(rows: Array<{ adjustedBy: string | null; at: string }>) {
+    const { id: storeId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Movimientos' } });
+    const { productId } = await productWithBatches([]);
+    for (const { adjustedBy, at } of rows) {
+      await prisma.inventoryAdjustment.create({
+        data: { locationId: storeId, productId, type: 'FOUND', quantity: 1, unitCost: 1, totalCost: 1, adjustedBy, adjustedAt: new Date(at) },
+      });
+    }
+    return { storeId, productId };
+  }
+
+  test('who made each one', async () => {
+    const { id: employeeId } = await prisma.employee.create({ data: { name: 'Lupita' } });
+    const { storeId, productId } = await storeWithAdjustments([
+      { adjustedBy: employeeId, at: '2026-10-03T00:00:00Z' },
+      { adjustedBy: 'SYSTEM', at: '2026-10-02T00:00:00Z' },
+      { adjustedBy: null, at: '2026-10-01T00:00:00Z' },
+    ]);
+
+    const byLocation = await service.getAdjustmentsByLocation(storeId);
+    const byProduct = await service.getAdjustmentsByProduct(productId, storeId);
+
+    assert({
+      given: 'adjustments by an employee, by the system and by no one',
+      should: "name the employee, and give no name when there's no employee",
+      actual: [byLocation.map((r) => r.adjustedByName), byProduct.map((r) => r.adjustedByName)],
+      expected: [['Lupita', null, null], ['Lupita', null, null]],
+    });
+  });
+
+  test('paging with a cursor', async () => {
+    const { storeId } = await storeWithAdjustments([
+      { adjustedBy: null, at: '2026-10-03T00:00:00Z' },
+      { adjustedBy: null, at: '2026-10-02T00:00:00Z' },
+      { adjustedBy: null, at: '2026-10-02T00:00:00Z' },
+      { adjustedBy: null, at: '2026-10-01T00:00:00Z' },
+    ]);
+    const all = await service.getAdjustmentsByLocation(storeId);
+
+    const first = await service.getAdjustmentsByLocation(storeId, { limit: 2 });
+    const cursor = nextMovementCursor(first, 2, 'adjustedAt');
+    const second = await service.getAdjustmentsByLocation(storeId, { limit: 2, cursor: cursor ?? undefined });
+
+    assert({
+      given: 'two adjustments at the same time split across a page boundary',
+      should: 'list each once, newest first then by id',
+      actual: [...first, ...second].map((r) => r.id),
+      expected: all.map((r) => r.id),
+    });
+    assert({ given: 'adjustments at the same time', should: 'order them by id, highest first', actual: all[1].id > all[2].id, expected: true });
   });
 });
