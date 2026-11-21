@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { listLimit } from './list-limit';
+import { afterCursor, employeeNames, parseMovementCursor } from './movement-list';
 import { Prisma } from '@prisma/client';
 import { SquareClient } from 'square';
 import { createSquareClient } from '../square/square-client';
@@ -413,10 +414,13 @@ export class InventoryReceivingService {
     supplierId?: string;
     productId?: string;
     limit?: number;
+    cursor?: string;
   }) {
-    return this.prisma.inventoryReceiving.findMany({
+    const cursor = parseMovementCursor(options?.cursor);
+    const rows = await this.prisma.inventoryReceiving.findMany({
       where: {
         locationId,
+        ...afterCursor(cursor, 'receivedAt'),
         ...((options?.startDate || options?.endDate) && {
           receivedAt: {
             ...(options?.startDate && { gte: options.startDate }),
@@ -430,13 +434,19 @@ export class InventoryReceivingService {
         product: { select: { id: true, name: true, sku: true } },
         supplier: { select: { id: true, name: true } },
       },
-      orderBy: { receivedAt: 'desc' },
+      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
       take: listLimit(options?.limit),
     });
+    return this.withNames(rows);
+  }
+
+  private async withNames<T extends { receivedBy: string | null }>(rows: T[]) {
+    const nameOf = await employeeNames(this.prisma, rows.map((r) => r.receivedBy));
+    return rows.map((r) => ({ ...r, receivedByName: nameOf(r.receivedBy) }));
   }
 
   async getReceivingsByProduct(productId: string, locationId?: string) {
-    return this.prisma.inventoryReceiving.findMany({
+    const rows = await this.prisma.inventoryReceiving.findMany({
       where: {
         productId,
         ...(locationId && { locationId }),
@@ -445,9 +455,10 @@ export class InventoryReceivingService {
         location: { select: { id: true, name: true } },
         supplier: { select: { id: true, name: true } },
       },
-      orderBy: { receivedAt: 'desc' },
+      orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
       take: listLimit(undefined),
     });
+    return this.withNames(rows);
   }
 
   async getReceivingSummary(locationId: string, startDate?: Date, endDate?: Date) {

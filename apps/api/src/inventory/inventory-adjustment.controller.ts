@@ -1,3 +1,5 @@
+import { nextMovementCursor } from './movement-list';
+import { listLimit } from './list-limit';
 import {
   Controller,
   Post,
@@ -243,17 +245,20 @@ export class InventoryAdjustmentController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('type') type?: AdjustmentType,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string
   ) {
     const adjustments = await this.adjustmentService.getAdjustmentsByLocation(locationId, {
       startDate: parseDateParam(startDate, 'startDate', 'start'),
       endDate: parseDateParam(endDate, 'endDate', 'end'),
       type,
       limit: limit ? parseInt(limit, 10) : undefined,
+      cursor,
     });
     return {
       success: true,
       count: adjustments.length,
+      nextCursor: nextMovementCursor(adjustments, listLimit(limit ? parseInt(limit, 10) : undefined), 'adjustedAt'),
       data: adjustments.map(a => ({
         ...a,
         unitCost: a.unitCost.toString(),

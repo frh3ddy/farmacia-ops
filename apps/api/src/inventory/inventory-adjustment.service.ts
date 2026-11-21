@@ -8,6 +8,7 @@ import { findSquareVariationId, sendInventoryChanges } from './square-sync';
 import { assertCutOver } from './cutover-gate';
 import { assertSoldAtLocation } from './sold-at-location';
 import { listLimit } from './list-limit';
+import { afterCursor, employeeNames, parseMovementCursor } from './movement-list';
 
 // ============================================================================
 // Types
@@ -732,7 +733,7 @@ export class InventoryAdjustmentService {
   }
 
   async getAdjustmentsByProduct(productId: string, locationId?: string) {
-    return this.prisma.inventoryAdjustment.findMany({
+    const rows = await this.prisma.inventoryAdjustment.findMany({
       where: {
         productId,
         ...(locationId && { locationId }),
@@ -743,9 +744,10 @@ export class InventoryAdjustmentService {
           select: { inventoryId: true, quantity: true, unitCost: true },
         },
       },
-      orderBy: { adjustedAt: 'desc' },
+      orderBy: [{ adjustedAt: 'desc' }, { id: 'desc' }],
       take: listLimit(undefined),
     });
+    return this.withNames(rows);
   }
 
   async getAdjustmentsByLocation(locationId: string, options?: {
@@ -753,10 +755,13 @@ export class InventoryAdjustmentService {
     endDate?: Date;
     type?: AdjustmentType;
     limit?: number;
+    cursor?: string;
   }) {
-    return this.prisma.inventoryAdjustment.findMany({
+    const cursor = parseMovementCursor(options?.cursor);
+    const rows = await this.prisma.inventoryAdjustment.findMany({
       where: {
         locationId,
+        ...afterCursor(cursor, 'adjustedAt'),
         ...((options?.startDate || options?.endDate) && {
           adjustedAt: {
             ...(options?.startDate && { gte: options.startDate }),
@@ -771,8 +776,14 @@ export class InventoryAdjustmentService {
           select: { quantity: true, unitCost: true },
         },
       },
-      orderBy: { adjustedAt: 'desc' },
+      orderBy: [{ adjustedAt: 'desc' }, { id: 'desc' }],
       take: listLimit(options?.limit),
     });
+    return this.withNames(rows);
+  }
+
+  private async withNames<T extends { adjustedBy: string | null }>(rows: T[]) {
+    const nameOf = await employeeNames(this.prisma, rows.map((r) => r.adjustedBy));
+    return rows.map((r) => ({ ...r, adjustedByName: nameOf(r.adjustedBy) }));
   }
 }
