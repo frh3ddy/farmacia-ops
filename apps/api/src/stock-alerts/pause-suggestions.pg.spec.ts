@@ -195,6 +195,42 @@ describe('pauseSuggestions EQUIVALENT_SELLING', () => {
   });
 });
 
+describe('pauseSuggestions one row per product', () => {
+  /** A product at 0 since 20 days ago, with `stats`, whose group-mate is in stock and sold 9 since. */
+  async function losingSalesToEquivalent(stats: Stats) {
+    const s = await store();
+    const groupId = await group();
+    const productId = await s.product('AtZero', { qty: 0, groupId, stats: { zeroSince: daysBefore(20), ...stats } });
+    await s.sell(await s.product('Equivalent', { qty: 5, groupId }), 9, daysBefore(3));
+    return { s, productId };
+  }
+  const noSalesInWindow: Stats = { lastSoldAt: daysBefore(120), daysAtZero: 20, stockOuts: 1 };
+  const slowLongAtZero: Stats = { unitsSold: 1, lastSoldAt: daysBefore(30), daysAtZero: 40, stockOuts: 1 };
+
+  test('no sales and an equivalent selling', async () => {
+    const { s } = await losingSalesToEquivalent(noSalesInWindow);
+    assert({ given: 'a product that fits no sales and equivalent selling', should: 'suggest it once, as equivalent selling', actual: await s.kinds(), expected: [['AtZero', 'EQUIVALENT_SELLING']] });
+  });
+
+  test('slow and an equivalent selling', async () => {
+    const { s } = await losingSalesToEquivalent(slowLongAtZero);
+    assert({ given: 'a product that fits slow seller and equivalent selling', should: 'suggest it once, as equivalent selling', actual: await s.kinds(), expected: [['AtZero', 'EQUIVALENT_SELLING']] });
+  });
+
+  test('its equivalent-selling suggestion dismissed', async () => {
+    const cases = [await losingSalesToEquivalent(noSalesInWindow), await losingSalesToEquivalent(slowLongAtZero)];
+    for (const { s, productId } of cases) {
+      await dismissPauseSuggestions(prisma, { locationId: s.locationId, items: [{ productId, kind: 'EQUIVALENT_SELLING' }], now: daysBefore(1) });
+    }
+    assert({
+      given: 'that suggestion dismissed, for one that also has no sales and one that is also slow',
+      should: 'not suggest either under another kind',
+      actual: [await cases[0].s.kinds(), await cases[1].s.kinds()],
+      expected: [[], []],
+    });
+  });
+});
+
 describe('pauseSuggestions exclusions', () => {
   test('products that are never suggested', async () => {
     const s = await store();

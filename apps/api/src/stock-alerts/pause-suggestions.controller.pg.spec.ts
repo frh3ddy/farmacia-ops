@@ -105,4 +105,18 @@ describe('ProductsController.getProductCounts pause suggestions', () => {
       expected: [2, 2, undefined, undefined],
     });
   });
+
+  test('a manager at another store', async () => {
+    const { locationId } = await storeWithSuggestions();
+    const controller = new ProductsController(new ProductsService(prisma), prisma, {} as any, {} as any, {} as any);
+    const centro = { locationId: 'centro', role: 'MANAGER', isActive: true };
+    const norte = { locationId, role: 'MANAGER', isActive: true };
+    const counts = (await controller.getProductCounts(locationId, { currentLocation: centro, accessibleLocations: [centro, norte] } as any)).data;
+    assert({
+      given: "a manager now at Centro, also a manager at Norte, reading Norte's counts",
+      should: "leave out the suggestion count, as the list refuses them there",
+      actual: 'pauseSuggestions' in counts,
+      expected: false,
+    });
+  });
 });
