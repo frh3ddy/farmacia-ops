@@ -19,7 +19,7 @@ export function parseMovementCursor(cursor: string | undefined): MovementCursor 
 /** The cursor for the page after `rows`, or null when it was the last (fewer rows than the limit). */
 export function nextMovementCursor<K extends string>(rows: Array<{ id: string } & Record<K, Date>>, limit: number, atKey: K): string | null {
   const last = rows[limit - 1];
-  return rows.length >= limit && last ? Buffer.from(`${last[atKey].getTime()}_${last.id}`).toString('base64url') : null;
+  return last ? Buffer.from(`${last[atKey].getTime()}_${last.id}`).toString('base64url') : null;
 }
 
 /** Rows after the cursor, in (time desc, id desc) order. */
