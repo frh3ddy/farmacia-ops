@@ -2,7 +2,7 @@ import { BadRequestException, Body, ForbiddenException, Controller, Get, Post, Q
 import type { PauseSuggestionKind } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, GuardedRequest } from '../auth/guards/auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
-import { dismissPauseSuggestions, pauseSuggestions } from './pause-suggestions';
+import { dismissPauseSuggestions, pauseSuggestions, reviewsPauseSuggestionsAt } from './pause-suggestions';
 
 /** Pause suggestions (stock alerts O7): owners and managers, at their own store. Pausing one is POST /products/pause. */
 @Controller('inventory/pause-suggestions')
@@ -47,13 +47,4 @@ export class PauseSuggestionsController {
     }
     return store;
   }
-}
-
-/**
- * Who may see and dismiss a store's pause suggestions (and its Alertas count):
- * an owner anywhere, a manager at the session's store only, as pausing.
- */
-export function reviewsPauseSuggestionsAt(req: Pick<GuardedRequest, 'currentLocation'>, locationId: string): boolean {
-  const here = req.currentLocation;
-  return here?.role === 'OWNER' || (here?.role === 'MANAGER' && here.locationId === locationId);
 }

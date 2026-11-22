@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { PauseSuggestionKind, PrismaClient } from '@prisma/client';
+import type { GuardedRequest } from '../auth/guards/auth.guard';
 import { catalogRowsSql } from '../products/products.service';
 import { salesLines } from '../sales-history/sales-history';
 
@@ -145,4 +146,13 @@ export async function dismissPauseSuggestions(
       }),
     ),
   );
+}
+
+/**
+ * Who may see and dismiss a store's pause suggestions (and its Alertas count):
+ * an owner anywhere, a manager at the session's store only, as pausing.
+ */
+export function reviewsPauseSuggestionsAt(req: Pick<GuardedRequest, 'currentLocation'>, locationId: string): boolean {
+  const here = req.currentLocation;
+  return here?.role === 'OWNER' || (here?.role === 'MANAGER' && here.locationId === locationId);
 }

@@ -18,8 +18,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
-import { pauseSuggestions } from '../stock-alerts/pause-suggestions';
-import { reviewsPauseSuggestionsAt } from '../stock-alerts/pause-suggestions.controller';
+import { pauseSuggestions, reviewsPauseSuggestionsAt } from '../stock-alerts/pause-suggestions';
 import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts, PRODUCT_LIST_FILTERS, ProductListFilter } from './products.service';
 import { InventoryAgingService } from '../inventory-aging/inventory-aging.service';
 import { CatalogSearchService } from './catalog-search.service';
