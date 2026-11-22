@@ -285,6 +285,23 @@ describe('pauseProducts()', () => {
     });
   });
 
+  test('notes', async () => {
+    const [a, b, c, d] = [await product(), await product(), await product(), await product()];
+    const bulk = (productIds: string[], note?: unknown) =>
+      pauseProducts(prisma, { productIds, locationId: centro, reason: 'SLOW_MOVER', note: note as string, employeeId: manager });
+    await bulk([a, b], '  Limpieza 2026-11-21  ');
+    await bulk([c]);
+    const refused = [await refusal(bulk([d], 'x'.repeat(501))), await refusal(bulk([d], 42))];
+    const notes = async (ids: string[]) => (await prisma.productStoreStatus.findMany({ where: { productId: { in: ids } } })).map((r) => r.pauseNote);
+
+    assert({
+      given: 'two products paused with a note, one without, and one with a note over 500 characters or not text',
+      should: 'store the trimmed note on both, none on the one without, and refuse the last with 400 without pausing it',
+      actual: [await notes([a, b]), await notes([c]), refused, await notes([d])],
+      expected: [['Limpieza 2026-11-21', 'Limpieza 2026-11-21'], [null], [400, 400], []],
+    });
+  });
+
   test('bad lists', async () => {
     const bulk = (productIds: unknown) => refusal(pauseProducts(prisma, { productIds: productIds as string[], locationId: centro, reason: 'OTHER', employeeId: manager }));
 
