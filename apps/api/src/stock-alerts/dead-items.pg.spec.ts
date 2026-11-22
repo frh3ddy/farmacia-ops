@@ -102,6 +102,18 @@ describe('pauseDeadItems', () => {
     });
   });
 
+  test('its time limit', async () => {
+    const s = await store();
+    for (let i = 0; i < 3; i++) await s.product(`Dead${i}`);
+    const tooShort = await pauseDeadItems(prisma, s.locationId, { now: NOW, timeout: 1 }).then(() => 'paused', () => 'refused');
+    assert({
+      given: 'a cleanup given a 1 ms time limit per transaction',
+      should: 'hold each pause to it: refused, nothing paused',
+      actual: [tooShort, await prisma.productStoreStatus.count({ where: { locationId: s.locationId } })],
+      expected: ['refused', 0],
+    });
+  });
+
   test("the note's day", async () => {
     const s = await store();
     const dead = await s.product('Dead', { lastSoldAt: daysBefore(800) });
