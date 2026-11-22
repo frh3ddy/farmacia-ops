@@ -69,6 +69,24 @@ describe('deadItems', () => {
   });
 });
 
+describe('deadItems with an equivalent selling', () => {
+  test('suggested as equivalent selling', async () => {
+    const s = await store();
+    const dead = await s.product('DeadWithEquivalent', { lastSoldAt: daysBefore(800) });
+    const equivalent = await s.product('Equivalent', { qty: 5, lastSoldAt: daysBefore(1) });
+    const { id: groupId } = await prisma.equivalenceGroup.create({ data: {} });
+    await prisma.product.updateMany({ where: { id: { in: [dead, equivalent] } }, data: { equivalenceGroupId: groupId } });
+    const sale = await prisma.sale.create({ data: { squareId: `PAY-${Math.random()}`, locationId: s.locationId, totalRevenue: 9, totalCost: 0, grossProfit: 9, createdAt: daysBefore(3) } });
+    await prisma.saleItem.create({ data: { saleId: sale.id, productId: equivalent, quantity: 9, price: 1, cost: 0 } });
+    assert({
+      given: 'a product at 0 not sold in over 2 years whose equivalent sells here',
+      should: 'leave it to its equivalent-selling suggestion (only no-sales suggestions are cleaned up)',
+      actual: await s.names(),
+      expected: [],
+    });
+  });
+});
+
 describe('pauseDeadItems', () => {
   test('pausing them', async () => {
     const s = await store();
