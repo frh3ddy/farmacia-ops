@@ -176,4 +176,25 @@ describe('recordStockStats()', () => {
       expected: [true, false],
     });
   });
+
+  test('lots that expire re-send their product', async () => {
+    const stamp = async (id: string) => (await prisma.$queryRaw<Array<{ x: string }>>`SELECT "changeXid"::text AS x FROM "Product" WHERE id = ${id}`)[0].x;
+    const withLot = async (name: string, expiryDate: string) => {
+      const { id } = await prisma.product.create({ data: { name } });
+      await prisma.inventory.create({ data: { productId: id, locationId: centro, quantity: 3, unitCost: 1, receivedAt: new Date('2026-10-01'), expiryDate: new Date(`${expiryDate}T00:00:00Z`) } });
+      return id;
+    };
+    const expiresToday = await withLot('VenceHoy', '2026-11-15');
+    const expiresLater = await withLot('VenceDespues', '2026-12-31');
+    await recordStockStats(prisma, new Date('2026-11-14T09:00:00Z'));
+    const before = [await stamp(expiresToday), await stamp(expiresLater)];
+    await recordStockStats(prisma, new Date('2026-11-15T09:00:00Z'));
+
+    assert({
+      given: 'a lot whose expiry day starts, and one that expires later',
+      should: 're-send only the first product, whose sellable stock just dropped',
+      actual: [(await stamp(expiresToday)) === before[0], (await stamp(expiresLater)) === before[1]],
+      expected: [false, true],
+    });
+  });
 });
