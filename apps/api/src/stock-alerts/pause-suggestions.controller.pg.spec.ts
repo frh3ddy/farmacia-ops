@@ -93,30 +93,16 @@ describe('PauseSuggestionsController', () => {
   });
 });
 
-describe('ProductsController.getProductCounts pause suggestions', () => {
-  test('by role', async () => {
+describe('ProductsController.getProductCounts', () => {
+  test('pause suggestions', async () => {
     const { locationId, as } = await storeWithSuggestions();
     const controller = new ProductsController(new ProductsService(prisma), prisma, {} as any, {} as any, {} as any);
-    const countFor = async (role: string) => ((await controller.getProductCounts(locationId, as(role))).data as any).pauseSuggestions;
+    const hasCount = async (role: string) => 'pauseSuggestions' in (await controller.getProductCounts(locationId, as(role))).data;
     assert({
-      given: 'two suggestions, counted for each role',
-      should: 'give the count to owners and managers only',
-      actual: [await countFor('OWNER'), await countFor('MANAGER'), await countFor('CASHIER'), await countFor('ACCOUNTANT')],
-      expected: [2, 2, undefined, undefined],
-    });
-  });
-
-  test('a manager at another store', async () => {
-    const { locationId } = await storeWithSuggestions();
-    const controller = new ProductsController(new ProductsService(prisma), prisma, {} as any, {} as any, {} as any);
-    const centro = { locationId: 'centro', role: 'MANAGER', isActive: true };
-    const norte = { locationId, role: 'MANAGER', isActive: true };
-    const counts = (await controller.getProductCounts(locationId, { currentLocation: centro, accessibleLocations: [centro, norte] } as any)).data;
-    assert({
-      given: "a manager now at Centro, also a manager at Norte, reading Norte's counts",
-      should: "leave out the suggestion count, as the list refuses them there",
-      actual: 'pauseSuggestions' in counts,
-      expected: false,
+      given: 'a store with suggestions, counted for each role',
+      should: 'leave them out: Alertas reads totalCount from the suggestion list, so counts stay as cheap as before',
+      actual: [await hasCount('OWNER'), await hasCount('MANAGER'), await hasCount('CASHIER')],
+      expected: [false, false, false],
     });
   });
 });
