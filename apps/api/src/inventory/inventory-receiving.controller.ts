@@ -12,6 +12,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InventoryReceivingService } from './inventory-receiving.service';
+import { nextMovementCursor } from './movement-list';
+import { listLimit } from './list-limit';
 import { parseBusinessDate, parseDateParam } from './business-date';
 import { ProductsService } from '../products/products.service';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
@@ -216,7 +218,8 @@ export class InventoryReceivingController {
     @Query('endDate') endDate?: string,
     @Query('supplierId') supplierId?: string,
     @Query('productId') productId?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string
   ) {
     const receivings = await this.receivingService.getReceivingsByLocation(locationId, {
       startDate: parseDateParam(startDate, 'startDate', 'start'),
@@ -224,10 +227,12 @@ export class InventoryReceivingController {
       supplierId,
       productId,
       limit: limit ? parseInt(limit, 10) : undefined,
+      cursor,
     });
     return {
       success: true,
       count: receivings.length,
+      nextCursor: nextMovementCursor(receivings, listLimit(limit ? parseInt(limit, 10) : undefined), 'receivedAt'),
       data: receivings.map(r => ({
         ...r,
         unitCost: r.unitCost.toString(),

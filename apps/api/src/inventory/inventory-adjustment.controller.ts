@@ -11,6 +11,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
+import { nextMovementCursor } from './movement-list';
+import { listLimit } from './list-limit';
 import { AdjustmentType } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 import { USER_ADJUSTMENT_TYPES } from './adjustment-types';
@@ -243,17 +245,20 @@ export class InventoryAdjustmentController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('type') type?: AdjustmentType,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string
   ) {
     const adjustments = await this.adjustmentService.getAdjustmentsByLocation(locationId, {
       startDate: parseDateParam(startDate, 'startDate', 'start'),
       endDate: parseDateParam(endDate, 'endDate', 'end'),
       type,
       limit: limit ? parseInt(limit, 10) : undefined,
+      cursor,
     });
     return {
       success: true,
       count: adjustments.length,
+      nextCursor: nextMovementCursor(adjustments, listLimit(limit ? parseInt(limit, 10) : undefined), 'adjustedAt'),
       data: adjustments.map(a => ({
         ...a,
         unitCost: a.unitCost.toString(),

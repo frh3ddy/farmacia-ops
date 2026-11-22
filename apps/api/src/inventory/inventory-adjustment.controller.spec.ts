@@ -192,3 +192,22 @@ describe('InventoryAdjustmentController Square sync messages', () => {
     });
   });
 });
+
+describe('InventoryAdjustmentController.getAdjustmentsByLocation paging', () => {
+  const row = (id: string, at: string) => ({ id, adjustedAt: new Date(at), unitCost: 1, totalCost: 1, consumptions: [] });
+
+  test('a full page and a short one', async () => {
+    const service = { getAdjustmentsByLocation: vi.fn().mockResolvedValueOnce([row('b', '2026-10-02T00:00:00Z'), row('a', '2026-10-01T00:00:00Z')]).mockResolvedValueOnce([row('z', '2026-09-01T00:00:00Z')]) };
+    const controller = new InventoryAdjustmentController(service as any);
+
+    const full = await controller.getAdjustmentsByLocation('centro', undefined, undefined, undefined, '2');
+    const short = await controller.getAdjustmentsByLocation('centro', undefined, undefined, undefined, '2', full.nextCursor ?? undefined);
+
+    assert({
+      given: 'a page as long as the limit, then a shorter one',
+      should: 'give a cursor that asks for what comes after the last row, then none',
+      actual: [service.getAdjustmentsByLocation.mock.calls[1][1].cursor, typeof full.nextCursor, short.nextCursor],
+      expected: [full.nextCursor, 'string', null],
+    });
+  });
+});

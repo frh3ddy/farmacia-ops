@@ -1,6 +1,6 @@
 # Stock Alerts Epic
 
-**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 and O6 are in production (2026-11-13). O7–O9 are deferred for later (2026-11-13); their requirements are below.
+**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 and O6 are in production (2026-11-13). O7 is built (2026-11-21, branch feature/ios-inventory-backend, not deployed); O8–O9 are deferred; their requirements are below.
 **Goal**: alert only on regular sellers that ran out or are running low, ranked by lost sales; let a product be paused per store; suggest pauses from history for a person to review
 
 ## Overview
@@ -107,7 +107,12 @@ Products a store could pause, found from the nightly stats (O3) and shown for a 
   - Given a product that's paused, doesn't track inventory (Yastás), is discontinued, or is sold only at another store, should never suggest it.
   - Given a dismissed suggestion, should hide it until the window has passed since the dismissal or its evidence changes (for example, it sold again).
   - Given suggestions to act on, the phone pauses them through O5's `POST /products/pause`, so pausing needs no new route.
-- Open question: compute suggestions on request from `ProductStockStats` (cheapest, always current), or save them in the nightly job? Start with on request.
+- Built 2026-11-21 (`pause-suggestions.ts`), computed on request. Decisions (Fredy and review, 2026-11-21):
+  - `EQUIVALENT_SELLING` is in O7 already, from manual `EquivalenceGroup`s only (today the ones a `REPLACED_BY_EQUIVALENT` pause made); a shared `medicationDefinitionId` is not used.
+  - One row per product: `EQUIVALENT_SELLING`, else `NO_SALES_AT_ZERO`, else `SLOW_WITH_STOCKOUTS`, checked on the rules, so dismissing the kind shown hides the product instead of bringing it back under a weaker one.
+  - A dismissal ends when the window has passed since it, or on a sale since (not for `EQUIVALENT_SELLING`), or a receiving / received transfer recorded since. Dismissing again restarts it.
+  - Paged like `GET /products` (50 a page) plus `windowDays` for the phone's reason text; Alertas' count is the list's `totalCount` (`?limit=1`); `/products/counts` doesn't run the suggestion query (Fredy, 2026-11-21).
+  - Pausing needs nothing extra: paused products are excluded and nothing is stored.
 
 ### O8. Equivalents
 

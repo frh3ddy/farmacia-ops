@@ -189,7 +189,7 @@ export type ProductListFilter = (typeof PRODUCT_LIST_FILTERS)[number];
  * corrected for stock that moved since: none once restocked, and today for one
  * that was in stock last night (unknown when the stats aren't from today).
  */
-function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql {
+export function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql {
   const today = parseBusinessDate(businessDay(now), 'start');
   return Prisma.sql`
     WITH inv AS (

@@ -166,3 +166,22 @@ describe('InventoryReceivingController.correctCost', () => {
     });
   });
 });
+
+describe('InventoryReceivingController.getReceivingsByLocation paging', () => {
+  const row = (id: string, at: string) => ({ id, receivedAt: new Date(at), unitCost: 1, totalCost: 1 });
+
+  test('a full page and a short one', async () => {
+    const service = { getReceivingsByLocation: vi.fn().mockResolvedValueOnce([row('b', '2026-10-02T00:00:00Z'), row('a', '2026-10-01T00:00:00Z')]).mockResolvedValueOnce([row('z', '2026-09-01T00:00:00Z')]) };
+    const controller = new InventoryReceivingController(service as any, {} as any);
+
+    const full = await controller.getReceivingsByLocation('centro', undefined, undefined, undefined, undefined, '2');
+    const short = await controller.getReceivingsByLocation('centro', undefined, undefined, undefined, undefined, '2', full.nextCursor ?? undefined);
+
+    assert({
+      given: 'a page as long as the limit, then a shorter one',
+      should: 'give a cursor that asks for what comes after the last row, then none',
+      actual: [service.getReceivingsByLocation.mock.calls[1][1].cursor, typeof full.nextCursor, short.nextCursor],
+      expected: [full.nextCursor, 'string', null],
+    });
+  });
+});
