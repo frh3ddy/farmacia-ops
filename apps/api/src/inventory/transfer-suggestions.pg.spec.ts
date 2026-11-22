@@ -89,6 +89,31 @@ describe('transferSuggestions', () => {
     });
   });
 
+  test('the origin keeps its typical stock', async () => {
+    const { origin, dests: [dest], product, suggest } = await stores();
+    // Origin: 0.1 a day (cover 2) but typically holds 10. Destination needs 14.
+    await product('AtTypical', { [origin]: { lots: [[10, null]], sold: 9, typical: 10 }, [dest]: { sold: 90, typical: 5 } });
+    await product('AboveTypical', { [origin]: { lots: [[15, null]], sold: 9, typical: 10 }, [dest]: { sold: 90, typical: 5 } });
+    const { suggestions } = await suggest();
+
+    assert({
+      given: 'a slow origin at its typical stock, and one 5 above it',
+      should: 'spare nothing from the first and only the 5 above typical from the second',
+      actual: suggestions.map((s) => [s.product.name, s.suggested, s.originAfter]),
+      expected: [['AboveTypical', 5, 10]],
+    });
+
+    // After the move: the origin at its typical 10, the destination well stocked (40, keeps 14).
+    const afterMove = await product('AfterMove', { [origin]: { lots: [[10, null]], sold: 9, typical: 10 }, [dest]: { lots: [[40, null]], sold: 90, typical: 5 } });
+    const { suggestions: back } = await transferSuggestions(prisma, { fromLocationId: dest, productIds: [afterMove], now: NOW });
+    assert({
+      given: 'the destination with stock to spare, and the origin left at its typical stock',
+      should: 'not suggest sending it back',
+      actual: back.filter((s) => s.toLocationId === origin).length,
+      expected: 0,
+    });
+  });
+
   test('nothing to send', async () => {
     const { origin, dests: [dest], product, suggest } = await stores();
     await product('Justo', { [origin]: { lots: [[14, null]], sold: 90 }, [dest]: { sold: 90, typical: 5 } });
