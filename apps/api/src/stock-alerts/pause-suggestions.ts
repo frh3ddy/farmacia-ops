@@ -26,8 +26,8 @@ const KINDS: PauseSuggestionKind[] = ['NO_SALES_AT_ZERO', 'SLOW_WITH_STOCKOUTS',
  *   paused, is in stock here and sold ≥ equivalentMinUnits since it ran out. Only
  *   manual groups: a shared medicationDefinitionId is never trusted on its own (§6.5).
  * - NO_SALES_AT_ZERO: at 0, no sale in noSalesMinDays (180) and none since the stats ran.
- * - SLOW_WITH_STOCKOUTS: units ≤ slowMaxUnits and (days at 0 ≥ slowMinDaysAtZero or
- *   ≥ 2 stock-outs).
+ * - SLOW_WITH_STOCKOUTS: 1 to slowMaxUnits units and (days at 0 ≥ slowMinDaysAtZero or
+ *   ≥ 2 stock-outs). None in the window isn't slow: it waits for NO_SALES_AT_ZERO (Fredy, 2026-11-21).
  *
  * One row per product: the first kind above whose rule it fits. Checked on the
  * rules, not on what's shown, so dismissing that kind hides the product rather
@@ -87,7 +87,7 @@ export async function pauseSuggestions(prisma: PrismaClient, locationId: string,
        WHERE b.no_sales AND b.id NOT IN (SELECT id FROM equivalent)
       UNION ALL
       SELECT b.*, 'SLOW_WITH_STOCKOUTS', 2, NULL, NULL, NULL FROM base b
-       WHERE NOT b.no_sales AND b.id NOT IN (SELECT id FROM equivalent) AND b.units <= ${settings?.slowMaxUnits ?? 2}
+       WHERE NOT b.no_sales AND b.id NOT IN (SELECT id FROM equivalent) AND b.units > 0 AND b.units <= ${settings?.slowMaxUnits ?? 2}
          AND (b.days_at_zero >= ${settings?.slowMinDaysAtZero ?? 30} OR b.stock_outs >= 2)
       UNION ALL
       SELECT b.*, 'EQUIVALENT_SELLING', 0, q.eq_id, q.eq_name, q.eq_units FROM base b JOIN equivalent q ON q.id = b.id
