@@ -141,6 +141,7 @@ export async function transferSuggestions(
       if (spare <= 0) break;
       const wanted = Math.min(need, spare);
       const suggested = expiresSoon ? Math.min(wanted, Math.floor(rate * daysToExpiry!)) : wanted;
+      if (suggested <= 0) continue; // sells none of the first lot before it expires
       spare -= suggested;
       originAfter -= suggested;
       suggestions.push({
