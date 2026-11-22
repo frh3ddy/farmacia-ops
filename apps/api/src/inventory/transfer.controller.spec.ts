@@ -204,3 +204,21 @@ describe('TransferController.getStock', () => {
     });
   });
 });
+
+describe('TransferController.suggestions', () => {
+  test('who may see a store\'s transfer suggestions', async () => {
+    const transferService = { suggestions: vi.fn().mockResolvedValue({ suggestions: [], skipped: [] }) };
+    const controller = new TransferController(transferService as any);
+
+    assert({
+      given: 'a manager asking for another store\'s suggestions, and for their own',
+      should: 'refuse the other store and answer for their own',
+      actual: [
+        await outcome(controller.suggestions('norte', undefined, undefined, managerRequest())),
+        await outcome(controller.suggestions('centro', undefined, 'p1,p2', managerRequest())),
+        transferService.suggestions.mock.calls,
+      ],
+      expected: ['No tienes acceso a esta sucursal', 'done', [[{ fromLocationId: 'centro', toLocationId: undefined, productIds: ['p1', 'p2'] }]]],
+    });
+  });
+});
