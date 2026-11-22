@@ -57,6 +57,7 @@ export async function updateStockAlertSettings(prisma: PrismaClient, locationId:
   if (patch?.receivingLocationId !== undefined) {
     const to = patch.receivingLocationId;
     if (to !== null) {
+      if (typeof to !== 'string' || !to) throw new BadRequestException('Sucursal no válida');
       if (to === locationId) throw new BadRequestException('Una sucursal no puede recibir por sí misma');
       const target = await prisma.location.findUnique({ where: { id: to }, select: { isActive: true, stockAlertSettings: { select: { receivingLocationId: true } } } });
       if (!target?.isActive) throw new BadRequestException('Sucursal no encontrada');
