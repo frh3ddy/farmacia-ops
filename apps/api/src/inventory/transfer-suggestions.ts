@@ -25,49 +25,35 @@ export interface TransferSkip { product: { id: string; name: string }; toLocatio
 
 const EXPIRY_CAP_DAYS = 60;
 
-/**
- * What a store can send to the others, computed on request from live stock,
- * lots, units in transit and last night's ProductStockStats. Nothing is stored.
- *
- * Sellable stock leaves out lots past their expiry day (as the stock alerts).
- * - need at a store = max(⌈coverDays × rate⌉, typicalOnHand) − sellable − in transit to it
- * - spare at the origin = sellable − max(⌈coverDays × rate⌉, typicalOnHand) (its own; symmetric with need)
- * The spare goes to the stores losing the most sales first (highest rate); a
- * store that sells none of it gets none. A transfer takes the origin's oldest
- * lot first, expired or not, so: an expired first lot blocks the row (merma
- * first); one expiring within 60 days caps each store at what it sells by then.
- *
- * Products: the origin's with something to spare, or those in productIds.
- * Skipped with a reason: not tracked, sold at one store, discontinued (once per
- * product); paused at a store, or no stats there (per store, only when the
- * origin has some to spare).
- * ponytail: the 60-day cap assumes the whole suggestion comes from the first lot.
- */
-export async function transferSuggestions(
-  prisma: PrismaClient,
-  o: { fromLocationId: string; toLocationId?: string; productIds?: string[]; now?: Date },
-): Promise<{ suggestions: TransferSuggestion[]; skipped: TransferSkip[] }> {
-  const now = o.now ?? new Date();
-  const origin = o.fromLocationId;
-  const dests = await prisma.location.findMany({
-    where: { isActive: true, id: o.toLocationId ? { equals: o.toLocationId, not: origin } : { not: origin } },
-    select: { id: true },
-  });
-  if (!dests.length || (o.productIds && !o.productIds.length)) return { suggestions: [], skipped: [] };
-  const destIds = dests.map((d) => d.id);
-  const stores = [origin, ...destIds];
-  const expiredBefore = expiryDayStart(1, now);
+/** One product at one store: what need and spare are worked out from. */
+export interface StockPosition {
+  id: string; name: string; tracks: boolean; sold_only_at: string | null; discontinued: boolean;
+  location_id: string; sellable: number; expired: number; rate: number | null; typical: number | null; cover: number;
+  paused: boolean; in_transit: number; first_expiry: Date | null;
+}
 
-  const rows = await prisma.$queryRaw<Array<{
-    id: string; name: string; tracks: boolean; sold_only_at: string | null; discontinued: boolean;
-    location_id: string; sellable: number; expired: number; rate: number | null; typical: number | null; cover: number;
-    paused: boolean; in_transit: number; first_expiry: Date | null;
-  }>>`
+/** What a store keeps for itself: max(⌈coverDays × rate⌉, typicalOnHand). Need is below it, spare above it. */
+export const keepOf = (p: StockPosition) => Math.max(Math.ceil(p.cover * (p.rate ?? 0)), p.typical ?? 0);
+/** What a store is short of: what it keeps, less its sellable stock and units on the way. */
+export const needOf = (p: StockPosition) => keepOf(p) - p.sellable - p.in_transit;
+
+/**
+ * Each product's position at each of `stores` (by product), from live stock,
+ * lots, units in transit, last night's stats and the store's settings.
+ * Products: productIds, or those with sellable stock at the origin. The first
+ * lot out (first_expiry) is the origin's.
+ */
+export async function stockPositions(
+  prisma: PrismaClient,
+  o: { origin: string; stores: string[]; productIds?: string[]; now: Date },
+): Promise<Map<string, StockPosition[]>> {
+  const { origin, stores } = o;
+  const rows = await prisma.$queryRaw<StockPosition[]>`
     WITH inv AS (
       SELECT "productId", "locationId",
              COALESCE(SUM(quantity) FILTER (WHERE NOT expired), 0)::int AS sellable,
              COALESCE(SUM(quantity) FILTER (WHERE expired), 0)::int AS expired
-        FROM (SELECT *, COALESCE("expiryDate" < ${expiredBefore}, false) AS expired FROM "Inventory"
+        FROM (SELECT *, COALESCE("expiryDate" < ${expiryDayStart(1, o.now)}, false) AS expired FROM "Inventory"
                WHERE quantity > 0 AND "locationId" IN (${Prisma.join(stores)})) i
        GROUP BY 1, 2
     ),
@@ -105,9 +91,46 @@ export async function transferSuggestions(
       LEFT JOIN in_transit t ON t."productId" = p.id AND t."toLocationId" = l.id
       LEFT JOIN first_lot f ON f."productId" = p.id
      ORDER BY p.name, p.id`;
+  const byProduct = new Map<string, StockPosition[]>();
+  for (const r of rows) {
+    const list = byProduct.get(r.id);
+    if (list) list.push(r);
+    else byProduct.set(r.id, [r]);
+  }
+  return byProduct;
+}
 
-  const byProduct = new Map<string, typeof rows>();
-  for (const r of rows) byProduct.set(r.id, [...(byProduct.get(r.id) ?? []), r]);
+/**
+ * What a store can send to the others, computed on request from live stock,
+ * lots, units in transit and last night's ProductStockStats. Nothing is stored.
+ *
+ * Sellable stock leaves out lots past their expiry day (as the stock alerts).
+ * - need at a store = max(⌈coverDays × rate⌉, typicalOnHand) − sellable − in transit to it
+ * - spare at the origin = sellable − max(⌈coverDays × rate⌉, typicalOnHand) (its own; symmetric with need)
+ * The spare goes to the stores losing the most sales first (highest rate); a
+ * store that sells none of it gets none. A transfer takes the origin's oldest
+ * lot first, expired or not, so: an expired first lot blocks the row (merma
+ * first); one expiring within 60 days caps each store at what it sells by then.
+ *
+ * Products: the origin's with something to spare, or those in productIds.
+ * Skipped with a reason: not tracked, sold at one store, discontinued (once per
+ * product); paused at a store, or no stats there (per store, only when the
+ * origin has some to spare).
+ * ponytail: the 60-day cap assumes the whole suggestion comes from the first lot.
+ */
+export async function transferSuggestions(
+  prisma: PrismaClient,
+  o: { fromLocationId: string; toLocationId?: string; productIds?: string[]; now?: Date },
+): Promise<{ suggestions: TransferSuggestion[]; skipped: TransferSkip[] }> {
+  const now = o.now ?? new Date();
+  const origin = o.fromLocationId;
+  const dests = await prisma.location.findMany({
+    where: { isActive: true, id: o.toLocationId ? { equals: o.toLocationId, not: origin } : { not: origin } },
+    select: { id: true },
+  });
+  if (!dests.length || (o.productIds && !o.productIds.length)) return { suggestions: [], skipped: [] };
+  const byProduct = await stockPositions(prisma, { origin, stores: [origin, ...dests.map((d) => d.id)], productIds: o.productIds, now });
+
 
   const suggestions: TransferSuggestion[] = [];
   const skipped: TransferSkip[] = [];
@@ -120,7 +143,7 @@ export async function transferSuggestions(
       continue;
     }
     // The origin keeps what it would need itself, so a move never makes it a destination for the same units.
-    let spare = here.sellable - Math.max(Math.ceil(here.cover * (here.rate ?? 0)), here.typical ?? 0);
+    let spare = here.sellable - keepOf(here);
     if (spare <= 0) continue;
     let originAfter = here.sellable;
 
@@ -133,7 +156,7 @@ export async function transferSuggestions(
       if (d.paused) skipped.push({ product, toLocationId: d.location_id, reason: 'PAUSED_AT_DESTINATION' });
       else if (d.rate === null) skipped.push({ product, toLocationId: d.location_id, reason: 'NO_STATS_AT_DESTINATION' });
       else if (d.rate > 0) {
-        const need = Math.max(Math.ceil(d.cover * d.rate), d.typical ?? 0) - d.sellable - d.in_transit;
+        const need = needOf(d);
         if (need > 0) needing.push({ d, rate: d.rate, need });
       }
     }
