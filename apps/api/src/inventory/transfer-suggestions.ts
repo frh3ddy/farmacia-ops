@@ -31,7 +31,7 @@ const EXPIRY_CAP_DAYS = 60;
  *
  * Sellable stock leaves out lots past their expiry day (as the stock alerts).
  * - need at a store = max(⌈coverDays × rate⌉, typicalOnHand) − sellable − in transit to it
- * - spare at the origin = sellable − ⌈coverDays × rate⌉ (its own settings and rate)
+ * - spare at the origin = sellable − max(⌈coverDays × rate⌉, typicalOnHand) (its own; symmetric with need)
  * The spare goes to the stores losing the most sales first (highest rate); a
  * store that sells none of it gets none. A transfer takes the origin's oldest
  * lot first, expired or not, so: an expired first lot blocks the row (merma
@@ -119,7 +119,8 @@ export async function transferSuggestions(
       skipped.push({ product, toLocationId: null, reason: productSkip });
       continue;
     }
-    let spare = here.sellable - Math.ceil(here.cover * (here.rate ?? 0));
+    // The origin keeps what it would need itself, so a move never makes it a destination for the same units.
+    let spare = here.sellable - Math.max(Math.ceil(here.cover * (here.rate ?? 0)), here.typical ?? 0);
     if (spare <= 0) continue;
     let originAfter = here.sellable;
 
