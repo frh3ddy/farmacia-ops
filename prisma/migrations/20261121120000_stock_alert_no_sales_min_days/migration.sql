@@ -1,0 +1,1 @@
+ALTER TABLE "StockAlertSettings" ADD COLUMN "noSalesMinDays" INTEGER NOT NULL DEFAULT 180;
