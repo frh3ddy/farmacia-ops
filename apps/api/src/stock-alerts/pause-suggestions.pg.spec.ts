@@ -32,7 +32,7 @@ interface ProductCase {
 }
 
 /** A store of its own (default thresholds unless given) and a way to add products to it. */
-async function store(settings?: { slowMaxUnits?: number; equivalentMinUnits?: number; windowDays?: number }) {
+async function store(settings?: { slowMaxUnits?: number; equivalentMinUnits?: number; windowDays?: number; noSalesMinDays?: number }) {
   const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Sugerencias' } });
   if (settings) await prisma.stockAlertSettings.create({ data: { locationId, ...settings } });
   const product = async (name: string, o: ProductCase) => {
@@ -61,25 +61,56 @@ async function store(settings?: { slowMaxUnits?: number; equivalentMinUnits?: nu
 }
 
 const group = async () => (await prisma.equivalenceGroup.create({ data: {} })).id;
-/** At 0 with no sale in the window, but under 30 days at 0 and out once, so not also SLOW_WITH_STOCKOUTS. */
-const atZeroNoSales: ProductCase = { qty: 0, stats: { lastSoldAt: daysBefore(120), daysAtZero: 20, stockOuts: 1, zeroSince: daysBefore(20) } };
+/** At 0 with no sale in 180 days, but under 30 days at 0 and out once, so not also SLOW_WITH_STOCKOUTS. */
+const atZeroNoSales: ProductCase = { qty: 0, stats: { lastSoldAt: daysBefore(200), daysAtZero: 20, stockOuts: 1, zeroSince: daysBefore(20) } };
 
 describe('pauseSuggestions NO_SALES_AT_ZERO', () => {
-  test('at 0 with no sale in the window', async () => {
+  test('at 0 with no sale in 180 days', async () => {
     const s = await store();
     const id = await s.product('Ambroxol', atZeroNoSales);
     await s.product('VendidoHace10', { qty: 0, stats: { unitsSold: 3, lastSoldAt: daysBefore(10), daysAtZero: 5, zeroSince: daysBefore(5) } });
-    await s.product('ConExistencia', { qty: 4, stats: { lastSoldAt: daysBefore(120), daysAtZero: 0 } });
+    await s.product('ConExistencia', { qty: 4, stats: { lastSoldAt: daysBefore(200), daysAtZero: 0 } });
 
     assert({
-      given: 'a product at 0 last sold before the window, one sold in the window, and one in stock',
+      given: 'a product at 0 last sold over 180 days ago, one sold recently, and one in stock',
       should: 'suggest only the first, with its last sale, 0 units, days at 0 and stock-outs',
       actual: (await s.list()).data,
       expected: [{
-        product: { id, name: 'Ambroxol' }, kind: 'NO_SALES_AT_ZERO', lastSoldAt: daysBefore(120).toISOString(),
+        product: { id, name: 'Ambroxol' }, kind: 'NO_SALES_AT_ZERO', lastSoldAt: daysBefore(200).toISOString(),
         unitsInWindow: 0, daysAtZero: 20, stockOuts: 1, equivalent: null,
       }],
     });
+  });
+});
+
+describe('pauseSuggestions NO_SALES_AT_ZERO 180 days', () => {
+  test('last sold before the window but within 180 days', async () => {
+    const s = await store();
+    await s.product('Hace120', { qty: 0, stats: { lastSoldAt: daysBefore(120), daysAtZero: 20, stockOuts: 1, zeroSince: daysBefore(20) } });
+    await s.product('Hace180', { qty: 0, stats: { lastSoldAt: daysBefore(180), daysAtZero: 20, stockOuts: 1, zeroSince: daysBefore(20) } });
+    assert({
+      given: 'a product at 0 last sold 120 days ago, and one exactly 180 days ago',
+      should: 'suggest only the one 180 days without a sale',
+      actual: await s.kinds(),
+      expected: [['Hace180', 'NO_SALES_AT_ZERO']],
+    });
+  });
+
+  test('dropped from no sales but slow and long at 0', async () => {
+    const s = await store();
+    await s.product('Hace120', { qty: 0, stats: { lastSoldAt: daysBefore(120), daysAtZero: 90, stockOuts: 0, zeroSince: daysBefore(90) } });
+    assert({
+      given: 'a product at 0 for the whole window, last sold 120 days ago',
+      should: 'suggest it as a slow seller, the rule it meets',
+      actual: await s.kinds(),
+      expected: [['Hace120', 'SLOW_WITH_STOCKOUTS']],
+    });
+  });
+
+  test("the store's noSalesMinDays", async () => {
+    const s = await store({ noSalesMinDays: 100 });
+    await s.product('Hace120', { qty: 0, stats: { lastSoldAt: daysBefore(120), daysAtZero: 20, stockOuts: 1, zeroSince: daysBefore(20) } });
+    assert({ given: 'a store whose no-sales threshold is 100 days', should: 'suggest one last sold 120 days ago', actual: await s.kinds(), expected: [['Hace120', 'NO_SALES_AT_ZERO']] });
   });
 });
 
