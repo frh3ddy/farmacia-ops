@@ -154,6 +154,20 @@ describe('transferSuggestions', () => {
     });
   });
 
+  test('a store that sells none before the first lot expires', async () => {
+    const { origin, dests: [slow, fast], product, suggest } = await stores(2);
+    // The slow store sells 2 in 90 days: ⌊0.02 × 30⌋ = 0 before the lot expires. The fast one sells 0.2 a day: 6.
+    await product('PorVencerLento', { [origin]: { lots: [[30, expiry(30)], [30, null]] }, [slow]: { sold: 2, typical: 10 }, [fast]: { sold: 18, typical: 10 } });
+    const { suggestions } = await suggest();
+
+    assert({
+      given: 'a destination that would sell none of the first lot before it expires, and one that would sell some',
+      should: 'suggest nothing for the first and the capped amount for the second',
+      actual: suggestions.map((s) => [s.toLocationId, s.suggested]),
+      expected: [[fast, 6]],
+    });
+  });
+
   test('expired units at the destination', async () => {
     const { origin, dests: [dest], product, suggest } = await stores();
     await product('VencidoAlla', { [origin]: { lots: [[50, null]] }, [dest]: { lots: [[4, expiry(0)], [3, expiry(200)]], sold: 90, typical: 5 } });
