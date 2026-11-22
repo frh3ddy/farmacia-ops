@@ -144,7 +144,7 @@ export class TransferController {
   /**
    * What a store can send to the others (transfer-suggestions.ts), computed on
    * request. Owners and managers with access to the origin (owners anywhere).
-   * GET /transfers/suggestions?fromLocationId=&toLocationId=&productIds=a,b
+   * GET /transfers/suggestions?fromLocationId=&toLocationId=&productIds=a,b (up to 200)
    */
   @Get('suggestions')
   @Roles('OWNER', 'MANAGER')
@@ -158,6 +158,7 @@ export class TransferController {
     if (!from) throw new HttpException({ success: false, message: 'Falta la sucursal' }, HttpStatus.BAD_REQUEST);
     assertLocationAccess(req, from);
     const ids = productIds?.split(',').map((id) => id.trim()).filter(Boolean);
+    if (ids && ids.length > 200) throw new HttpException({ success: false, message: 'Envía hasta 200 productos' }, HttpStatus.BAD_REQUEST);
     return { success: true, data: await this.transferService.suggestions({ fromLocationId: from, toLocationId: toLocationId || undefined, productIds: ids }) };
   }
 
