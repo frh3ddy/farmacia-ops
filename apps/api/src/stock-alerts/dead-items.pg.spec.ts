@@ -93,12 +93,12 @@ describe('pauseDeadItems', () => {
     const dead = await s.product('Dead', { lastSoldAt: daysBefore(800) });
     await s.product('Recent', { lastSoldAt: daysBefore(300) });
     const paused = (await pauseDeadItems(prisma, s.locationId, { now: NOW })).map((i) => i.product.name);
-    const status = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pauseReason: true } });
+    const status = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pauseReason: true, pauseNote: true } });
     assert({
       given: 'one dead product and one that sold within 2 years',
-      should: 'pause only the dead one, as a slow mover, through the pause path, and say which it paused',
+      should: "pause only the dead one, as a slow mover noted as the cleanup of the store's day, and say which it paused",
       actual: { paused, status },
-      expected: { paused: ['Dead'], status: [{ productId: dead, pauseReason: 'SLOW_MOVER' }] },
+      expected: { paused: ['Dead'], status: [{ productId: dead, pauseReason: 'SLOW_MOVER', pauseNote: 'Limpieza 2026-11-21' }] },
     });
   });
 
@@ -106,14 +106,14 @@ describe('pauseDeadItems', () => {
     const s = await store();
     for (let i = 0; i < 201; i++) await s.product(`Dead${i}`);
     const first = (await pauseDeadItems(prisma, s.locationId, { now: NOW })).length;
-    const pausedAt = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pausedAt: true }, orderBy: { productId: 'asc' } });
+    const pausedAt = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pausedAt: true, pauseNote: true }, orderBy: { productId: 'asc' } });
     const second = (await pauseDeadItems(prisma, s.locationId, { now: NOW })).length;
-    const after = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pausedAt: true }, orderBy: { productId: 'asc' } });
+    const after = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pausedAt: true, pauseNote: true }, orderBy: { productId: 'asc' } });
     assert({
       given: '201 dead products (over the 200 a bulk pause takes), cleaned up twice',
-      should: 'pause all 201 the first time and nothing the second, leaving the pauses as they were',
-      actual: { first, pausedCount: pausedAt.length, second, unchanged: JSON.stringify(after) === JSON.stringify(pausedAt) },
-      expected: { first: 201, pausedCount: 201, second: 0, unchanged: true },
+      should: 'pause all 201 the first time, each with the note, and nothing the second, leaving the pauses as they were',
+      actual: { first, pausedCount: pausedAt.length, notes: [...new Set(pausedAt.map((p) => p.pauseNote))], second, unchanged: JSON.stringify(after) === JSON.stringify(pausedAt) },
+      expected: { first: 201, pausedCount: 201, notes: ['Limpieza 2026-11-21'], second: 0, unchanged: true },
     });
   }, 60_000);
 });
