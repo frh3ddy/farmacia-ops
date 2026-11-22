@@ -10,7 +10,7 @@
  * Against production, only when the owner says so.
  */
 import path from 'path';
-import { writeFileSync } from 'fs';
+import { appendFileSync, writeFileSync } from 'fs';
 import dotenv from 'dotenv';
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -18,6 +18,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { deadItems, pauseDeadItems } from '../src/stock-alerts/dead-items';
+import type { PauseSuggestion } from '../src/stock-alerts/pause-suggestions';
 
 const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
@@ -29,18 +30,21 @@ async function main() {
   const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
   try {
     console.log(`DB host: ${new URL(connectionString).hostname} · ${save ? 'PAUSING' : 'dry run'}`);
-    const rows: unknown[][] = [['store', 'productId', 'name', 'lastSoldAt', 'qty']];
+    // Written as it goes: if a pause fails, the file still lists every product paused before it.
+    const file = path.resolve(process.env.INIT_CWD ?? process.cwd(), 'dead-items.csv'); // where npm was run
+    writeFileSync(file, 'store,productId,name,lastSoldAt,qty\n');
     for (const store of await prisma.location.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } })) {
-      // Saving, the list is what was paused.
-      const items = save ? await pauseDeadItems(prisma, store.id) : await deadItems(prisma, store.id);
-      const qty = new Map((await prisma.inventory.groupBy({
-        by: ['productId'], where: { locationId: store.id, productId: { in: items.map((s) => s.product.id) } }, _sum: { quantity: true },
-      })).map((g) => [g.productId, g._sum.quantity ?? 0]));
-      for (const s of items) rows.push([store.name, s.product.id, s.product.name, s.lastSoldAt ?? 'never', qty.get(s.product.id) ?? 0]);
+      const write = async (items: PauseSuggestion[]) => {
+        const qty = new Map((await prisma.inventory.groupBy({
+          by: ['productId'], where: { locationId: store.id, productId: { in: items.map((s) => s.product.id) } }, _sum: { quantity: true },
+        })).map((g) => [g.productId, g._sum.quantity ?? 0]));
+        const rows = items.map((s) => [store.name, s.product.id, s.product.name, s.lastSoldAt ?? 'never', qty.get(s.product.id) ?? 0]);
+        appendFileSync(file, rows.map((r) => r.map(csvCell).join(',') + '\n').join(''));
+      };
+      const items = save ? await pauseDeadItems(prisma, store.id, { onPaused: write }) : await deadItems(prisma, store.id);
+      if (!save) await write(items);
       console.log(`${store.name}: ${items.length} dead items${save ? ', paused' : ''}`);
     }
-    const file = path.resolve(process.env.INIT_CWD ?? process.cwd(), 'dead-items.csv'); // where npm was run
-    writeFileSync(file, rows.map((r) => r.map(csvCell).join(',')).join('\n') + '\n');
     console.log(`List: ${file}`);
   } finally {
     await prisma.$disconnect();
