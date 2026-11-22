@@ -296,3 +296,43 @@ describe('stockAlert.lastSoldAt with today\'s sales', () => {
     });
   });
 });
+
+describe('stockAlert with expired lots', () => {
+  test('sellable stock leaves out lots past their expiry', async () => {
+    const products = new ProductsService(prisma);
+    const s = await store();
+    const regular = { unitsSold: 90, weeksWithSales: 10, typicalOnHand: 20 };
+    const today = businessDay(new Date());
+    const day = (offset: number) => new Date(Date.parse(`${today}T00:00:00Z`) + offset * 86_400_000);
+    const lot = (productId: string, quantity: number, expiryDate: Date | null) =>
+      prisma.inventory.create({ data: { productId, locationId: s.locationId, quantity, unitCost: 1, receivedAt: new Date('2026-10-01'), expiryDate } });
+    const withLots = async (name: string, lots: Array<[number, Date | null]>) => {
+      const id = await s.product(name, { qty: 0, stats: regular });
+      for (const [q, e] of lots) await lot(id, q, e);
+      return id;
+    };
+    const mostlyExpired = await withLots('CasiVencido', [[25, day(-30)], [5, day(400)]]);
+    const allExpired = await withLots('TodoVencido', [[10, day(-1)]]);
+    const expiresToday = await withLots('VenceHoy', [[20, day(0)]]);
+    const expiresTomorrow = await withLots('VenceManana', [[20, day(1)]]);
+    const noExpiry = await withLots('SinCaducidad', [[20, null]]);
+    const ids = [mostlyExpired, allExpired, expiresToday, expiresTomorrow, noExpiry];
+    const rows = (await products.getProducts(s.locationId, { onlyIds: ids, limit: 50 })).data;
+    const listed = async (filter: 'outOfStock' | 'lowStock' | 'outAlert') =>
+      (await products.getProducts(s.locationId, { filter, limit: 50 })).data.map((p) => p.id).filter((id) => ids.includes(id));
+
+    assert({
+      given: 'regular sellers whose stock is partly or wholly in lots past expiry, one expiring today, one tomorrow, and one without expiry',
+      should: 'alert on sellable stock: lots expired or expiring today don\'t count, lots without expiry do',
+      actual: ids.map((id) => [rows.find((r) => r.id === id)!.stockAlert!.level, rows.find((r) => r.id === id)!.stockAlert!.priority]),
+      expected: [['low', 0.2], ['out', 1], ['out', 1], ['none', 0], ['none', 0]],
+    });
+
+    assert({
+      given: 'the same products in the chips',
+      should: 'keep out of stock on real stock, and low and Alertas\' out on sellable stock',
+      actual: [await listed('outOfStock'), await listed('lowStock'), (await listed('outAlert')).sort()],
+      expected: [[], [mostlyExpired], [allExpired, expiresToday].sort()],
+    });
+  });
+});
