@@ -21,13 +21,14 @@ export async function deadItems(prisma: PrismaClient, locationId: string, { now 
 
 /**
  * Pauses a store's dead items as slow movers through the pause path (a later
- * receiving resumes one), 200 at a time; returns how many. Paused ones aren't
+ * receiving resumes one), 200 at a time; returns those it paused. Paused ones aren't
  * suggested, so a re-run pauses only what is left.
  */
-export async function pauseDeadItems(prisma: PrismaClient, locationId: string, { now = new Date() }: { now?: Date } = {}): Promise<number> {
-  const ids = (await deadItems(prisma, locationId, { now })).map((s) => s.product.id);
+export async function pauseDeadItems(prisma: PrismaClient, locationId: string, { now = new Date() }: { now?: Date } = {}): Promise<PauseSuggestion[]> {
+  const items = await deadItems(prisma, locationId, { now });
+  const ids = items.map((s) => s.product.id);
   for (let i = 0; i < ids.length; i += 200) {
     await pauseProducts(prisma, { productIds: ids.slice(i, i + 200), locationId, reason: 'SLOW_MOVER' });
   }
-  return ids.length;
+  return items;
 }
