@@ -4,8 +4,9 @@ import { pauseProducts } from './stock-pause';
 import { businessDay } from '../inventory/business-date';
 
 const DEAD_AFTER_DAYS = 730;
-// 200 (the bulk cap) one upsert at a time passed Prisma's 5 s transaction limit run from a laptop through the DB proxy (2026-11-21).
 const CHUNK = 50;
+// Run from a laptop through the DB proxy, an upsert is ~0.4 s (several ~110 ms round trips): 50 need ~20 s, over Prisma's 5 s default (2026-11-21).
+const TIMEOUT_MS = 120_000;
 
 /**
  * A store's dead items, for the one-time cleanup (Fredy, 2026-11-21): its
@@ -30,12 +31,12 @@ export async function deadItems(prisma: PrismaClient, locationId: string, { now 
 export async function pauseDeadItems(
   prisma: PrismaClient,
   locationId: string,
-  { now = new Date(), onPaused = () => {} }: { now?: Date; onPaused?: (chunk: PauseSuggestion[]) => void | Promise<void> } = {},
+  { now = new Date(), onPaused = () => {}, timeout = TIMEOUT_MS }: { now?: Date; onPaused?: (chunk: PauseSuggestion[]) => void | Promise<void>; timeout?: number } = {},
 ): Promise<PauseSuggestion[]> {
   const items = await deadItems(prisma, locationId, { now });
   for (let i = 0; i < items.length; i += CHUNK) {
     const chunk = items.slice(i, i + CHUNK);
-    await pauseProducts(prisma, { productIds: chunk.map((s) => s.product.id), locationId, reason: 'SLOW_MOVER', note: `Limpieza ${businessDay(now)}` });
+    await pauseProducts(prisma, { productIds: chunk.map((s) => s.product.id), locationId, reason: 'SLOW_MOVER', note: `Limpieza ${businessDay(now)}` }, { timeout });
     await onPaused(chunk);
   }
   return items;
