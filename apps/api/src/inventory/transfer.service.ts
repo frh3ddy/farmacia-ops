@@ -9,6 +9,7 @@ import { buildTransferLines, resolveQuantityReceived } from './transfer';
 import { Square, SquareClient, SquareError } from 'square';
 import { createSquareClient } from '../square/square-client';
 import { preferredMapping, sendInventoryChanges, type SquareSyncResult } from './square-sync';
+import { transferSuggestions } from './transfer-suggestions';
 
 type SquareReceipt = {
   transfer: { id: string; fromLocationId: string; toLocationId: string; productId: string; quantity: number };
@@ -286,6 +287,11 @@ export class TransferService {
     });
     for await (const change of changes) if (references.has(change.adjustment?.referenceId)) return true;
     return false;
+  }
+
+  /** What a store can send to the others; see transferSuggestions. */
+  suggestions(o: { fromLocationId: string; toLocationId?: string; productIds?: string[] }) {
+    return transferSuggestions(this.prisma, o);
   }
 
   async ship(input: ShipTransferInput) {
