@@ -20,9 +20,7 @@ function routesForManagerAtCentroCashierAtNorte() {
       data: { total: 10, outOfStock: 1, lowStock: 2, lowMargin: 3, synced: 9, local: 1 },
     })),
   };
-  // No pause suggestions: counts for a manager also ask for them (pause-suggestions.ts).
-  const prisma = { stockAlertSettings: { findUnique: async () => null }, $queryRaw: async () => [] };
-  const controller = new ProductsController(service as any, prisma as any, {} as any, {} as any, {} as any);
+  const controller = new ProductsController(service as any, {} as any, {} as any, {} as any, {} as any);
   const centro = { locationId: 'centro', role: 'MANAGER', isActive: true };
   const norte = { locationId: 'norte', role: 'CASHIER', isActive: true };
   const req = { currentLocation: centro, accessibleLocations: [centro, norte] } as any;

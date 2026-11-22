@@ -149,7 +149,7 @@ export async function dismissPauseSuggestions(
 }
 
 /**
- * Who may see and dismiss a store's pause suggestions (and its Alertas count):
+ * Who may see and dismiss a store's pause suggestions:
  * an owner anywhere, a manager at the session's store only, as pausing.
  */
 export function reviewsPauseSuggestionsAt(req: Pick<GuardedRequest, 'currentLocation'>, locationId: string): boolean {

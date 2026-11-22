@@ -18,7 +18,6 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
-import { pauseSuggestions, reviewsPauseSuggestionsAt } from '../stock-alerts/pause-suggestions';
 import { ProductsService, CreateProductInput, UpdatePriceInput, withoutCosts, PRODUCT_LIST_FILTERS, ProductListFilter } from './products.service';
 import { InventoryAgingService } from '../inventory-aging/inventory-aging.service';
 import { CatalogSearchService } from './catalog-search.service';
@@ -386,11 +385,6 @@ export class ProductsController {
   ) {
     const targetLocationId = locationId || req.currentLocation?.locationId;
     const result = await this.productsService.getProductCounts(targetLocationId);
-    if (targetLocationId && reviewsPauseSuggestionsAt(req, targetLocationId)) {
-      // Alertas' pause-suggestions card; the list is theirs only.
-      const { totalCount } = await pauseSuggestions(this.prisma, targetLocationId, { limit: 1 });
-      return { ...result, data: { ...result.data, pauseSuggestions: totalCount } };
-    }
     if (!isCashierAt(req, targetLocationId)) return result;
     // The low-margin count is worked out from cost; a cashier never sees costs.
     const { lowMargin, ...counts } = result.data;

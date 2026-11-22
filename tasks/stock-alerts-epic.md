@@ -111,7 +111,7 @@ Products a store could pause, found from the nightly stats (O3) and shown for a 
   - `EQUIVALENT_SELLING` is in O7 already, from manual `EquivalenceGroup`s only (today the ones a `REPLACED_BY_EQUIVALENT` pause made); a shared `medicationDefinitionId` is not used.
   - One row per product: `EQUIVALENT_SELLING`, else `NO_SALES_AT_ZERO`, else `SLOW_WITH_STOCKOUTS`, checked on the rules, so dismissing the kind shown hides the product instead of bringing it back under a weaker one.
   - A dismissal ends when the window has passed since it, or on a sale since (not for `EQUIVALENT_SELLING`), or a receiving / received transfer recorded since. Dismissing again restarts it.
-  - Paged like `GET /products` (50 a page) plus `windowDays` for the phone's reason text; `/products/counts` gains `pauseSuggestions` for owners and managers.
+  - Paged like `GET /products` (50 a page) plus `windowDays` for the phone's reason text; Alertas' count is the list's `totalCount` (`?limit=1`); `/products/counts` doesn't run the suggestion query (Fredy, 2026-11-21).
   - Pausing needs nothing extra: paused products are excluded and nothing is stored.
 
 ### O8. Equivalents
