@@ -302,6 +302,21 @@ describe('pauseProducts()', () => {
     });
   });
 
+  test('a time limit', async () => {
+    const [a, b, c] = [await product(), await product(), await product()];
+    const bulk = (timeout?: number) => pauseProducts(prisma, { productIds: [a, b, c], locationId: centro, reason: 'OTHER', employeeId: manager }, { timeout });
+    const tooShort = await bulk(1).then(() => 'paused', () => 'refused');
+    const pausedAfterRefusal = await prisma.productStoreStatus.count({ where: { productId: { in: [a, b, c] } } });
+    await bulk();
+
+    assert({
+      given: 'three products paused with a 1 ms time limit, then with the default one',
+      should: 'refuse the first and pause none of them, then pause all three',
+      actual: [tooShort, pausedAfterRefusal, await prisma.productStoreStatus.count({ where: { productId: { in: [a, b, c] } } })],
+      expected: ['refused', 0, 3],
+    });
+  });
+
   test('bad lists', async () => {
     const bulk = (productIds: unknown) => refusal(pauseProducts(prisma, { productIds: productIds as string[], locationId: centro, reason: 'OTHER', employeeId: manager }));
 

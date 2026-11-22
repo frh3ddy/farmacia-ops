@@ -54,9 +54,11 @@ export interface BulkPauseInput {
 /**
  * Pauses several products at one store with one reason (and note): all of them, or none
  * if any is refused. A refusal names the product and carries its id, so the
- * phone can point at it. The store and the products are read once.
+ * phone can point at it. The store and the products are read once. `timeout`
+ * (ms) is the transaction's limit, Prisma's 5 s unless given: only for scripts
+ * reaching the database from afar, never from a request.
  */
-export async function pauseProducts(prisma: PrismaClient, { productIds, ...pause }: BulkPauseInput): Promise<void> {
+export async function pauseProducts(prisma: PrismaClient, { productIds, ...pause }: BulkPauseInput, { timeout }: { timeout?: number } = {}): Promise<void> {
   if (!Array.isArray(productIds) || !productIds.length || productIds.length > BULK_MAX || productIds.some((id) => typeof id !== 'string')) {
     throw new BadRequestException(`Indica de 1 a ${BULK_MAX} productos`);
   }
@@ -72,7 +74,7 @@ export async function pauseProducts(prisma: PrismaClient, { productIds, ...pause
   }
   await prisma.$transaction(async (tx) => {
     for (const productId of ids) await writePause(tx, { productId, ...pause });
-  });
+  }, { timeout });
 }
 
 /** Resumes a paused product at one store by hand, recording who. One that isn't paused there is left as it is. */

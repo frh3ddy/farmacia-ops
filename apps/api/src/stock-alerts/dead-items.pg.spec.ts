@@ -102,6 +102,18 @@ describe('pauseDeadItems', () => {
     });
   });
 
+  test('its time limit', async () => {
+    const s = await store();
+    for (let i = 0; i < 3; i++) await s.product(`Dead${i}`);
+    const tooShort = await pauseDeadItems(prisma, s.locationId, { now: NOW, timeout: 1 }).then(() => 'paused', () => 'refused');
+    assert({
+      given: 'a cleanup given a 1 ms time limit per transaction',
+      should: 'hold each pause to it: refused, nothing paused',
+      actual: [tooShort, await prisma.productStoreStatus.count({ where: { locationId: s.locationId } })],
+      expected: ['refused', 0],
+    });
+  });
+
   test("the note's day", async () => {
     const s = await store();
     const dead = await s.product('Dead', { lastSoldAt: daysBefore(800) });
@@ -114,15 +126,16 @@ describe('pauseDeadItems', () => {
   test('more than one bulk pause holds, and a re-run', async () => {
     const s = await store();
     for (let i = 0; i < 201; i++) await s.product(`Dead${i}`);
-    const first = (await pauseDeadItems(prisma, s.locationId, { now: NOW })).length;
+    const chunks: number[] = [];
+    const first = (await pauseDeadItems(prisma, s.locationId, { now: NOW, onPaused: (c) => void chunks.push(c.length) })).length;
     const pausedAt = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pausedAt: true, pauseNote: true }, orderBy: { productId: 'asc' } });
     const second = (await pauseDeadItems(prisma, s.locationId, { now: NOW })).length;
     const after = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pausedAt: true, pauseNote: true }, orderBy: { productId: 'asc' } });
     assert({
       given: '201 dead products (over the 200 a bulk pause takes), cleaned up twice',
-      should: 'pause all 201 the first time, each with the note, and nothing the second, leaving the pauses as they were',
-      actual: { first, pausedCount: pausedAt.length, notes: [...new Set(pausedAt.map((p) => p.pauseNote))], second, unchanged: JSON.stringify(after) === JSON.stringify(pausedAt) },
-      expected: { first: 201, pausedCount: 201, notes: ['Limpieza 2026-11-21'], second: 0, unchanged: true },
+      should: 'pause all 201 the first time in transactions of 50 (each well inside 5 s over a remote link), each with the note, and nothing the second, leaving the pauses as they were',
+      actual: { first, chunks, pausedCount: pausedAt.length, notes: [...new Set(pausedAt.map((p) => p.pauseNote))], second, unchanged: JSON.stringify(after) === JSON.stringify(pausedAt) },
+      expected: { first: 201, chunks: [50, 50, 50, 50, 1], pausedCount: 201, notes: ['Limpieza 2026-11-21'], second: 0, unchanged: true },
     });
   }, 60_000);
 });
