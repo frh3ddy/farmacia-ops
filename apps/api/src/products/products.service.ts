@@ -14,7 +14,7 @@ import { findSearchMatchIds, sortByIdOrder } from './product-search';
 import { productsWithoutCostSql, type ProductWithoutCost } from './products-without-cost';
 import { soldAt } from './catalog-product-view';
 import { nextSyncCursor, parseSyncCursor } from './product-sync-cursor';
-import { businessDay, parseBusinessDate } from '../inventory/business-date';
+import { businessDay, expiryDayStart, parseBusinessDate } from '../inventory/business-date';
 
 /** The initial stock's lote, trimmed and capped like a count lot's; null when blank. */
 const initialLotNumber = (batchNumber?: string) => batchNumber?.trim().slice(0, 100) || null;
@@ -188,6 +188,9 @@ export type ProductListFilter = (typeof PRODUCT_LIST_FILTERS)[number];
  * rate, low by rate ÷ stock. Its run at 0 is last night's (the nightly stats),
  * corrected for stock that moved since: none once restocked, and today for one
  * that was in stock last night (unknown when the stats aren't from today).
+ * The level and priority read sellable stock: lots past their expiry day (as
+ * aging's expiryDayStart) don't count until someone records the merma; lots with
+ * no expiry do. qty (and the out-of-stock chip) stays real stock.
  */
 export function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql {
   const today = parseBusinessDate(businessDay(now), 'start');
@@ -195,6 +198,7 @@ export function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql
     WITH inv AS (
       SELECT "productId",
              SUM(quantity) AS qty,
+             SUM(quantity) FILTER (WHERE "expiryDate" IS NULL OR "expiryDate" >= ${expiryDayStart(1, now)}) AS sellable,
              SUM(quantity * "unitCost") AS total_cost
       FROM "Inventory"
       WHERE "locationId" = ${locationId}
@@ -218,6 +222,7 @@ export function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql
         p.id,
         p."createdAt",
         COALESCE(inv.qty, 0) AS qty,
+        COALESCE(inv.sellable, 0) AS sellable,
         COALESCE(
           m."priceCents" IS NOT NULL
             AND inv.qty IS NOT NULL
@@ -253,12 +258,12 @@ export function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql
     leveled AS (
       SELECT *,
              CASE WHEN paused OR NOT regular THEN 'none'
-                  WHEN qty <= 0 THEN 'out'
-                  WHEN qty < CEIL(rate * cover) AND qty < typical THEN 'low'
+                  WHEN sellable <= 0 THEN 'out'
+                  WHEN sellable < CEIL(rate * cover) AND sellable < typical THEN 'low'
                   ELSE 'none' END AS level
         FROM rows
     )
-    SELECT *, CASE level WHEN 'out' THEN rate WHEN 'low' THEN rate / GREATEST(qty, 1) ELSE 0 END AS priority
+    SELECT *, CASE level WHEN 'out' THEN rate WHEN 'low' THEN rate / GREATEST(sellable, 1) ELSE 0 END AS priority
       FROM leveled
   `;
 }
