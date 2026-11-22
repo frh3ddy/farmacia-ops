@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { businessDay, parseBusinessDate } from '../inventory/business-date';
+import { businessDay, expiryDayStart, parseBusinessDate } from '../inventory/business-date';
 import { salesLines } from '../sales-history/sales-history';
 
 const DAY = 86_400_000;
@@ -144,6 +144,11 @@ export async function recordStockStats(prisma: PrismaClient, now = new Date()): 
     }
     saved += rows.length;
   }
+  // A lot whose expiry day starts drops out of sellable stock (the stock alert)
+  // without any row changing, so its product is re-sent. Yesterday's too, in case a night was missed.
+  await prisma.$executeRaw`
+    SELECT product_touch(ARRAY(SELECT DISTINCT "productId" FROM "Inventory"
+     WHERE quantity > 0 AND "expiryDate" >= ${expiryDayStart(-1, now)} AND "expiryDate" < ${expiryDayStart(1, now)}))`;
   return saved;
 }
 
