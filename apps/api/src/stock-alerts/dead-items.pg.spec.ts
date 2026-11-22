@@ -102,6 +102,15 @@ describe('pauseDeadItems', () => {
     });
   });
 
+  test("the note's day", async () => {
+    const s = await store();
+    const dead = await s.product('Dead', { lastSoldAt: daysBefore(800) });
+    const evening = new Date('2026-11-22T03:00:00Z'); // 21:00 on the 21st in Mexico City
+    await pauseDeadItems(prisma, s.locationId, { now: evening });
+    const [status] = await prisma.productStoreStatus.findMany({ where: { productId: dead } });
+    assert({ given: "a cleanup run at 9 pm store time, already the next day in UTC", should: "note the store's day", actual: status.pauseNote, expected: 'Limpieza 2026-11-21' });
+  });
+
   test('more than one bulk pause holds, and a re-run', async () => {
     const s = await store();
     for (let i = 0; i < 201; i++) await s.product(`Dead${i}`);
