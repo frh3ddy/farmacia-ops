@@ -92,22 +92,22 @@ describe('pauseDeadItems', () => {
     const s = await store();
     const dead = await s.product('Dead', { lastSoldAt: daysBefore(800) });
     await s.product('Recent', { lastSoldAt: daysBefore(300) });
-    const paused = await pauseDeadItems(prisma, s.locationId, { now: NOW });
+    const paused = (await pauseDeadItems(prisma, s.locationId, { now: NOW })).map((i) => i.product.name);
     const status = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pauseReason: true } });
     assert({
       given: 'one dead product and one that sold within 2 years',
-      should: 'pause only the dead one, as a slow mover, through the pause path',
+      should: 'pause only the dead one, as a slow mover, through the pause path, and say which it paused',
       actual: { paused, status },
-      expected: { paused: 1, status: [{ productId: dead, pauseReason: 'SLOW_MOVER' }] },
+      expected: { paused: ['Dead'], status: [{ productId: dead, pauseReason: 'SLOW_MOVER' }] },
     });
   });
 
   test('more than one bulk pause holds, and a re-run', async () => {
     const s = await store();
     for (let i = 0; i < 201; i++) await s.product(`Dead${i}`);
-    const first = await pauseDeadItems(prisma, s.locationId, { now: NOW });
+    const first = (await pauseDeadItems(prisma, s.locationId, { now: NOW })).length;
     const pausedAt = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pausedAt: true }, orderBy: { productId: 'asc' } });
-    const second = await pauseDeadItems(prisma, s.locationId, { now: NOW });
+    const second = (await pauseDeadItems(prisma, s.locationId, { now: NOW })).length;
     const after = await prisma.productStoreStatus.findMany({ where: { locationId: s.locationId }, select: { productId: true, pausedAt: true }, orderBy: { productId: 'asc' } });
     assert({
       given: '201 dead products (over the 200 a bulk pause takes), cleaned up twice',
