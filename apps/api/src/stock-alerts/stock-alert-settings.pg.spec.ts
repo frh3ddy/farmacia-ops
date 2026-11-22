@@ -63,7 +63,7 @@ describe('updateStockAlertSettings', () => {
     const third = await store('Sur');
     await updateStockAlertSettings(prisma, other, { receivingLocationId: hub });
     assert({
-      given: 'a number out of range, not a whole number, itself as receiving store, a store that buys through another, and a receiving store pointed elsewhere',
+      given: 'a number out of range, not a whole number, itself as receiving store, a store that buys through another, a receiving store pointed elsewhere, and a store id that is not text',
       should: 'refuse each',
       actual: [
         await refusal(updateStockAlertSettings(prisma, hub, { coverDays: 0 })),
@@ -71,6 +71,7 @@ describe('updateStockAlertSettings', () => {
         await refusal(updateStockAlertSettings(prisma, hub, { receivingLocationId: hub })),
         await refusal(updateStockAlertSettings(prisma, third, { receivingLocationId: other })),
         await refusal(updateStockAlertSettings(prisma, hub, { receivingLocationId: third })),
+        await refusal(updateStockAlertSettings(prisma, third, { receivingLocationId: 5 as never })),
       ],
       expected: [
         'coverDays debe ser un número entero entre 1 y 120',
@@ -78,6 +79,7 @@ describe('updateStockAlertSettings', () => {
         'Una sucursal no puede recibir por sí misma',
         'Esa sucursal compra a través de otra',
         'Otras sucursales compran a través de esta',
+        'Sucursal no válida',
       ],
     });
   });
