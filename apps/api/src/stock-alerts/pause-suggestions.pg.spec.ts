@@ -96,14 +96,15 @@ describe('pauseSuggestions NO_SALES_AT_ZERO 180 days', () => {
     });
   });
 
-  test('dropped from no sales but slow and long at 0', async () => {
+  test('no sales in the window but not yet 180 days', async () => {
     const s = await store();
-    await s.product('Hace120', { qty: 0, stats: { lastSoldAt: daysBefore(120), daysAtZero: 90, stockOuts: 0, zeroSince: daysBefore(90) } });
+    await s.product('Hace120', { qty: 0, stats: { lastSoldAt: daysBefore(120), unitsSold: 0, daysAtZero: 90, stockOuts: 2, zeroSince: daysBefore(90) } });
+    await s.product('UnaVenta', { qty: 0, stats: { lastSoldAt: daysBefore(60), unitsSold: 1, daysAtZero: 50, stockOuts: 0, zeroSince: daysBefore(50) } });
     assert({
-      given: 'a product at 0 for the whole window, last sold 120 days ago',
-      should: 'suggest it as a slow seller, the rule it meets',
+      given: 'a product at 0 the whole window with no sale in it (last sold 120 days ago), and one with a single sale long at 0',
+      should: 'not suggest the first as slow (it waits for 180 days without a sale), and suggest the second',
       actual: await s.kinds(),
-      expected: [['Hace120', 'SLOW_WITH_STOCKOUTS']],
+      expected: [['UnaVenta', 'SLOW_WITH_STOCKOUTS']],
     });
   });
 
