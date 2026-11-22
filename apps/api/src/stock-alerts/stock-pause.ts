@@ -47,11 +47,12 @@ export interface BulkPauseInput {
   productIds: string[];
   locationId: string;
   reason: PauseReason;
+  note?: string;
   employeeId?: string;
 }
 
 /**
- * Pauses several products at one store with one reason: all of them, or none
+ * Pauses several products at one store with one reason (and note): all of them, or none
  * if any is refused. A refusal names the product and carries its id, so the
  * phone can point at it. The store and the products are read once.
  */

@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { pauseSuggestions, type PauseSuggestion } from './pause-suggestions';
 import { pauseProducts } from './stock-pause';
+import { businessDay } from '../inventory/business-date';
 
 const DEAD_AFTER_DAYS = 730;
 
@@ -20,7 +21,7 @@ export async function deadItems(prisma: PrismaClient, locationId: string, { now 
 }
 
 /**
- * Pauses a store's dead items as slow movers through the pause path (a later
+ * Pauses a store's dead items as slow movers noted "Limpieza <store's day>" through the pause path (a later
  * receiving resumes one), 200 at a time, telling `onPaused` after each; returns those it paused. Paused ones aren't
  * suggested, so a re-run pauses only what is left.
  */
@@ -32,7 +33,7 @@ export async function pauseDeadItems(
   const items = await deadItems(prisma, locationId, { now });
   for (let i = 0; i < items.length; i += 200) {
     const chunk = items.slice(i, i + 200);
-    await pauseProducts(prisma, { productIds: chunk.map((s) => s.product.id), locationId, reason: 'SLOW_MOVER' });
+    await pauseProducts(prisma, { productIds: chunk.map((s) => s.product.id), locationId, reason: 'SLOW_MOVER', note: `Limpieza ${businessDay(now)}` });
     await onPaused(chunk);
   }
   return items;
