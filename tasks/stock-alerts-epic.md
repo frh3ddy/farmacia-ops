@@ -141,7 +141,7 @@ Days to cover is `StockAlertSettings.coverDays` per store (default 14); it drive
 
 ### O10. Fewer pause suggestions
 - `NO_SALES_AT_ZERO` needs no sale in `noSalesMinDays` (new per-store setting, default 180; `lastSoldAt` null or ≤ that many days ago). `windowDays` stays 90 for rates, stock-outs and `unitsInWindow`.
-- The other kinds, "first kind it fits" and dismissals are unchanged: a product dropped from no-sales shows as `SLOW_WITH_STOCKOUTS` only if it meets that rule.
+- `SLOW_WITH_STOCKOUTS` needs at least one unit sold in the window: one with none waits for no-sales at 180 days (Fredy, 2026-11-21, after the dry run showed the 180-day rule alone only moved ~100 per store from no-sales to slow). "First kind it fits" and dismissals are unchanged.
 
 ### O11. Sellable stock in the alerts
 - O4's `level` and `priority` (so `lowStock`, `outAlert`, `lowAlert` and their counts) read sellable stock. `qty` and `outOfStock` stay real stock.
@@ -149,8 +149,8 @@ Days to cover is `StockAlertSettings.coverDays` per store (default 14); it drive
 
 ### O12. Transfer suggestions
 `GET /transfers/suggestions?fromLocationId[&toLocationId][&productIds=a,b]` (`transfer-suggestions.ts`), computed on request; owners and managers with access to the origin.
-- need = max(⌈coverDays × rate⌉, typicalOnHand) − sellable − in transit to it; spare = origin sellable − ⌈origin coverDays × origin rate⌉. The spare goes to the stores losing the most sales first; a store with rate 0 gets none.
-- A transfer takes the oldest received lot first, expired or not: an expired first lot blocks the row (`EXPIRED_FIRST`, origin's expired units); one expiring within 60 days caps each store at ⌊rate × days left⌋ (`originalSuggested`, `firstLotDaysToExpiry`).
+- need = max(⌈coverDays × rate⌉, typicalOnHand) − sellable − in transit to it; spare = origin sellable − max(⌈origin coverDays × origin rate⌉, origin typicalOnHand), symmetric with need so a move never makes the origin need the same units back (review and Fredy, 2026-11-21; the handoff had no typical at the origin). The spare goes to the stores losing the most sales first; a store with rate 0 gets none.
+- A transfer takes the oldest received lot first, expired or not: an expired first lot blocks the row (`EXPIRED_FIRST`, origin's expired units); one expiring within 60 days caps each store at ⌊rate × days left⌋ (`originalSuggested`, `firstLotDaysToExpiry`); a store the cap brings to 0 gets no row.
 - Skipped with a reason: `NOT_TRACKED`, `SOLD_AT_ONE_STORE`, `DISCONTINUED` (per product), `PAUSED_AT_DESTINATION`, `NO_STATS_AT_DESTINATION` (per store, only when the origin can spare some).
 - Known ceiling: the 60-day cap assumes the whole suggestion comes from the first lot.
 
