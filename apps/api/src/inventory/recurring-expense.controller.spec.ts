@@ -160,4 +160,32 @@ describe('RecurringExpenseController upcoming', () => {
       ],
     });
   });
+
+  test('paying an occurrence', async () => {
+    const booked = { id: 'x1', locationId: 'norte', amount: { toString: () => '100.5' } };
+    const pay = vi.fn(async (_id: string, _body: unknown, ctx: any) => {
+      ctx.assertAccess('centro');
+      ctx.assertAccess(null);
+      return [booked];
+    });
+    const labor = { getShiftsByPerson: vi.fn().mockResolvedValue([]) };
+    const controller = new RecurringExpenseController({ pay } as any, labor as any);
+
+    assert({
+      given: 'a manager of Centro paying an occurrence whose pay touches a general expense',
+      should: 'refuse it (general is owner and accountant only)',
+      actual: await outcome(controller.pay('r1:2026-12-01', { date: '2026-12-01' }, requestAs('MANAGER'))),
+      expected: 'Solo el dueño o el contador pueden ver gastos generales',
+    });
+
+    const response = await controller.pay('r1:2026-12-01', { date: '2026-12-01' }, requestAs('OWNER'));
+    await pay.mock.calls[1][2].staff('2026-11-14', '2026-11-20');
+
+    assert({
+      given: 'the owner paying it',
+      should: 'pass the occurrence, the body, who paid and Square hours, and return the expenses with string amounts',
+      actual: [pay.mock.calls[1].slice(0, 2), pay.mock.calls[1][2].createdBy, labor.getShiftsByPerson.mock.calls, response],
+      expected: [['r1:2026-12-01', { date: '2026-12-01' }], 'e1', [['2026-11-14', '2026-11-20']], { success: true, data: { expenses: [{ ...booked, amount: '100.5' }] } }],
+    });
+  });
 });

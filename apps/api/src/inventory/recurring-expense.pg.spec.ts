@@ -331,3 +331,203 @@ describe('RecurringExpenseService upcoming', () => {
     });
   });
 });
+
+describe('RecurringExpenseService pay', () => {
+  const noStaff = () => Promise.reject(new Error('Square asked for a bill'));
+  const open = () => ({ staff: noStaff, assertAccess: () => undefined });
+  const brief = (e: any) => [e.locationId, e.type, e.amount.toString(), dayOf(e.periodStart), dayOf(e.periodEnd), e.recurringExpenseId, dayOf(e.occurrenceDate), e.teamMemberId];
+  const dayOf = (d: Date | null) => d?.toISOString().slice(0, 10) ?? null;
+  const unpaidDue = async (locationId: string, ruleId: string, staff: any = noStaff) =>
+    (await service.upcoming({ locationId, today: '2026-11-23', days: 10, staff })).data.filter((o) => o.ruleId === ruleId).map((o) => o.dueDate);
+
+  test('a fixed bill', async () => {
+    const centro = await newLocation();
+    const renta = await service.createRule(rent(centro, { startDate: '2026-11-01', vendor: 'Don Pepe' }));
+    const id = `${renta.id}:2026-11-01`;
+
+    const expenses = await service.pay(id, { date: '2026-11-02', clientRequestId: `pay-${renta.id}` }, open());
+
+    assert({
+      given: 'an unpaid rent occurrence paid without an amount',
+      should: "book the rule's amount in its store, type and period, linked to the occurrence",
+      actual: [expenses.map(brief), expenses[0].vendor],
+      expected: [[[centro, 'RENT', '8000', '2026-11-01', '2026-11-30', renta.id, '2026-11-01', null]], 'Don Pepe'],
+    });
+
+    assert({
+      given: 'the paid occurrence',
+      should: 'no longer list it as upcoming, and refuse a second payment (a replay returns the first)',
+      actual: [
+        await unpaidDue(centro, renta.id),
+        await outcome(service.pay(id, { date: '2026-11-03' }, open())),
+        (await service.pay(id, { date: '2026-11-02', clientRequestId: `pay-${renta.id}` }, open())).map((e) => e.id),
+      ],
+      expected: [['2026-12-01'], 'Este pago ya se registró', [expenses[0].id]],
+    });
+  });
+
+  test('a varying bill and its period', async () => {
+    const centro = await newLocation();
+    const luz = await service.createRule(rent(centro, { type: 'UTILITIES', name: 'Luz', kind: 'VARIES', amount: null, freq: 'BIMONTHLY', dayOfMonth: 10, startDate: '2026-12-10', periodRule: 'BILL_MONTHS' }));
+    const id = `${luz.id}:2026-12-10`;
+
+    assert({
+      given: 'a varying bill paid without an amount, with half a period, or on a day it is not due',
+      should: 'refuse each',
+      actual: [
+        await outcome(service.pay(id, { date: '2026-12-10' }, open())),
+        await outcome(service.pay(id, { date: '2026-12-10', amount: 1450, periodStart: '2026-10-12' }, open())),
+        await outcome(service.pay(`${luz.id}:2026-12-11`, { date: '2026-12-10', amount: 1450 }, open())),
+        await outcome(service.pay('nope:2026-12-10', { date: '2026-12-10', amount: 1450 }, open())),
+      ],
+      expected: ['El monto del gasto debe ser un número mayor que cero', 'El periodo necesita inicio y fin', 'No se encontró la ocurrencia', 'No se encontró la ocurrencia'],
+    });
+
+    const [expense] = await service.pay(id, { date: '2026-12-10', amount: 1450, periodStart: '2026-10-12', periodEnd: '2026-12-09' }, open());
+
+    assert({
+      given: 'the bill paid with its printed consumption dates',
+      should: 'count it in those dates instead of the default months',
+      actual: brief(expense),
+      expected: [centro, 'UTILITIES', '1450', '2026-10-12', '2026-12-09', luz.id, '2026-12-10', null],
+    });
+  });
+
+  test('access', async () => {
+    const centro = await newLocation();
+    const renta = await service.createRule(rent(centro, { startDate: '2026-11-01' }));
+    const general = await service.createRule(rent(null, { type: 'PROFESSIONAL', name: 'Contador', startDate: '2026-11-01' }));
+    const asked: (string | null)[] = [];
+    const deny = { staff: noStaff, assertAccess: (locationId: string | null) => { asked.push(locationId); throw new Error('No tienes acceso a esta sucursal'); } };
+
+    assert({
+      given: 'someone without access paying a store bill and a general bill',
+      should: 'check the rule store (null: general), refuse, and book nothing',
+      actual: [
+        await outcome(service.pay(`${renta.id}:2026-11-01`, { date: '2026-11-02' }, deny)),
+        await outcome(service.pay(`${general.id}:2026-11-01`, { date: '2026-11-02' }, deny)),
+        asked,
+        await prisma.expense.count({ where: { recurringExpenseId: { in: [renta.id, general.id] } } }),
+      ],
+      expected: ['No tienes acceso a esta sucursal', 'No tienes acceso a esta sucursal', [centro, null], 0],
+    });
+  });
+
+  test('payroll', async () => {
+    const centro = await newLocation();
+    const norte = await newLocation('Norte');
+    const id = (name: string) => `${name}-${centro}`;
+    await service.setPayrollConfig([{ teamMemberId: id('beto'), mode: 'FIXED', fixedAmount: 3000, homeLocationId: centro }]);
+    const nomina = await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-21' }));
+    const shift = (date: string, locationId: string, workedMinutes: number, cost: number) => ({ date, locationId, workedMinutes, cost });
+    const staff = vi.fn().mockResolvedValue([
+      { teamMemberId: id('ana'), name: 'Ana', shifts: [shift('2026-11-15', centro, 300, 250.5), shift('2026-11-16', norte, 100, 80)] },
+      { teamMemberId: id('beto'), name: 'Beto', shifts: [] },
+      { teamMemberId: id('carla'), name: 'Carla', shifts: [shift('2026-11-17', centro, 60, 50), shift('2026-11-18', norte, 180, 150)] },
+    ]);
+    const occurrence = `${nomina.id}:2026-11-21`;
+    const ctx = { staff, assertAccess: vi.fn() };
+
+    assert({
+      given: 'a payroll occurrence paid with its own dates, or for someone with no hours here',
+      should: 'refuse both',
+      actual: [
+        await outcome(service.pay(occurrence, { date: '2026-11-21', periodStart: '2026-11-10', periodEnd: '2026-11-20' }, ctx)),
+        await outcome(service.pay(occurrence, { date: '2026-11-21', people: [{ teamMemberId: id('zoe') }] }, ctx)),
+      ],
+      expected: ['La nómina se paga por el periodo de la ocurrencia', 'Sin horas registradas en el periodo'],
+    });
+
+    const anaPaid = await service.pay(occurrence, { date: '2026-11-21', people: [{ teamMemberId: id('ana') }] }, ctx);
+
+    assert({
+      given: "Ana paid for the 14–20 Nov week at Centro, with Centro's hours amount",
+      should: 'book one PAYROLL expense for her at Centro, for that week, linked to the occurrence',
+      actual: anaPaid.map(brief),
+      expected: [[centro, 'PAYROLL', '250.5', '2026-11-14', '2026-11-20', nomina.id, '2026-11-21', id('ana')]],
+    });
+
+    const listed = async () => (await service.upcoming({ locationId: centro, today: '2026-11-23', days: 0, staff })).data
+      .filter((o) => o.ruleId === nomina.id).map((o: any) => o.payroll.map((p: any) => p.name));
+
+    assert({
+      given: 'the occurrence after paying Ana',
+      should: 'no longer list Ana, and refuse paying her again',
+      actual: [await listed(), await outcome(service.pay(occurrence, { date: '2026-11-21', people: [{ teamMemberId: id('ana') }] }, ctx))],
+      expected: [[['Beto', 'Carla']], 'Ya se le pagó a Ana en esta sucursal por este periodo'],
+    });
+
+    ctx.assertAccess.mockClear();
+    const rest = await service.pay(occurrence, { date: '2026-11-21', includeOtherStores: true, people: [{ teamMemberId: id('beto') }, { teamMemberId: id('carla'), amount: 400 }] }, ctx);
+
+    assert({
+      given: "Beto (fixed) and Carla paid 400 for her hours at both stores (60 min here, 180 at Norte)",
+      should: "book Beto's salary here and split Carla's 400 by minutes, Norte's part checked for access",
+      actual: [rest.map(brief), ctx.assertAccess.mock.calls],
+      expected: [
+        [
+          [centro, 'PAYROLL', '3000', '2026-11-14', '2026-11-20', nomina.id, '2026-11-21', id('beto')],
+          [centro, 'PAYROLL', '100', '2026-11-14', '2026-11-20', nomina.id, '2026-11-21', id('carla')],
+          [norte, 'PAYROLL', '300', '2026-11-14', '2026-11-20', nomina.id, '2026-11-21', id('carla')],
+        ],
+        [[centro], [norte]],
+      ],
+    });
+
+    assert({
+      given: 'everyone paid',
+      should: 'drop the occurrence and refuse paying it again',
+      actual: [await listed(), await outcome(service.pay(occurrence, { date: '2026-11-21' }, ctx))],
+      expected: [[], 'Este pago ya se registró'],
+    });
+  });
+
+  test('two phones paying the same person at once', async () => {
+    const centro = await newLocation();
+    const ana = `ana-${centro}`;
+    const nomina = await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-21' }));
+    const staff = async () => [{ teamMemberId: ana, name: 'Ana', shifts: [{ date: '2026-11-15', locationId: centro, workedMinutes: 300, cost: 250 }] }];
+    const payAna = () => outcome(service.pay(`${nomina.id}:2026-11-21`, { date: '2026-11-21' }, { staff, assertAccess: () => undefined }));
+
+    assert({
+      given: 'Ana paid from two phones at the same moment',
+      should: 'book her once and refuse the other',
+      actual: [(await Promise.all([payAna(), payAna()])).sort(), await prisma.expense.count({ where: { teamMemberId: ana } })],
+      expected: [['Este pago ya se registró', 'done'], 1],
+    });
+  });
+
+  test('a payroll payment replayed while Square is down', async () => {
+    const centro = await newLocation();
+    const ana = `ana-${centro}`;
+    const nomina = await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-21' }));
+    const staff = async () => [{ teamMemberId: ana, name: 'Ana', shifts: [{ date: '2026-11-15', locationId: centro, workedMinutes: 300, cost: 250 }] }];
+    const body = { date: '2026-11-21', clientRequestId: `nomina-${centro}` };
+    const first = await service.pay(`${nomina.id}:2026-11-21`, body, { staff, assertAccess: () => undefined });
+
+    assert({
+      given: 'the same payment sent again (its response was lost) while Square labor fails',
+      should: 'return what the first one booked',
+      actual: (await service.pay(`${nomina.id}:2026-11-21`, body, { staff: () => Promise.reject(new Error('Square 502')), assertAccess: () => undefined })).map((e) => e.id),
+      expected: first.map((e) => e.id),
+    });
+  });
+
+  test("a replay by someone without access to a store it booked", async () => {
+    const centro = await newLocation();
+    const norte = await newLocation('Norte');
+    const ana = `ana-${centro}`;
+    const nomina = await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-21' }));
+    const staff = async () => [{ teamMemberId: ana, name: 'Ana', shifts: [{ date: '2026-11-15', locationId: centro, workedMinutes: 300, cost: 250 }, { date: '2026-11-16', locationId: norte, workedMinutes: 60, cost: 50 }] }];
+    const body = { date: '2026-11-21', includeOtherStores: true, clientRequestId: `nomina-${norte}` };
+    await service.pay(`${nomina.id}:2026-11-21`, body, { staff, assertAccess: () => undefined });
+    const centroOnly = (locationId: string | null) => { if (locationId !== centro) throw new Error('No tienes acceso a esta sucursal'); };
+
+    assert({
+      given: "the payment resent by a manager of Centro only, after it booked Ana's Norte hours",
+      should: "refuse to return Norte's expense",
+      actual: await outcome(service.pay(`${nomina.id}:2026-11-21`, body, { staff, assertAccess: centroOnly })),
+      expected: 'No tienes acceso a esta sucursal',
+    });
+  });
+});
