@@ -406,6 +406,35 @@ export class RecurringExpenseService {
   }
 
   /**
+   * Daily job (worker `auto-pay` queue): books every unpaid occurrence of an
+   * active auto-paid (direct debit) fixed bill due up to `today`, dated on its
+   * due date. Each occurrence has a stable clientRequestId, so a rerun books
+   * nothing twice; one failing occurrence is logged and the rest still book.
+   */
+  async autoPay(today: string) {
+    const rules = await this.prisma.recurringExpense.findMany({
+      where: { autoPaid: true, paused: false }, // validation keeps autoPaid on FIXED rules only
+      include: { expenses: { where: { occurrenceDate: { not: null } }, select: { occurrenceDate: true } } },
+    });
+    const due = rules.flatMap((rule) => {
+      const paid = new Set(rule.expenses.map((e) => e.occurrenceDate!.toISOString().slice(0, 10)));
+      return dueDates(rule, today).filter((d) => !paid.has(d)).map((d) => `${rule.id}:${d}`);
+    });
+    const paid: string[] = [];
+    const failed: { occurrenceId: string; error: string }[] = [];
+    for (const id of due) {
+      const day = id.slice(id.lastIndexOf(':') + 1);
+      await this.pay(id, { date: day, clientRequestId: `auto:${id}` }, {
+        staff: () => Promise.reject(new Error('A fixed bill needs no staff')), assertAccess: () => undefined,
+      }).then(() => paid.push(id), (error: Error) => {
+        this.logger.error(`[AUTO-PAY] ${id} failed`, error);
+        failed.push({ occurrenceId: id, error: error.message });
+      });
+    }
+    return { paid, failed };
+  }
+
+  /**
    * Paydays are per store. Another store's hours are booked only when it has no
    * payroll rule, or its own rule has an occurrence with exactly this period
    * (that rule is returned, to link its row); never over a payment there that

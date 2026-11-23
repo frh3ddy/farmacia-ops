@@ -5,6 +5,7 @@ import { InventoryAdjustmentController } from './inventory-adjustment.controller
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { BreakBulkController } from './break-bulk.controller';
 import { InternalBreakBulkController } from './internal-break-bulk.controller';
+import { InternalExpensesController } from './internal-expenses.controller';
 import { BreakBulkService } from './break-bulk.service';
 import { TransferController } from './transfer.controller';
 import { TransferService } from './transfer.service';
@@ -31,6 +32,7 @@ import { ProductsModule } from '../products/products.module';
     InventoryAdjustmentController,
     BreakBulkController,
     InternalBreakBulkController,
+    InternalExpensesController,
     TransferController,
     InventoryReceivingController,
     InventoryReportsController,
