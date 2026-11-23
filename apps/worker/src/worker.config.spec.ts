@@ -59,4 +59,28 @@ describe('WORKERS', () => {
       fetch.mockRestore();
     });
   });
+  describe('auto-pay', () => {
+    const autoPay = WORKERS.find((w) => w.queueName === 'auto-pay');
+    const env = process.env;
+    beforeEach(() => {
+      process.env = { ...env, API_INTERNAL_URL: 'http://api.test', WORKER_API_SECRET: 's3cret' };
+    });
+    afterEach(() => {
+      process.env = env;
+    });
+
+    it('given the auto-pay job, runs it daily at 06:00 Mexico City time, once (a missed day is booked by the next)', () => {
+      expect([autoPay?.schedule, autoPay?.options?.attempts, autoPay?.concurrency]).toEqual([{ pattern: '0 6 * * *', tz: 'America/Mexico_City' }, 1, 1]);
+    });
+
+    it('given a run, asks the api to book the direct-debit bills due with the worker secret', async () => {
+      const fetch = jest.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ success: true, data: { paid: 1, failed: [] } })));
+
+      await autoPay!.processor({ id: '1', name: 'auto-pay', data: {} } as Job, () => ({}) as Queue);
+
+      expect([fetch.mock.calls[0][0], (fetch.mock.calls[0][1] as RequestInit).method, ((fetch.mock.calls[0][1] as RequestInit).headers as Record<string, string>)['x-worker-secret']])
+        .toEqual(['http://api.test/internal/expenses/auto-pay', 'POST', 's3cret']);
+      fetch.mockRestore();
+    });
+  });
 });
