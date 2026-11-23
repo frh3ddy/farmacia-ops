@@ -1,9 +1,12 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   ExpenseType, PayrollMode, Prisma, RecurringExpense, RecurringExpenseKind, RecurringFrequency, RecurringPeriodRule,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { addDays, dueDates, occurrencePeriod } from './recurring-occurrence';
+import { assertAmount, periodData } from './expense.service';
+import { split } from './expense-period';
+import { parseDateParam } from './business-date';
 
 /** A rule as a client sends it (create: all of it; update: any part). */
 export interface RecurringRuleInput {
@@ -30,6 +33,18 @@ export interface PayrollConfigInput {
   mode?: PayrollMode;
   fixedAmount?: number | null;
   homeLocationId?: string | null;
+}
+
+/** POST /expenses/upcoming/:id/pay. periodStart/End replace a bill's default period (not payroll's). */
+export interface PayOccurrenceInput {
+  amount?: number;
+  date: string;
+  reference?: string;
+  clientRequestId?: string;
+  people?: { teamMemberId: string; amount?: number }[];
+  includeOtherStores?: boolean;
+  periodStart?: string;
+  periodEnd?: string;
 }
 
 /** Each person's Square shifts in [startDay, endDay], at every store (labor payroll summary). */
@@ -207,7 +222,7 @@ export class RecurringExpenseService {
       this.logger.error('[UPCOMING] Square labor failed; payroll listed without people', error);
       return null;
     });
-    const payrollFor = await this.payrollPeople(payrollPeriods, squareStaff);
+    const payrollFor = (await this.payrollPeople(payrollPeriods, squareStaff))?.owed;
 
     const data = occurrences.flatMap(({ rule, due, period }) => {
       const base = {
@@ -239,7 +254,7 @@ export class RecurringExpenseService {
    * left out and those already paid. Square is asked once, for the span of all periods.
    */
   private async payrollPeople(periods: { start: string; end: string }[], staff: (s: string, e: string) => Promise<StaffHours[] | null>) {
-    if (!periods.length) return () => [];
+    if (!periods.length) return { owed: () => [], isPaid: () => false, person: () => undefined };
     const from = periods.reduce((min, p) => (p.start < min ? p.start : min), periods[0].start);
     const to = periods.reduce((max, p) => (p.end > max ? p.end : max), periods[0].end);
     const [people, configs, paidRows] = await Promise.all([
@@ -255,9 +270,12 @@ export class RecurringExpenseService {
     const key = (teamMemberId: string, locationId: string | null, start: string, end: string) => [teamMemberId, locationId, start, end].join('|');
     const paid = new Set(paidRows.map((e) => key(e.teamMemberId!, e.locationId, dayOf(e.periodStart!), dayOf(e.periodEnd!))));
 
-    return (locationId: string, period: { start: string; end: string }) => people.flatMap((person) => {
+    const isPaid = (teamMemberId: string, locationId: string, period: { start: string; end: string }) =>
+      paid.has(key(teamMemberId, locationId, period.start, period.end));
+    const person = (teamMemberId: string) => people.find((p) => p.teamMemberId === teamMemberId);
+    const owed = (locationId: string, period: { start: string; end: string }) => people.flatMap((person) => {
       const c = config.get(person.teamMemberId);
-      if (c?.included === false || paid.has(key(person.teamMemberId, locationId, period.start, period.end))) return [];
+      if (c?.included === false || isPaid(person.teamMemberId, locationId, period)) return [];
       const here = person.shifts.filter((s) => s.locationId === locationId && s.date >= period.start && s.date <= period.end);
       const minutes = here.reduce((sum, s) => sum + s.workedMinutes, 0);
       if (c?.mode === 'FIXED') {
@@ -267,5 +285,128 @@ export class RecurringExpenseService {
       const cents = here.reduce((sum, s) => sum + Math.round(s.cost * 100), 0);
       return [{ teamMemberId: person.teamMemberId, name: person.name, mode: 'HOURS', minutes, amount: new Prisma.Decimal(cents).div(100).toString() }];
     });
+    return { owed, isPaid, person };
+  }
+
+  /**
+   * Pays an occurrence ("<ruleId>:<dueDate>"). A bill: one expense in the rule's
+   * store and type, for the occurrence's period (or the one sent). Payroll: one
+   * expense per person at this store, for the occurrence's period only, so
+   * /upcoming sees them paid; with includeOtherStores, a person paid by hours
+   * also gets their unpaid hours at other stores, their amount split by minutes
+   * as POST /expenses/payroll does. Each store booked is access-checked.
+   */
+  async pay(occurrenceId: string, input: PayOccurrenceInput, { staff, assertAccess, createdBy }: {
+    staff: (startDay: string, endDay: string) => Promise<StaffHours[]>;
+    assertAccess: (locationId: string | null) => void;
+    createdBy?: string;
+  }) {
+    const sep = occurrenceId.lastIndexOf(':');
+    const due = occurrenceId.slice(sep + 1);
+    const rule = sep > 0 && DATE_ONLY.test(due) ? await this.prisma.recurringExpense.findUnique({ where: { id: occurrenceId.slice(0, sep) } }) : null;
+    if (!rule || !dueDates(rule, due).includes(due)) throw new NotFoundException('No se encontró la ocurrencia');
+    assertAccess(rule.locationId);
+    const occurrenceDate = new Date(`${due}T00:00:00Z`);
+    const crid = input.clientRequestId;
+
+    // A replay returns what the first request booked (payroll rows carry "<crid>:<person>:<store>").
+    const replayed = async () => {
+      if (!crid) return [];
+      const existing = await this.prisma.expense.findMany({
+        where: { OR: [{ clientRequestId: crid }, { clientRequestId: { startsWith: `${crid}:` } }] },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (existing.some((e) => e.recurringExpenseId !== rule.id || e.occurrenceDate?.getTime() !== occurrenceDate.getTime())) {
+        throw new ConflictException('This clientRequestId was already used for a different expense');
+      }
+      return existing;
+    };
+    const existing = await replayed();
+    for (const e of existing) if (e.locationId !== rule.locationId) assertAccess(e.locationId);
+    if (existing.length) return existing;
+
+    if (!input.date) refuse('Falta la fecha del pago');
+    const date = parseDateParam(input.date, 'date')!;
+    const common = { type: rule.type, date, reference: input.reference, createdBy, recurringExpenseId: rule.id, occurrenceDate };
+    const alreadyPaid = () => new ConflictException('Este pago ya se registró');
+    const racedOrPaid = async (error: unknown) => {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error;
+      const rows = await replayed(); // two copies of the same replay
+      if (rows.length) return rows;
+      throw alreadyPaid();
+    };
+
+    if (rule.kind !== 'PAYROLL') {
+      const amount = input.amount ?? (rule.amount === null ? undefined : Number(rule.amount));
+      assertAmount(amount);
+      const period = periodData(input.periodStart ?? null, input.periodEnd ?? null);
+      const { start, end } = occurrencePeriod(rule, due);
+      // The partial unique index (rule, occurrence) refuses a second payment.
+      return this.prisma.expense.create({ data: {
+        ...common, locationId: rule.locationId, vendor: rule.vendor, description: rule.name, clientRequestId: crid,
+        amount: new Prisma.Decimal(amount),
+        periodStart: period.periodStart ?? new Date(`${start}T00:00:00Z`), periodEnd: period.periodEnd ?? new Date(`${end}T00:00:00Z`),
+      } }).then((e) => [e], racedOrPaid);
+    }
+
+    if (input.periodStart || input.periodEnd) refuse('La nómina se paga por el periodo de la ocurrencia');
+    const here = rule.locationId!;
+    const period = occurrencePeriod(rule, due);
+    const payroll = (await this.payrollPeople([period], staff))!; // Square failing fails the payment
+    const owed = payroll.owed(here, period);
+    const chosen = input.people ?? owed.map((p) => ({ teamMemberId: p.teamMemberId, amount: undefined }));
+    if (!chosen.length) {
+      if (await this.anyPayrollPaid(here, period)) throw alreadyPaid();
+      refuse('Sin horas registradas en el periodo');
+    }
+
+    const rows = chosen.flatMap(({ teamMemberId, amount }) => {
+      const person = owed.find((p) => p.teamMemberId === teamMemberId);
+      if (!person) {
+        if (!payroll.isPaid(teamMemberId, here, period)) refuse('Sin horas registradas en el periodo');
+        throw new ConflictException(`Ya se le pagó a ${payroll.person(teamMemberId)?.name ?? teamMemberId} en esta sucursal por este periodo`);
+      }
+      if (amount !== undefined) assertAmount(amount);
+      if (!input.includeOtherStores || person.mode === 'FIXED') {
+        return [{ teamMemberId, locationId: here, amount: new Prisma.Decimal(amount ?? person.amount) }];
+      }
+      // This store first, then each other store still unpaid for the period.
+      const stores = new Map<string, { minutes: number; cents: number }>([[here, { minutes: 0, cents: 0 }]]);
+      for (const s of payroll.person(teamMemberId)!.shifts) {
+        if (!s.locationId || s.date < period.start || s.date > period.end || (s.locationId !== here && payroll.isPaid(teamMemberId, s.locationId, period))) continue;
+        const store = stores.get(s.locationId) ?? { minutes: 0, cents: 0 };
+        stores.set(s.locationId, { minutes: store.minutes + s.workedMinutes, cents: store.cents + Math.round(s.cost * 100) });
+      }
+      const parts = [...stores].filter(([, s]) => s.minutes > 0);
+      const total = amount !== undefined ? BigInt(new Prisma.Decimal(amount).mul(100).toFixed(0)) : BigInt(parts.reduce((sum, [, s]) => sum + s.cents, 0));
+      const cents = split(total, parts.map(([, s]) => BigInt(s.minutes)));
+      return parts.map(([locationId], i) => ({ teamMemberId, locationId, amount: new Prisma.Decimal(cents[i].toString()).div(100) }));
+    });
+    for (const { locationId } of rows) if (locationId !== here) assertAccess(locationId);
+
+    const periodDates = { periodStart: new Date(`${period.start}T00:00:00Z`), periodEnd: new Date(`${period.end}T00:00:00Z`) };
+    // ponytail: one lock for every payroll payment (they're rare, a few a week); re-checked inside
+    // so two phones paying the same person at once book it once.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('payroll-pay'))`;
+      const clash = await tx.expense.count({ where: {
+        type: 'PAYROLL', ...periodDates, OR: rows.map(({ teamMemberId, locationId }) => ({ teamMemberId, locationId })),
+      } });
+      if (clash) throw alreadyPaid();
+      const created = [];
+      for (const row of rows) {
+        created.push(await tx.expense.create({ data: {
+          ...common, ...periodDates, ...row, type: 'PAYROLL',
+          clientRequestId: crid && `${crid}:${row.teamMemberId}:${row.locationId}`,
+        } }));
+      }
+      return created;
+    }).catch(racedOrPaid);
+  }
+
+  private async anyPayrollPaid(locationId: string, period: { start: string; end: string }) {
+    return !!(await this.prisma.expense.count({ where: {
+      type: 'PAYROLL', locationId, periodStart: new Date(`${period.start}T00:00:00Z`), periodEnd: new Date(`${period.end}T00:00:00Z`),
+    } }));
   }
 }

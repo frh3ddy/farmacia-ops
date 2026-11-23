@@ -1,9 +1,9 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard, LocationGuard, Roles, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
-import { RecurringExpenseService, RecurringRuleInput, PayrollConfigInput } from './recurring-expense.service';
+import { RecurringExpenseService, RecurringRuleInput, PayrollConfigInput, PayOccurrenceInput } from './recurring-expense.service';
 import { LaborService } from '../labor/labor.service';
 import { businessDay } from './business-date';
-import { readScope } from './expense.controller';
+import { assertGeneralAccess, readScope } from './expense.controller';
 
 const withAmount = <T extends { amount: { toString(): string } | null }>(rule: T) => ({ ...rule, amount: rule.amount?.toString() ?? null });
 
@@ -30,6 +30,18 @@ export class RecurringExpenseController {
       staff: (from, to) => this.labor.getShiftsByPerson(from, to),
     });
     return { success: true, data, payrollUnavailable };
+  }
+
+  /** Books an occurrence ("<ruleId>:<dueDate>"); each store it books in needs access, general needs owner or accountant. */
+  @Post('upcoming/:id/pay')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async pay(@Param('id') id: string, @Body() body: PayOccurrenceInput, @Req() req: RoleGuardedRequest) {
+    const expenses = await this.service.pay(id, body ?? ({} as PayOccurrenceInput), {
+      staff: (from, to) => this.labor.getShiftsByPerson(from, to),
+      assertAccess: (locationId) => (locationId ? assertLocationAccess(req, locationId) : assertGeneralAccess(req)),
+      createdBy: req.employee.id,
+    });
+    return { success: true, data: { expenses: expenses.map((e) => ({ ...e, amount: e.amount.toString() })) } };
   }
 
   @Get('recurring')
