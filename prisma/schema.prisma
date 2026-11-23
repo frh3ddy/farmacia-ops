@@ -868,7 +868,7 @@ model Expense {
   // InventoryAdjustment.clientRequestId for the full rationale.
   clientRequestId String? @unique
 
-  location         Location?         @relation(fields: [locationId], references: [id])
+  location         Location?         @relation(fields: [locationId], references: [id], onDelete: Restrict) // stores are deactivated, never deleted
   recurringExpense RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
 
   @@index([recurringExpenseId, occurrenceDate])
