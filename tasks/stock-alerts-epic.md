@@ -164,7 +164,7 @@ Days to cover is `StockAlertSettings.coverDays` per store (default 14); it drive
 `GET /inventory/purchase-needs?locationId` (`purchase-needs.ts`; owners anywhere, managers their store) → `{ receivingLocationId, suppliesLocationIds, rows }`, one row per product alerting (O4) at the store or at a store that buys through it, most urgent first (out, then lost sales a day).
 - A store that orders from suppliers: `{ product, level, priority, needHere, forOthers[{ locationId, need, fromSpare, toOrder }], toOrderTotal }`. `fromSpare` is exactly what `GET /transfers/suggestions` would send (same need, spare, allocation and expiry checks); `toOrder` is the rest.
 - A store that buys through another: `{ product, level, priority, need, receivingSends, receivingOrders }`, the receiving store's view of the same numbers.
-- need = O12's need at that store, never below 0.
+- need = O12's need at that store, never below 0; `needHere` is 0 unless the product alerts there (paused or not a regular seller here: nothing ordered for here).
 
 ### Later: transfers that skip expired lots
 Today a transfer takes the oldest lot even when it's expired (O12 blocks the suggestion instead). Letting a transfer skip expired lots fits the batchId idea in `tasks/adjustment-lot-choice-epic.md`: the expired lot gets its merma by batch, the transfer takes the next one. Not started.
