@@ -634,11 +634,11 @@ describe('RecurringExpenseService autoPay', () => {
 
   test('direct-debit bills due up to today', async () => {
     const centro = await newLocation();
-    const renta = await service.createRule(rent(centro, { startDate: '2026-09-15', dayOfMonth: 15, autoPaid: true }));
+    const renta = await service.createRule(rent(centro, { freq: 'WEEKLY', weekday: 1, dayOfMonth: null, startDate: '2026-11-16', autoPaid: true }));
     const manual = await service.createRule(rent(centro, { name: 'Internet', startDate: '2026-11-01' }));
     const paused = await service.createRule(rent(centro, { name: 'Agua', startDate: '2026-11-01', autoPaid: true }));
     await service.updateRule(paused.id, { paused: true } as any);
-    await service.pay(`${renta.id}:2026-09-15`, { date: '2026-09-16' }, { staff: () => Promise.resolve([]), assertAccess: () => undefined });
+    await service.pay(`${renta.id}:2026-11-16`, { date: '2026-11-17' }, { staff: () => Promise.resolve([]), assertAccess: () => undefined });
 
     const mine = (run: { paid: string[]; failed: { occurrenceId: string }[] }) =>
       [run.paid, run.failed.map((f) => f.occurrenceId)].map((ids) => ids.filter((id) => id.startsWith(renta.id)));
@@ -648,7 +648,7 @@ describe('RecurringExpenseService autoPay', () => {
       given: 'an auto-paid fixed bill with one occurrence already paid by hand',
       should: 'book each other occurrence due up to today, on its due date, for the rule amount',
       actual: await booked(renta.id),
-      expected: [['2026-09-15', '2026-09-16', '8000'], ['2026-10-15', '2026-10-15', '8000'], ['2026-11-15', '2026-11-15', '8000']],
+      expected: [['2026-11-16', '2026-11-17', '8000'], ['2026-11-23', '2026-11-23', '8000']],
     });
 
     assert({
@@ -662,7 +662,7 @@ describe('RecurringExpenseService autoPay', () => {
       given: 'the run',
       should: 'report the occurrences it booked, and no failures',
       actual: first,
-      expected: [[`${renta.id}:2026-10-15`, `${renta.id}:2026-11-15`], []],
+      expected: [[`${renta.id}:2026-11-23`], []],
     });
 
     const second = mine(await service.autoPay('2026-11-23'));
@@ -671,7 +671,25 @@ describe('RecurringExpenseService autoPay', () => {
       given: 'the job running again the same day',
       should: 'book nothing twice and not retry what is already paid',
       actual: [(await booked(renta.id)).length, second],
-      expected: [3, [[], []]],
+      expected: [2, [[], []]],
+    });
+  });
+  test('old unpaid occurrences of a bill switched to auto-pay', async () => {
+    const centro = await newLocation();
+    const renta = await service.createRule(rent(centro, { startDate: '2026-06-20', dayOfMonth: 20, autoPaid: true }));
+
+    await service.autoPay('2026-11-23');
+    const listed = (await service.upcoming({ locationId: centro, today: '2026-11-23', days: 0, staff: () => Promise.resolve([]) })).data
+      .filter((o) => o.ruleId === renta.id).map((o) => [o.dueDate, o.overdue]);
+
+    assert({
+      given: 'an auto-paid bill whose start date is months ago',
+      should: 'book only the occurrence due in the last week, leaving older ones overdue for a person to settle',
+      actual: [await booked(renta.id), listed],
+      expected: [
+        [['2026-11-20', '2026-11-20', '8000']],
+        [['2026-06-20', true], ['2026-07-20', true], ['2026-08-20', true], ['2026-09-20', true], ['2026-10-20', true]],
+      ],
     });
   });
 });
