@@ -252,4 +252,43 @@ describe('ExpenseService payroll by store', () => {
       expected: [first.map((e) => e.id).sort(), first.map((e) => e.id).sort(), 2],
     });
   });
+
+  test('a replay after the hours changed in Square', async () => {
+    const centro = await newLocation();
+    const norte = await newLocation('Norte');
+    const input = payroll([{ locationId: centro, workedMinutes: 60 }], { clientRequestId: `pay-moved-${centro}` });
+    const first = await service.createPayrollExpenses(input);
+    let asked = 0;
+
+    const onlyNorte = await service.createPayrollExpenses({ ...input, hours: async () => { asked++; return [{ locationId: norte, workedMinutes: 60 }]; } });
+    const squareDown = await outcome(service.createPayrollExpenses({ ...input, hours: async () => { asked++; throw new Error('Square down'); } }));
+
+    assert({
+      given: 'the payment replayed after its hours moved to another store, and again with Square down',
+      should: 'return the original expenses both times without asking Square, and pay nothing twice',
+      actual: [
+        onlyNorte.map((e) => e.id),
+        squareDown,
+        asked,
+        await prisma.expense.count({ where: { teamMemberId: input.teamMemberId } }),
+      ],
+      expected: [first.map((e) => e.id), 'done', 0, 1],
+    });
+  });
+
+  test('a request id reused for a different payment', async () => {
+    const centro = await newLocation();
+    const input = payroll([{ locationId: centro, workedMinutes: 60 }], { clientRequestId: `pay-reused-${centro}` });
+    await service.createPayrollExpenses(input);
+
+    assert({
+      given: 'the same request id with another amount, or for another person',
+      should: 'refuse instead of returning the original payment',
+      actual: [
+        await outcome(service.createPayrollExpenses({ ...input, amount: 999 })),
+        await outcome(service.createPayrollExpenses({ ...input, teamMemberId: 'someone-else' })),
+      ],
+      expected: Array(2).fill('This clientRequestId was already used for a different expense'),
+    });
+  });
 });

@@ -219,4 +219,17 @@ describe('ExpenseController payroll by store', () => {
       expected: ['Missing required fields: teamMemberId, amount, date', 'Missing required fields: teamMemberId, amount, date', 0],
     });
   });
+
+  test("a replay of a payment booked at a store the manager doesn't run", async () => {
+    const labor = { getPayrollSummary: vi.fn() };
+    const service = { createPayrollExpenses: vi.fn().mockResolvedValue([{ locationId: 'norte', amount: { toString: () => '1000' } }]) };
+    const controller = new ExpenseController(service as any, labor as any);
+
+    assert({
+      given: "a manager of Centro resending a request id that booked a payment at Norte",
+      should: 'refuse rather than return Norte\'s expense',
+      actual: await outcome(controller.createPayrollExpense({ ...body, clientRequestId: 'k' }, requestAs('MANAGER'))),
+      expected: 'No tienes acceso a esta sucursal',
+    });
+  });
 });
