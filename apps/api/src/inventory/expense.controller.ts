@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ExpenseService } from './expense.service';
+import { LaborService } from '../labor/labor.service';
 import { parseDateParam } from './business-date';
 import { ExpenseType } from '@prisma/client';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, Public, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
@@ -76,7 +77,10 @@ interface CreateExpenseDto {
 @Controller('expenses')
 @UseGuards(AuthGuard, LocationGuard)
 export class ExpenseController {
-  constructor(private readonly expenseService: ExpenseService) {}
+  constructor(
+    private readonly expenseService: ExpenseService,
+    private readonly laborService: LaborService,
+  ) {}
 
   // ==========================================================================
   // IMPORTANT: Specific routes MUST come before parameterized routes (:id)
@@ -202,6 +206,45 @@ export class ExpenseController {
         ...expense,
         amount: expense.amount.toString(),
       },
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // Pay a person: one PAYROLL expense per store, by their Square hours there
+  // --------------------------------------------------------------------------
+  @Post('payroll')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async createPayrollExpense(
+    @Body() body: { teamMemberId: string; periodStart: string; periodEnd: string; amount: number; date: string; reference?: string; clientRequestId?: string },
+    @Req() req: RoleGuardedRequest,
+  ) {
+    if (!body.teamMemberId || body.amount === undefined || !body.date) {
+      throw new HttpException(
+        { success: false, message: 'Missing required fields: teamMemberId, amount, date' },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+    const expenses = await this.expenseService.createPayrollExpenses({
+      teamMemberId: body.teamMemberId,
+      periodStart: body.periodStart,
+      periodEnd: body.periodEnd,
+      amount: body.amount,
+      date: parseDateParam(body.date, 'date')!,
+      reference: body.reference,
+      createdBy: req.employee.id,
+      clientRequestId: body.clientRequestId,
+      hours: async () => {
+        const { stores } = await this.laborService.getPayrollSummary(body.teamMemberId, { startDate: body.periodStart, endDate: body.periodEnd });
+        // Hours at a Square location that isn't one of ours aren't charged here.
+        const ours = stores.flatMap((s) => (s.locationId && s.workedMinutes > 0 ? [{ locationId: s.locationId, workedMinutes: s.workedMinutes }] : []));
+        // Each store's part is an expense there: the payer needs access to all of them.
+        for (const s of ours) assertLocationAccess(req, s.locationId);
+        return ours;
+      },
+    });
+    return {
+      success: true,
+      data: { expenses: expenses.map((e) => ({ ...e, amount: e.amount.toString() })) },
     };
   }
 

@@ -849,6 +849,7 @@ model Expense {
   // there, split by day (expense-period.ts). Null: the day it was paid.
   periodStart DateTime? @db.Date
   periodEnd   DateTime? @db.Date
+  teamMemberId String? // PAYROLL: the Square team member paid (one expense per store they worked at)
   description String? // Description of the expense
   vendor      String? // Who was paid (landlord, utility company, etc.)
   reference   String? // Invoice/receipt number
@@ -868,6 +869,7 @@ model Expense {
   @@index([type])
   @@index([date])
   @@index([periodStart])
+  @@index([teamMemberId])
 }
 
 enum ExpenseType {

@@ -13,6 +13,7 @@ import { InventoryReceivingService } from './inventory-receiving.service';
 import { InventoryReportsController } from './inventory-reports.controller';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ExpenseController } from './expense.controller';
+import { LaborModule } from '../labor/labor.module';
 import { ExpenseService } from './expense.service';
 import { StockCountController } from './stock-count.controller';
 import { InventoryLotsController } from './inventory-lots.controller';
@@ -22,7 +23,7 @@ import { AuthModule } from '../auth/auth.module';
 import { ProductsModule } from '../products/products.module';
 
 @Module({
-  imports: [forwardRef(() => AuthModule), ProductsModule],
+  imports: [forwardRef(() => AuthModule), ProductsModule, LaborModule],
   controllers: [
     InventoryReconciliationController,
     InventoryAdjustmentController,
