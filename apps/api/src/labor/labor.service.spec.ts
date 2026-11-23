@@ -203,3 +203,47 @@ describe('LaborService.deleteShift', () => {
     assert({ given: 'an unknown timecard id', should: 'answer 404, not 502', actual: status, expected: 404 });
   });
 });
+
+describe('LaborService.getShiftsByPerson', () => {
+  test("everyone's shifts at every store", async () => {
+    const card = (id: string, teamMemberId: string, startAt: string, endAt: string, amount?: number, locationId = 'L1') =>
+      ({ ...timecard(id, startAt, endAt, amount, locationId), teamMemberId, ...(amount === undefined && { wage: undefined }) });
+    const searchTimecards = vi.fn().mockResolvedValueOnce({
+      timecards: [
+        card('a1', 'ana', '2026-10-20T09:00:00-06:00', '2026-10-20T11:00:00-06:00', 5000),
+        card('a2', 'ana', '2026-10-21T09:00:00-06:00', '2026-10-21T10:00:00-06:00', undefined, 'L2'),
+        card('q1', 'quit', '2026-10-19T09:00:00-06:00', '2026-10-19T10:00:00-06:00', 6000),
+        card('g1', 'ghost', '2026-10-22T09:00:00-06:00', '2026-10-22T10:00:00-06:00', 6000),
+      ],
+    });
+    const search = vi.fn().mockResolvedValue({ teamMembers: [
+      { id: 'ana', givenName: 'Ana', familyName: 'López', status: 'ACTIVE' },
+      { id: 'quit', givenName: 'Quique', status: 'INACTIVE' },
+      { id: 'beto', givenName: 'Beto', status: 'ACTIVE' },
+      { id: 'old', givenName: 'Olga', status: 'INACTIVE' },
+    ] });
+    const service = laborWith({ searchTimecards });
+    service['squareClient'] = { labor: { searchTimecards }, teamMembers: { search } } as any;
+
+    const people = await service.getShiftsByPerson(period.startDate, period.endDate);
+
+    assert({
+      given: 'Ana with shifts at both stores, Quique deactivated with a shift, Beto active with none, Olga deactivated with none, someone missing from the team list with a shift',
+      should: "list Ana, Quique, Beto and the unnamed one (by id) with their shifts (a shift without wage at the person's rate), not Olga",
+      actual: people.map((p) => [p.teamMemberId, p.name, p.shifts.map((s) => [s.locationId, s.workedMinutes, s.cost])]),
+      expected: [
+        ['ana', 'Ana López', [['lolita', 120, 100], ['oriente', 60, 50]]],
+        ['quit', 'Quique', [['lolita', 60, 60]]],
+        ['beto', 'Beto', []],
+        ['ghost', 'ghost', [['lolita', 60, 60]]],
+      ],
+    });
+
+    assert({
+      given: 'the period',
+      should: 'search every team member\'s timecards once, by workday',
+      actual: [searchTimecards.mock.calls.length, searchTimecards.mock.calls[0][0].query.filter],
+      expected: [1, { workday: { dateRange: period, matchTimecardsBy: 'START_AT', defaultTimezone: 'America/Mexico_City' } }],
+    });
+  });
+});

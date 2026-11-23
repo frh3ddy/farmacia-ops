@@ -202,13 +202,14 @@ describe('RecurringExpenseService upcoming', () => {
     await paid(renta, '2026-10-01', 8000);
     for (const [day, amount] of [['2026-08-15', 100], ['2026-09-15', 200], ['2026-10-15', 300], ['2026-11-15', 601]] as const) await paid(luz, day, amount);
 
-    const upcoming = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 30, staff: noStaff });
+    const { data: upcoming, payrollUnavailable } = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 30, staff: noStaff });
 
     assert({
       given: 'rent paid for October, Luz paid four times, Agua never paid, and a paused rule (today 23 Nov, 30 days)',
       should: "list unpaid due dates up to 23 Dec with amount or the last 3 payments' average, in due order",
-      actual: upcoming.map(brief),
+      actual: [payrollUnavailable, ...upcoming.map(brief)],
       expected: [
+        false,
         ['Renta', '2026-11-01', true, '8000', false, '2026-11-01', '2026-11-30'],
         ['Renta', '2026-12-01', false, '8000', false, '2026-12-01', '2026-12-31'],
         ['Agua', '2026-12-10', false, null, true, '2026-12-01', '2026-12-31'],
@@ -232,7 +233,7 @@ describe('RecurringExpenseService upcoming', () => {
     await service.createRule(rent(norte, { name: tag('Norte') }));
     await service.createRule(rent(null, { name: tag('General'), type: 'PROFESSIONAL' }));
     const names = async (locationId?: string | null) =>
-      (await service.upcoming({ locationId, today: '2026-11-23', days: 10, staff: async () => [] }))
+      (await service.upcoming({ locationId, today: '2026-11-23', days: 10, staff: async () => [] })).data
         .map((o) => o.name).filter((n) => n.endsWith(centro)).map((n) => n.split(' ')[0]).sort();
 
     assert({
@@ -268,7 +269,7 @@ describe('RecurringExpenseService upcoming', () => {
       } });
     }
 
-    const upcoming = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 6, staff });
+    const { data: upcoming } = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 6, staff });
 
     assert({
       given: 'a weekly payroll since 14 Nov, everyone paid for its first week, today Monday 23 Nov',
@@ -295,6 +296,38 @@ describe('RecurringExpenseService upcoming', () => {
       should: 'ask Square once, for the days they span',
       actual: staff.mock.calls,
       expected: [['2026-11-07', '2026-11-27']],
+    });
+  });
+
+  test('payroll older than the lookback', async () => {
+    const centro = await newLocation();
+    const beto = `beto-${centro}`;
+    await service.setPayrollConfig([{ teamMemberId: beto, mode: 'FIXED', fixedAmount: 3000, homeLocationId: centro }]);
+    await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2025-11-01' }));
+    const staff = vi.fn().mockResolvedValue([{ teamMemberId: beto, name: 'Beto', shifts: [] }]);
+
+    const { data } = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 6, staff });
+
+    assert({
+      given: 'a weekly payroll unpaid since a year ago, today 23 Nov',
+      should: 'list only due dates in the last 56 days and ask Square only for their weeks',
+      actual: [data[0].dueDate, data.length, staff.mock.calls],
+      expected: ['2026-10-03', 9, [['2026-09-26', '2026-11-27']]],
+    });
+  });
+
+  test('Square down', async () => {
+    const centro = await newLocation();
+    await service.createRule(rent(centro, { startDate: '2026-11-01' }));
+    await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-28' }));
+
+    const { data, payrollUnavailable } = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 6, staff: () => Promise.reject(new Error('Square 502')) });
+
+    assert({
+      given: 'a rent and a payroll rule while Square labor fails',
+      should: 'still list the rent, and the payroll without people or amount, flagged',
+      actual: [payrollUnavailable, data.map((o: any) => [o.name, o.dueDate, o.amount, o.payroll])],
+      expected: [true, [['Renta', '2026-11-01', '8000', undefined], ['Nómina', '2026-11-28', null, null]]],
     });
   });
 });

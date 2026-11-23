@@ -112,11 +112,8 @@ describe('RecurringExpenseController payroll config', () => {
 
 describe('RecurringExpenseController upcoming', () => {
   function upcomingSetup() {
-    const service = { upcoming: vi.fn().mockResolvedValue([]) };
-    const labor = {
-      listTeamMembers: vi.fn().mockResolvedValue([{ id: 'ana', fullName: 'Ana López' }]),
-      getPayrollSummary: vi.fn().mockResolvedValue({ shifts: [{ date: '2026-11-20', locationId: 'centro', workedMinutes: 60, cost: 50 }] }),
-    };
+    const service = { upcoming: vi.fn().mockResolvedValue({ data: [], payrollUnavailable: true }) };
+    const labor = { getShiftsByPerson: vi.fn().mockResolvedValue([{ teamMemberId: 'ana', name: 'Ana López', shifts: [] }]) };
     return { service, labor, controller: new RecurringExpenseController(service as any, labor as any) };
   }
 
@@ -146,19 +143,20 @@ describe('RecurringExpenseController upcoming', () => {
     });
   });
 
-  test("payroll hours come from each person's Square timecards", async () => {
+  test("payroll hours come from everyone's Square timecards", async () => {
     const { service, labor, controller } = upcomingSetup();
-    await controller.upcoming(requestAs('OWNER'), undefined, undefined, '7');
+    const response = await controller.upcoming(requestAs('OWNER'), undefined, undefined, '7');
     const { staff, days } = service.upcoming.mock.calls[0][0];
 
     assert({
-      given: 'the service asking for 1–27 Nov',
-      should: "give each active person's shifts in that span",
-      actual: [days, await staff('2026-11-01', '2026-11-27'), labor.getPayrollSummary.mock.calls],
+      given: 'the service asking for 1–27 Nov, and Square labor down',
+      should: 'give the shifts by person for that span, and pass the flag on',
+      actual: [days, await staff('2026-11-01', '2026-11-27'), labor.getShiftsByPerson.mock.calls, response],
       expected: [
         7,
-        [{ teamMemberId: 'ana', name: 'Ana López', shifts: [{ date: '2026-11-20', locationId: 'centro', workedMinutes: 60, cost: 50 }] }],
-        [['ana', { startDate: '2026-11-01', endDate: '2026-11-27' }]],
+        [{ teamMemberId: 'ana', name: 'Ana López', shifts: [] }],
+        [['2026-11-01', '2026-11-27']],
+        { success: true, data: [], payrollUnavailable: true },
       ],
     });
   });
