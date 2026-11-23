@@ -160,3 +160,26 @@ describe('RecurringExpenseService payroll config', () => {
     });
   });
 });
+
+describe('RecurringExpenseService and deleted stores', () => {
+  test("a store with rules or someone's home", async () => {
+    const withRule = await newLocation();
+    const withHome = await newLocation('Norte');
+    const { id: ruleId } = await service.createRule(rent(withRule));
+    await service.setPayrollConfig([{ teamMemberId: `TM-home-${withHome}`, mode: 'FIXED', fixedAmount: 3000, homeLocationId: withHome }]);
+
+    const deleting = async (id: string) => outcome(prisma.location.delete({ where: { id } }));
+
+    assert({
+      given: "deleting a store that has a recurring rule, and one that is a fixed salary's home",
+      should: "refuse both, rather than turn the store's rent into a general rule or leave the salary with no store",
+      actual: [
+        (await deleting(withRule)) === 'done',
+        (await deleting(withHome)) === 'done',
+        (await prisma.recurringExpense.findUniqueOrThrow({ where: { id: ruleId } })).locationId,
+        (await prisma.payrollConfig.findUniqueOrThrow({ where: { teamMemberId: `TM-home-${withHome}` } })).homeLocationId,
+      ],
+      expected: [false, false, withRule, withHome],
+    });
+  });
+});

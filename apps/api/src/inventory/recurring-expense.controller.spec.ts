@@ -67,3 +67,45 @@ describe('RecurringExpenseController', () => {
     });
   });
 });
+
+describe('RecurringExpenseController payroll config', () => {
+  const stored = [
+    { teamMemberId: 'TM-centro', mode: 'FIXED', fixedAmount: 3000, homeLocationId: 'centro' },
+    { teamMemberId: 'TM-norte', mode: 'FIXED', fixedAmount: 4000, homeLocationId: 'norte' },
+    { teamMemberId: 'TM-hours', mode: 'HOURS', fixedAmount: null, homeLocationId: null },
+  ];
+  function configSetup() {
+    const service = {
+      getPayrollConfig: vi.fn().mockResolvedValue(stored),
+      setPayrollConfig: vi.fn().mockResolvedValue(stored),
+    };
+    return { service, controller: new RecurringExpenseController(service as any) };
+  }
+
+  test("an accountant of one store and another store's salaries", async () => {
+    const { service, controller } = configSetup();
+
+    assert({
+      given: 'a Centro-only accountant setting a Norte home, or changing someone whose home is Norte',
+      should: 'refuse both and save nothing',
+      actual: [
+        await outcome(controller.setPayrollConfig([{ teamMemberId: 'TM-hours', mode: 'FIXED', fixedAmount: 1, homeLocationId: 'norte' }], requestAs('ACCOUNTANT'))),
+        await outcome(controller.setPayrollConfig([{ teamMemberId: 'TM-norte', fixedAmount: 1 }], requestAs('ACCOUNTANT'))),
+        service.setPayrollConfig.mock.calls.length,
+      ],
+      expected: ['No tienes acceso a esta sucursal', 'No tienes acceso a esta sucursal', 0],
+    });
+  });
+
+  test('reading salaries', async () => {
+    const { controller } = configSetup();
+    const ids = async (role: string) => (await controller.getPayrollConfig(requestAs(role))).data.map((r) => r.teamMemberId);
+
+    assert({
+      given: 'a Centro-only accountant, and the owner, reading payroll config',
+      should: 'leave out the Norte-home row for the accountant only',
+      actual: [await ids('ACCOUNTANT'), await ids('OWNER')],
+      expected: [['TM-centro', 'TM-hours'], ['TM-centro', 'TM-norte', 'TM-hours']],
+    });
+  });
+});
