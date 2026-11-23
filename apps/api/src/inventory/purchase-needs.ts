@@ -12,6 +12,7 @@ export interface PurchaseNeed {
   /** The most urgent across this store and the ones it buys for. */
   level: Level;
   priority: number;
+  /** 0 unless the product alerts here. */
   needHere: number;
   /** Stores that buy through this one, where the product alerts. */
   forOthers: Array<{ locationId: string; need: number; fromSpare: number; toOrder: number }>;
@@ -80,7 +81,8 @@ export async function purchaseNeeds(prisma: PrismaClient, locationId: string, o:
   }
 
   const rows: PurchaseNeed[] = ids.map((id) => {
-    const needHere = needAt(id, locationId);
+    // Only what alerts here: a paused product or one that isn't a regular seller here isn't ordered for here.
+    const needHere = alerts.get(locationId)!.has(id) ? needAt(id, locationId) : 0;
     const forOthers = suppliesLocationIds
       .filter((s) => alerts.get(s)!.has(id))
       .map((s) => {
