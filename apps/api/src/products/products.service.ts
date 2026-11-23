@@ -177,7 +177,7 @@ export type ProductListFilter = (typeof PRODUCT_LIST_FILTERS)[number];
 /**
  * One row per stocked product this location sells (not Yastás services, not
  * discontinued, not another store's one-store product), with its stock,
- * whether its margin is under 10%, and its stock alert. The counts, the filtered
+ * whether its margin is under the store's lowMarginPct (default 10%), and its stock alert. The counts, the filtered
  * list and the rows' `stockAlert` all read it, so a chip's count is always the
  * length of its list.
  *
@@ -228,7 +228,7 @@ export function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql
             AND inv.qty IS NOT NULL
             AND inv.qty > 0
             AND (m."priceCents" / 100.0 - (inv.total_cost / inv.qty))
-                / NULLIF(m."priceCents" / 100.0, 0) * 100 < 10,
+                / NULLIF(m."priceCents" / 100.0, 0) * 100 < COALESCE(cfg."lowMarginPct", 10),
           false
         ) AS low_margin,
         m."squareVariationId" AS square_variation_id,
@@ -1618,7 +1618,7 @@ export class ProductsService {
    * Lightweight stock/margin alert counts for a location (Dashboard alerts).
    * Uses SQL aggregates + window functions instead of transferring full product
    * rows. outOfStock, lowStock, paused and outAlert as their filters (FILTER_SQL),
-   * lowMargin < 10% (margin computed from selling price vs weighted average cost
+   * lowMargin under the store's lowMarginPct (margin computed from selling price vs weighted average cost
    * of the location's FIFO batches).
    */
   async getProductCounts(locationId?: string) {

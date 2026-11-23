@@ -10,6 +10,7 @@ const RANGES = {
   slowMinDaysAtZero: [1, 365],
   equivalentMinUnits: [1, 100],
   noSalesMinDays: [30, 730],
+  lowMarginPct: [1, 60],
 } as const;
 type NumberSetting = keyof typeof RANGES;
 
@@ -25,7 +26,7 @@ export async function stockAlertSettingsOf(prisma: PrismaClient, locationId: str
     prisma.stockAlertSettings.findUnique({ where: { locationId } }),
     prisma.stockAlertSettings.findMany({ where: { receivingLocationId: locationId, location: { isActive: true } }, select: { locationId: true }, orderBy: { locationId: 'asc' } }),
   ]);
-  const s = row ?? { windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, receivingLocationId: null };
+  const s = row ?? { windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, lowMarginPct: 10, receivingLocationId: null };
   return {
     locationId,
     windowDays: s.windowDays,
@@ -35,6 +36,7 @@ export async function stockAlertSettingsOf(prisma: PrismaClient, locationId: str
     slowMinDaysAtZero: s.slowMinDaysAtZero,
     equivalentMinUnits: s.equivalentMinUnits,
     noSalesMinDays: s.noSalesMinDays,
+    lowMarginPct: s.lowMarginPct,
     receivingLocationId: s.receivingLocationId,
     suppliesLocationIds: supplied.map((r) => r.locationId),
   };
