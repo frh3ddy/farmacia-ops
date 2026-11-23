@@ -9,9 +9,10 @@ import {
   HttpException,
   HttpStatus,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { LaborService } from './labor.service';
-import { AuthGuard, Roles } from '../auth/guards/auth.guard';
+import { AuthGuard, Roles, GuardedRequest, scopedLocationId, assertLocationAccess } from '../auth/guards/auth.guard';
 
 interface UpdateShiftTimesDto {
   startAt?: string;
@@ -45,15 +46,23 @@ export class LaborController {
   // - ?teamMemberId=xxx (required)
   // - ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD (custom range) OR
   // - ?weekOffset=0 (0 = current week, 1 = last week, ...) — default 0
+  // - ?locationId=xxx: one store's shifts. Only the owner may omit it (all
+  //   stores). Anyone else who omits it gets their current store, and may name
+  //   another only where they have active access (403 otherwise).
   // --------------------------------------------------------------------------
   @Get('payroll-summary')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async getPayrollSummary(
+    @Req() req: GuardedRequest,
     @Query('teamMemberId') teamMemberId?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('weekOffset') weekOffset?: string,
+    @Query('locationId') requestedLocationId?: string,
   ) {
+    const locationId = scopedLocationId(req, requestedLocationId);
+    if (locationId) assertLocationAccess(req, locationId);
+
     if (!teamMemberId) {
       throw new HttpException(
         { success: false, message: 'teamMemberId is required' },
@@ -87,6 +96,7 @@ export class LaborController {
       endDate,
       weekOffset:
         weekOffset !== undefined ? parseInt(weekOffset, 10) : undefined,
+      locationId,
     });
 
     return { success: true, data: summary };
