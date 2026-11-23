@@ -182,3 +182,74 @@ describe('ExpenseService general expenses', () => {
     });
   });
 });
+
+describe('ExpenseService payroll by store', () => {
+  const payroll = (stores: { locationId: string; workedMinutes: number }[], extra: Record<string, unknown> = {}) => ({
+    teamMemberId: `TM-${Math.random()}`, periodStart: '2026-11-30', periodEnd: '2026-12-06',
+    amount: 1000, date: new Date('2026-12-07T12:00:00-06:00'), hours: async () => stores, ...extra,
+  });
+
+  test('a person who worked at two stores', async () => {
+    const centro = await newLocation();
+    const norte = await newLocation('Norte');
+    const input = payroll([{ locationId: centro, workedMinutes: 120 }, { locationId: norte, workedMinutes: 60 }]);
+
+    const expenses = await service.createPayrollExpenses(input);
+
+    assert({
+      given: 'a $1,000 payment and twice the hours at one store as at the other',
+      should: 'record one payroll expense per store by hours, with cents adding up to the payment',
+      actual: expenses.map((e) => [e.locationId === centro ? 'centro' : 'norte', e.amount.toString(), e.type, e.teamMemberId, e.periodStart?.toISOString().slice(0, 10), e.periodEnd?.toISOString().slice(0, 10)]),
+      expected: [
+        ['centro', '666.67', 'PAYROLL', input.teamMemberId, '2026-11-30', '2026-12-06'],
+        ['norte', '333.33', 'PAYROLL', input.teamMemberId, '2026-11-30', '2026-12-06'],
+      ],
+    });
+  });
+
+  test('no hours in the period', async () => {
+    const centro = await newLocation();
+
+    assert({
+      given: 'no hours at any store, or only zero-minute shifts',
+      should: 'refuse and record nothing',
+      actual: [
+        await outcome(service.createPayrollExpenses(payroll([]))),
+        await outcome(service.createPayrollExpenses(payroll([{ locationId: centro, workedMinutes: 0 }]))),
+        await prisma.expense.count({ where: { locationId: centro } }),
+      ],
+      expected: ['Sin horas registradas en el periodo', 'Sin horas registradas en el periodo', 0],
+    });
+  });
+
+  test('a payment with no period', async () => {
+    const centro = await newLocation();
+
+    assert({
+      given: 'a payroll payment missing the end of its period',
+      should: 'refuse it',
+      actual: await outcome(service.createPayrollExpenses(payroll([{ locationId: centro, workedMinutes: 60 }], { periodEnd: undefined }))),
+      expected: 'El periodo necesita inicio y fin',
+    });
+  });
+
+  test('the same payment replayed', async () => {
+    const centro = await newLocation();
+    const norte = await newLocation('Norte');
+    const input = payroll([{ locationId: centro, workedMinutes: 60 }, { locationId: norte, workedMinutes: 60 }], { clientRequestId: `pay-${centro}` });
+
+    const first = await service.createPayrollExpenses(input);
+    const [second, third] = await Promise.all([service.createPayrollExpenses(input), service.createPayrollExpenses(input)]);
+
+    assert({
+      given: 'an offline-queue replay of a payroll payment, twice at once',
+      should: 'record the expenses once and return the same ones',
+      actual: [
+        second.map((e) => e.id).sort(),
+        third.map((e) => e.id).sort(),
+        await prisma.expense.count({ where: { teamMemberId: input.teamMemberId } }),
+      ],
+      expected: [first.map((e) => e.id).sort(), first.map((e) => e.id).sort(), 2],
+    });
+  });
+});
