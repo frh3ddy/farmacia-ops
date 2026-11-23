@@ -1,4 +1,5 @@
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { SquareClient, SquareError } from 'square';
 import { createSquareClient } from '../square/square-client';
 import type { Timecard } from 'square/api';
@@ -23,8 +24,17 @@ export interface ShiftSummary {
   minutes: number;         // remainder minutes
   hourlyRate: number;      // dollars (major currency unit)
   currency: string;
-  cost: number;            // pay for this shift
+  cost: number;            // pay for this shift, rounded to the cent
   jobTitle: string | null;
+  locationId: string | null;   // our store; null if its Square location isn't one of ours
+  locationName: string | null;
+}
+
+export interface StorePayroll {
+  locationId: string | null;
+  locationName: string | null;
+  workedMinutes: number;
+  cost: number;            // sum of its shifts' costs
 }
 
 export interface PayrollSummary {
@@ -36,7 +46,8 @@ export interface PayrollSummary {
   totalHours: number;
   totalMinutes: number;    // remainder minutes
   workedDays: number;      // distinct dates with at least one shift
-  totalCost: number;
+  totalCost: number;       // sum of the stores' costs, so the rows on screen add up
+  stores: StorePayroll[];
   shifts: ShiftSummary[];
 }
 
@@ -70,6 +81,8 @@ const isNotFound = (error: unknown) => error instanceof SquareError && error.sta
 export class LaborService {
   private readonly logger = new Logger(LaborService.name);
   private squareClient: SquareClient | null = null;
+
+  constructor(private readonly prisma: PrismaService) {}
 
   // --------------------------------------------------------------------------
   // Square client (same pattern as CatalogService)
@@ -212,6 +225,7 @@ export class LaborService {
     timeZone: string,
     fallbackRateCents: number,
     currency: string,
+    store?: { id: string; name: string },
   ): ShiftSummary {
     const rateCents =
       shift.wage?.hourlyRate?.amount != null
@@ -235,6 +249,8 @@ export class LaborService {
       currency,
       cost,
       jobTitle: shift.wage?.title ?? null,
+      locationId: store?.id ?? null,
+      locationName: store?.name ?? null,
     };
   }
 
@@ -279,7 +295,7 @@ export class LaborService {
 
   async getPayrollSummary(
     teamMemberId: string,
-    options: { startDate?: string; endDate?: string; weekOffset?: number },
+    options: { startDate?: string; endDate?: string; weekOffset?: number; locationId?: string },
   ): Promise<PayrollSummary> {
     if (!teamMemberId) {
       throw new HttpException(
@@ -297,6 +313,11 @@ export class LaborService {
       );
     }
 
+    const locations = await this.prisma.location.findMany({ select: { id: true, squareId: true, name: true } });
+    const storeBySquareId = new Map(locations.map((l) => [l.squareId, l]));
+    const store = options.locationId ? locations.find((l) => l.id === options.locationId && l.squareId) : undefined;
+    if (options.locationId && !store) throw new NotFoundException(`No se encontró la sucursal ${options.locationId}`);
+
     const client = this.getSquareClient();
     const timeZone = DEFAULT_TIMEZONE;
 
@@ -313,6 +334,7 @@ export class LaborService {
           query: {
             filter: {
               teamMemberIds: [teamMemberId],
+              ...(store && { locationIds: [store.squareId!] }),
               workday: {
                 dateRange: {
                   startDate: period.startDate,
@@ -369,8 +391,18 @@ export class LaborService {
       }
 
       const summaries = shifts.map(s =>
-        this.toShiftSummary(s, timeZone, rateCents, currency),
+        this.toShiftSummary(s, timeZone, rateCents, currency, storeBySquareId.get(s.locationId)),
       );
+
+      // Added in cents, so a store is exactly its shifts and the total exactly its stores.
+      const byStore = new Map<string | null, StorePayroll & { cents: number }>();
+      for (const s of summaries) {
+        const row = byStore.get(s.locationId) ?? { locationId: s.locationId, locationName: s.locationName, workedMinutes: 0, cost: 0, cents: 0 };
+        row.workedMinutes += s.workedMinutes;
+        row.cents += Math.round(s.cost * 100);
+        byStore.set(s.locationId, row);
+      }
+      const stores = [...byStore.values()].map(({ cents, ...row }) => ({ ...row, cost: cents / 100 }));
 
       const totalWorkedMinutes = summaries.reduce(
         (acc, s) => acc + s.workedMinutes,
@@ -378,8 +410,7 @@ export class LaborService {
       );
       const workedDays = new Set(summaries.map(s => s.date)).size;
       const hourlyRate = rateCents / 100;
-      const totalCost =
-        Math.round(((totalWorkedMinutes / 60) * hourlyRate) * 100) / 100;
+      const totalCost = [...byStore.values()].reduce((acc, row) => acc + row.cents, 0) / 100;
 
       return {
         teamMemberId,
@@ -391,6 +422,7 @@ export class LaborService {
         totalMinutes: totalWorkedMinutes % 60,
         workedDays,
         totalCost,
+        stores,
         shifts: summaries,
       };
     } catch (error) {
