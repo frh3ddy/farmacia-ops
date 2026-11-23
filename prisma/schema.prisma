@@ -906,7 +906,7 @@ model RecurringExpense {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  location Location? @relation(fields: [locationId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id], onDelete: Restrict) // stores are deactivated, never deleted
   expenses Expense[]
 
   @@index([locationId])
@@ -941,7 +941,7 @@ model PayrollConfig {
   homeLocationId String? // FIXED: the store charged
   updatedAt      DateTime    @updatedAt
 
-  homeLocation Location? @relation(fields: [homeLocationId], references: [id])
+  homeLocation Location? @relation(fields: [homeLocationId], references: [id], onDelete: Restrict)
 }
 
 enum PayrollMode {

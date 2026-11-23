@@ -27,7 +27,8 @@ CREATE TABLE "RecurringExpense" (
     CONSTRAINT "RecurringExpense_pkey" PRIMARY KEY ("id")
 );
 CREATE INDEX "RecurringExpense_locationId_idx" ON "RecurringExpense"("locationId");
-ALTER TABLE "RecurringExpense" ADD CONSTRAINT "RecurringExpense_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- RESTRICT: stores are deactivated, never deleted; SET NULL would turn a store's rent into a general rule.
+ALTER TABLE "RecurringExpense" ADD CONSTRAINT "RecurringExpense_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 CREATE TABLE "PayrollConfig" (
     "teamMemberId" TEXT NOT NULL,
@@ -38,7 +39,7 @@ CREATE TABLE "PayrollConfig" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "PayrollConfig_pkey" PRIMARY KEY ("teamMemberId")
 );
-ALTER TABLE "PayrollConfig" ADD CONSTRAINT "PayrollConfig_homeLocationId_fkey" FOREIGN KEY ("homeLocationId") REFERENCES "Location"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "PayrollConfig" ADD CONSTRAINT "PayrollConfig_homeLocationId_fkey" FOREIGN KEY ("homeLocationId") REFERENCES "Location"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- The occurrence an expense pays. A non-payroll occurrence is paid once;
 -- payroll has one expense per person and store.

@@ -45,18 +45,38 @@ export class RecurringExpenseController {
     return { success: true };
   }
 
+  // An accountant sees and sets only the salaries of the stores they can access
+  // (a home there, or none); the owner, all of them.
   @Get('payroll-config')
   @Roles('OWNER', 'ACCOUNTANT')
-  async getPayrollConfig() {
-    const rows = await this.service.getPayrollConfig();
-    return { success: true, data: rows.map((r) => ({ ...r, fixedAmount: r.fixedAmount?.toString() ?? null })) };
+  async getPayrollConfig(@Req() req: GuardedRequest) {
+    return { success: true, data: this.visibleConfig(req, await this.service.getPayrollConfig()) };
   }
 
   @Put('payroll-config')
   @Roles('OWNER', 'ACCOUNTANT')
-  async setPayrollConfig(@Body() body: PayrollConfigInput[]) {
-    const rows = await this.service.setPayrollConfig(Array.isArray(body) ? body : []);
-    return { success: true, data: rows.map((r) => ({ ...r, fixedAmount: r.fixedAmount?.toString() ?? null })) };
+  async setPayrollConfig(@Body() body: PayrollConfigInput[], @Req() req: GuardedRequest) {
+    const rows = Array.isArray(body) ? body : [];
+    const storedHome = new Map((await this.service.getPayrollConfig()).map((c) => [c.teamMemberId, c.homeLocationId]));
+    for (const row of rows) {
+      for (const home of [row.homeLocationId, storedHome.get(row.teamMemberId)]) {
+        if (home) assertLocationAccess(req, home);
+      }
+    }
+    return { success: true, data: this.visibleConfig(req, await this.service.setPayrollConfig(rows)) };
+  }
+
+  private visibleConfig<T extends { homeLocationId: string | null; fixedAmount: { toString(): string } | null }>(req: GuardedRequest, rows: T[]) {
+    const canSee = (home: string | null) => {
+      if (!home) return true;
+      try {
+        assertLocationAccess(req, home);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    return rows.filter((r) => canSee(r.homeLocationId)).map((r) => ({ ...r, fixedAmount: r.fixedAmount?.toString() ?? null }));
   }
 
   /** A store rule needs access to its store; a general one is already owner/accountant by @Roles. */
