@@ -17,13 +17,13 @@ export type StockAlertSettingsPatch = Partial<Record<NumberSetting, number>> & {
 
 /**
  * A store's stock alert settings (defaults when it has no row), the store its
- * supplier orders go through (null: it buys for itself), and the stores that
- * buy through it.
+ * supplier orders go through (null: it buys for itself), and the active stores
+ * that buy through it (a closed one is never ordered for).
  */
 export async function stockAlertSettingsOf(prisma: PrismaClient, locationId: string) {
   const [row, supplied] = await Promise.all([
     prisma.stockAlertSettings.findUnique({ where: { locationId } }),
-    prisma.stockAlertSettings.findMany({ where: { receivingLocationId: locationId }, select: { locationId: true }, orderBy: { locationId: 'asc' } }),
+    prisma.stockAlertSettings.findMany({ where: { receivingLocationId: locationId, location: { isActive: true } }, select: { locationId: true }, orderBy: { locationId: 'asc' } }),
   ]);
   const s = row ?? { windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, receivingLocationId: null };
   return {
