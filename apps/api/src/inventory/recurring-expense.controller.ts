@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard, LocationGuard, Roles, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
-import { RecurringExpenseService, RecurringRuleInput, PayrollConfigInput, StaffHours } from './recurring-expense.service';
+import { RecurringExpenseService, RecurringRuleInput, PayrollConfigInput } from './recurring-expense.service';
 import { LaborService } from '../labor/labor.service';
 import { businessDay } from './business-date';
 import { readScope } from './expense.controller';
@@ -23,23 +23,13 @@ export class RecurringExpenseController {
   async upcoming(@Req() req: RoleGuardedRequest, @Query('locationId') locationId?: string, @Query('scope') scope?: string, @Query('days') days?: string) {
     const horizon = days === undefined ? 30 : Number(days);
     if (!Number.isInteger(horizon) || horizon < 0 || horizon > 366) throw new BadRequestException('days debe ser un número entero de 0 a 366');
-    const data = await this.service.upcoming({
+    const { data, payrollUnavailable } = await this.service.upcoming({
       locationId: readScope(req, locationId, scope),
       today: businessDay(new Date()),
       days: horizon,
-      staff: (from, to) => this.staffHours(from, to),
+      staff: (from, to) => this.labor.getShiftsByPerson(from, to),
     });
-    return { success: true, data };
-  }
-
-  // ponytail: one Square timecard search per active person per request; a location-wide search if staff grows.
-  private async staffHours(startDate: string, endDate: string): Promise<StaffHours[]> {
-    const members = await this.labor.listTeamMembers();
-    return Promise.all(members.map(async (m) => ({
-      teamMemberId: m.id,
-      name: m.fullName,
-      shifts: (await this.labor.getPayrollSummary(m.id, { startDate, endDate })).shifts,
-    })));
+    return { success: true, data, payrollUnavailable };
   }
 
   @Get('recurring')

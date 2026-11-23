@@ -70,6 +70,19 @@ interface TeamMemberSummary {
 const DEFAULT_TIMEZONE = 'America/Mexico_City';
 const DEFAULT_HOURLY_RATE_CENTS = 0;
 
+/** The most recent hourly rate in a person's timecards (the rate for those without wage info). */
+function latestRate(timecards: Timecard[]): { rateCents: number; currency: string } {
+  let rateCents = DEFAULT_HOURLY_RATE_CENTS;
+  let currency = 'USD';
+  for (const card of timecards) {
+    if (card.wage?.hourlyRate?.amount != null) {
+      rateCents = Number(card.wage.hourlyRate.amount);
+      currency = card.wage.hourlyRate.currency || currency;
+    }
+  }
+  return { rateCents, currency };
+}
+
 /** Square answers an unknown timecard id with a 404 it throws. */
 const isNotFound = (error: unknown) => error instanceof SquareError && error.statusCode === 404;
 
@@ -326,33 +339,10 @@ export class LaborService {
     );
 
     try {
-      const shifts: Timecard[] = [];
-      let cursor: string | undefined = undefined;
-
-      do {
-        const response = await client.labor.searchTimecards({
-          query: {
-            filter: {
-              teamMemberIds: [teamMemberId],
-              ...(store && { locationIds: [store.squareId!] }),
-              workday: {
-                dateRange: {
-                  startDate: period.startDate,
-                  endDate: period.endDate,
-                },
-                matchTimecardsBy: 'START_AT',
-                defaultTimezone: timeZone,
-              },
-            },
-            sort: { field: 'START_AT', order: 'ASC' },
-          },
-          limit: 200,
-          ...(cursor && { cursor }),
-        });
-
-        shifts.push(...(response.timecards || []));
-        cursor = response.cursor || undefined;
-      } while (cursor);
+      const shifts = await this.searchTimecards(client, period, {
+        teamMemberIds: [teamMemberId],
+        ...(store && { locationIds: [store.squareId!] }),
+      });
 
       this.logger.log(
         `[LABOR] Found ${shifts.length} timecard(s) for ${teamMemberId} in ${period.startDate}..${period.endDate}`,
@@ -381,14 +371,7 @@ export class LaborService {
 
       // Most recent hourly rate found in the period (used as the payroll rate
       // and as fallback for shifts without wage info).
-      let rateCents = DEFAULT_HOURLY_RATE_CENTS;
-      let currency = 'USD';
-      for (const shift of shifts) {
-        if (shift.wage?.hourlyRate?.amount != null) {
-          rateCents = Number(shift.wage.hourlyRate.amount);
-          currency = shift.wage.hourlyRate.currency || currency;
-        }
-      }
+      const { rateCents, currency } = latestRate(shifts);
 
       const summaries = shifts.map(s =>
         this.toShiftSummary(s, timeZone, rateCents, currency, storeBySquareId.get(s.locationId)),
@@ -432,6 +415,75 @@ export class LaborService {
         { success: false, message: 'Failed to fetch timecards from Square' },
         HttpStatus.BAD_GATEWAY,
       );
+    }
+  }
+
+  /** Every timecard in the period's workdays (store clock) matching `filter`, all pages. */
+  private async searchTimecards(
+    client: SquareClient,
+    period: { startDate: string; endDate: string },
+    filter: { teamMemberIds?: string[]; locationIds?: string[] },
+  ): Promise<Timecard[]> {
+    const timecards: Timecard[] = [];
+    let cursor: string | undefined = undefined;
+    do {
+      const response = await client.labor.searchTimecards({
+        query: {
+          filter: {
+            ...filter,
+            workday: {
+              dateRange: { startDate: period.startDate, endDate: period.endDate },
+              matchTimecardsBy: 'START_AT',
+              defaultTimezone: DEFAULT_TIMEZONE,
+            },
+          },
+          sort: { field: 'START_AT', order: 'ASC' },
+        },
+        limit: 200,
+        ...(cursor && { cursor }),
+      });
+      timecards.push(...(response.timecards || []));
+      cursor = response.cursor || undefined;
+    } while (cursor);
+    return timecards;
+  }
+
+  /**
+   * Everyone's shifts in the period at every store, by person: one timecard
+   * search for all of them. Someone deactivated in Square is listed while they
+   * have shifts (they're still owed); active people are listed even with none
+   * (a fixed salary doesn't need them).
+   */
+  async getShiftsByPerson(startDate: string, endDate: string): Promise<{ teamMemberId: string; name: string; shifts: ShiftSummary[] }[]> {
+    const locations = await this.prisma.location.findMany({ select: { id: true, squareId: true, name: true } });
+    const storeBySquareId = new Map(locations.map((l) => [l.squareId, l]));
+    const client = this.getSquareClient();
+    try {
+      // ponytail: one page of 200 team members; follow the cursor if the staff ever grows past it.
+      const [timecards, { teamMembers = [] }] = await Promise.all([
+        this.searchTimecards(client, { startDate, endDate }, {}),
+        client.teamMembers.search({ limit: 200 }),
+      ]);
+      const byPerson = new Map<string, Timecard[]>();
+      for (const card of timecards) {
+        if (!byPerson.has(card.teamMemberId!)) byPerson.set(card.teamMemberId!, []);
+        byPerson.get(card.teamMemberId!)!.push(card);
+      }
+      const names = new Map(teamMembers.map((m) => [m.id!, [m.givenName, m.familyName].filter(Boolean).join(' ').trim()]));
+      const ids = [...new Set([...teamMembers.filter((m) => m.status === 'ACTIVE' || byPerson.has(m.id!)).map((m) => m.id!), ...byPerson.keys()])];
+      return ids.map((id) => {
+        const cards = byPerson.get(id) ?? [];
+        const { rateCents, currency } = latestRate(cards);
+        return {
+          teamMemberId: id,
+          name: names.get(id) || id,
+          shifts: cards.map((c) => this.toShiftSummary(c, DEFAULT_TIMEZONE, rateCents, currency, storeBySquareId.get(c.locationId))),
+        };
+      });
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error('[LABOR] Failed to read timecards by person', error);
+      throw new HttpException({ success: false, message: 'Failed to fetch timecards from Square' }, HttpStatus.BAD_GATEWAY);
     }
   }
 

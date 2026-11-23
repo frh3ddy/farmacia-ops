@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   ExpenseType, PayrollMode, Prisma, RecurringExpense, RecurringExpenseKind, RecurringFrequency, RecurringPeriodRule,
 } from '@prisma/client';
@@ -38,6 +38,11 @@ export interface StaffHours {
   name: string;
   shifts: { date: string; locationId: string | null; workedMinutes: number; cost: number }[];
 }
+
+// ponytail: unpaid payroll older than 8 weeks drops off the list (periods paid in cash
+// before adoption, and so Square is never asked for more than ~9 weeks); widen it if
+// late payroll ever needs to stay visible longer.
+const PAYROLL_LOOKBACK_DAYS = 56;
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -101,6 +106,8 @@ const asInput = (rule: RecurringExpense): RecurringRuleInput => ({
 
 @Injectable()
 export class RecurringExpenseService {
+  private readonly logger = new Logger(RecurringExpenseService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async createRule(input: RecurringRuleInput, createdBy?: string) {
@@ -172,7 +179,9 @@ export class RecurringExpenseService {
    * startDate included. A bill is paid once an expense links to its due date; a
    * payroll occurrence lists this store's people still unpaid for the period
    * (a PAYROLL expense for that person, store and period) and drops out once
-   * none are left. VARIES: the average of the rule's last 3 payments.
+   * none are left, or once it's older than the lookback. VARIES: the average of
+   * the rule's last 3 payments. If Square fails, everything else is still listed:
+   * payroll comes with payroll and amount null, and payrollUnavailable is set.
    */
   async upcoming({ locationId, today, days, staff }: {
     locationId?: string | null; // undefined: every store and general; null: general only
@@ -185,15 +194,22 @@ export class RecurringExpenseService {
       include: { expenses: { where: { occurrenceDate: { not: null } }, orderBy: [{ occurrenceDate: 'desc' }, { date: 'desc' }] } },
     });
     const until = addDays(today, days);
+    const payrollFrom = addDays(today, -PAYROLL_LOOKBACK_DAYS);
     const occurrences = rules.flatMap((rule) => {
       const paid = new Set(rule.expenses.map((e) => dayOf(e.occurrenceDate!)));
       return dueDates(rule, until)
-        .filter((due) => rule.kind === 'PAYROLL' || !paid.has(due))
+        .filter((due) => (rule.kind === 'PAYROLL' ? due >= payrollFrom : !paid.has(due)))
         .map((due) => ({ rule, due, period: occurrencePeriod(rule, due) }));
     });
-    const payrollFor = await this.payrollPeople(occurrences.filter((o) => o.rule.kind === 'PAYROLL').map((o) => o.period), staff);
+    const payrollPeriods = occurrences.filter((o) => o.rule.kind === 'PAYROLL').map((o) => o.period);
+    // Only Square failing is tolerated: a database error still fails the request.
+    const squareStaff = (from: string, to: string) => staff(from, to).catch((error) => {
+      this.logger.error('[UPCOMING] Square labor failed; payroll listed without people', error);
+      return null;
+    });
+    const payrollFor = await this.payrollPeople(payrollPeriods, squareStaff);
 
-    return occurrences.flatMap(({ rule, due, period }) => {
+    const data = occurrences.flatMap(({ rule, due, period }) => {
       const base = {
         id: `${rule.id}:${due}`, ruleId: rule.id, dueDate: due, overdue: due < today, autoPaid: rule.autoPaid,
         name: rule.name, type: rule.type, vendor: rule.vendor, locationId: rule.locationId, kind: rule.kind,
@@ -201,6 +217,7 @@ export class RecurringExpenseService {
         remind: rule.remindDaysBefore == null ? null : { daysBefore: rule.remindDaysBefore, time: rule.remindTime },
       };
       if (rule.kind === 'PAYROLL') {
+        if (!payrollFor) return [{ ...base, amount: null, amountIsEstimate: true, payroll: null }];
         const payroll = payrollFor(rule.locationId!, period);
         if (!payroll.length && due < today) return [];
         const total = payroll.reduce((sum, p) => sum.add(p.amount), new Prisma.Decimal(0));
@@ -213,6 +230,7 @@ export class RecurringExpenseService {
         : null;
       return [{ ...base, amount: estimate, amountIsEstimate: true }];
     }).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.name.localeCompare(b.name));
+    return { data, payrollUnavailable: !payrollFor };
   }
 
   /**
@@ -220,7 +238,7 @@ export class RecurringExpenseService {
    * shifts' cost), FIXED people whose home it is (their salary); minus those
    * left out and those already paid. Square is asked once, for the span of all periods.
    */
-  private async payrollPeople(periods: { start: string; end: string }[], staff: (s: string, e: string) => Promise<StaffHours[]>) {
+  private async payrollPeople(periods: { start: string; end: string }[], staff: (s: string, e: string) => Promise<StaffHours[] | null>) {
     if (!periods.length) return () => [];
     const from = periods.reduce((min, p) => (p.start < min ? p.start : min), periods[0].start);
     const to = periods.reduce((max, p) => (p.end > max ? p.end : max), periods[0].end);
@@ -232,6 +250,7 @@ export class RecurringExpenseService {
         select: { teamMemberId: true, locationId: true, periodStart: true, periodEnd: true },
       }),
     ]);
+    if (!people) return null;
     const config = new Map(configs.map((c) => [c.teamMemberId, c]));
     const key = (teamMemberId: string, locationId: string | null, start: string, end: string) => [teamMemberId, locationId, start, end].join('|');
     const paid = new Set(paidRows.map((e) => key(e.teamMemberId!, e.locationId, dayOf(e.periodStart!), dayOf(e.periodEnd!))));
