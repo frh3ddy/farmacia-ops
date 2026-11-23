@@ -28,12 +28,42 @@ function assertExpenseType(type: unknown): void {
   }
 }
 
+/**
+ * General (no-store) expenses are for the owner and the accountant only. A
+ * record's null locationId, or a request for scope=general, comes through here.
+ */
+function assertGeneralAccess(req: GuardedRequest): void {
+  if (!['OWNER', 'ACCOUNTANT'].includes(req.currentLocation?.role as string)) {
+    throw new HttpException(
+      { success: false, message: 'Solo el dueño o el contador pueden ver gastos generales' },
+      HttpStatus.FORBIDDEN
+    );
+  }
+}
+
+/** A record's store, or the general-expense check when it has none. */
+function assertExpenseAccess(req: GuardedRequest, locationId: string | null): void {
+  if (locationId === null) assertGeneralAccess(req);
+  else assertLocationAccess(req, locationId);
+}
+
+/** scope=general: only general expenses (null); otherwise the usual store scope. */
+function readScope(req: GuardedRequest, locationId?: string, scope?: string): string | null | undefined {
+  if (scope === 'general') {
+    assertGeneralAccess(req);
+    return null;
+  }
+  return scopedLocationId(req, locationId);
+}
+
 // DTOs
 interface CreateExpenseDto {
-  locationId: string;
+  locationId?: string | null; // null: general (no store); left out: the session store
   type: ExpenseType;
   amount: number;
   date: string;
+  periodStart?: string | null; // YYYY-MM-DD store days it covers, both or neither
+  periodEnd?: string | null;
   description?: string;
   vendor?: string;
   reference?: string;
@@ -73,11 +103,12 @@ export class ExpenseController {
   async getExpenseSummary(
     @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
+    @Query('scope') scope?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('includeMonthly') includeMonthly?: string
   ) {
-    const targetLocationId = scopedLocationId(req, locationId);
+    const targetLocationId = readScope(req, locationId, scope);
 
     const summary = await this.expenseService.getExpenseSummary({
       locationId: targetLocationId,
@@ -97,13 +128,14 @@ export class ExpenseController {
   async listExpenses(
     @Req() req: RoleGuardedRequest,
     @Query('locationId') locationId?: string,
+    @Query('scope') scope?: string,
     @Query('type') type?: ExpenseType,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('isPaid') isPaid?: string,
     @Query('limit') limit?: string
   ) {
-    const targetLocationId = scopedLocationId(req, locationId);
+    const targetLocationId = readScope(req, locationId, scope);
 
     const expenses = await this.expenseService.listExpenses({
       locationId: targetLocationId,
@@ -133,7 +165,9 @@ export class ExpenseController {
     const currentEmployee = req.employee;
     const currentLocation = req.currentLocation;
 
-    const locationId = body.locationId || currentLocation.locationId;
+    // An explicit null is a general expense; leaving it out means the session store.
+    const locationId = body.locationId === null ? null : body.locationId || currentLocation.locationId;
+    if (locationId === null) assertGeneralAccess(req);
 
     if (!body.type || body.amount === undefined || !body.date) {
       throw new HttpException(
@@ -149,6 +183,8 @@ export class ExpenseController {
       type: body.type,
       amount: body.amount,
       date: parseDateParam(body.date, 'date')!, // presence checked above
+      periodStart: body.periodStart ?? undefined,
+      periodEnd: body.periodEnd ?? undefined,
       description: body.description,
       vendor: body.vendor,
       reference: body.reference,
@@ -181,7 +217,7 @@ export class ExpenseController {
   async getExpense(@Param('id') id: string, @Req() req: GuardedRequest) {
     const expense = await this.expenseService.getExpense(id);
     // No locationId in the request for LocationGuard to check — check the record's.
-    assertLocationAccess(req, expense.locationId);
+    assertExpenseAccess(req, expense.locationId);
     return {
       success: true,
       data: {
@@ -197,12 +233,14 @@ export class ExpenseController {
   @Put(':id')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
   async updateExpense(@Param('id') id: string, @Body() body: Partial<CreateExpenseDto>, @Req() req: GuardedRequest) {
-    assertLocationAccess(req, (await this.expenseService.getExpense(id)).locationId);
+    assertExpenseAccess(req, (await this.expenseService.getExpense(id)).locationId);
     if (body.type !== undefined) assertExpenseType(body.type);
     const expense = await this.expenseService.updateExpense(id, {
       type: body.type,
       amount: body.amount,
       date: parseDateParam(body.date, 'date'),
+      periodStart: body.periodStart,
+      periodEnd: body.periodEnd,
       description: body.description,
       vendor: body.vendor,
       reference: body.reference,
@@ -227,7 +265,7 @@ export class ExpenseController {
   @Delete(':id')
   @Roles('OWNER', 'ACCOUNTANT')
   async deleteExpense(@Param('id') id: string, @Req() req: GuardedRequest) {
-    assertLocationAccess(req, (await this.expenseService.getExpense(id)).locationId);
+    assertExpenseAccess(req, (await this.expenseService.getExpense(id)).locationId);
     await this.expenseService.deleteExpense(id);
     return { success: true, message: 'Expense deleted' };
   }

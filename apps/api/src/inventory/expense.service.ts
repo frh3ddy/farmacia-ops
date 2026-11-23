@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { listLimit } from './list-limit';
-import { businessDay } from './business-date';
+import { expensePeriodOverlaps, expenseShareDecimal, expenseSharesByMonth, reportDays } from './expense-period';
 import { Prisma, ExpenseType } from '@prisma/client';
 
 // ============================================================================
@@ -9,10 +9,12 @@ import { Prisma, ExpenseType } from '@prisma/client';
 // ============================================================================
 
 interface CreateExpenseInput {
-  locationId: string;
+  locationId: string | null; // null: general (business-wide)
   type: ExpenseType;
   amount: number;
   date: Date;
+  periodStart?: string | null; // YYYY-MM-DD store days, both or neither; two nulls clear it on update
+  periodEnd?: string | null;
   description?: string;
   vendor?: string;
   reference?: string;
@@ -25,7 +27,7 @@ interface CreateExpenseInput {
 
 interface ExpenseSummary {
   period: { startDate?: Date; endDate?: Date };
-  locationId?: string;
+  locationId?: string | null;
   totals: {
     totalExpenses: string;
     expenseCount: number;
@@ -52,6 +54,23 @@ function assertAmount(amount: unknown): void {
   }
 }
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The period as stored (@db.Date), or a 400 in Spanish. Neither end: no period. */
+function periodData(start?: string | null, end?: string | null) {
+  if (!start && !end) return {};
+  if (!start || !end) throw new BadRequestException('El periodo necesita inicio y fin');
+  if (![start, end].every((d) => DATE_ONLY.test(d) && !isNaN(Date.parse(`${d}T00:00:00Z`)))) {
+    throw new BadRequestException('El periodo debe tener fechas AAAA-MM-DD');
+  }
+  if (end < start) throw new BadRequestException('El fin del periodo no puede ser antes del inicio');
+  return { periodStart: new Date(`${start}T00:00:00Z`), periodEnd: new Date(`${end}T00:00:00Z`) };
+}
+
+/** undefined: every store and general; null: general only; an id: that store. */
+const locationWhere = (locationId?: string | null): Prisma.ExpenseWhereInput =>
+  locationId === undefined ? {} : { locationId };
+
 // ============================================================================
 // Service
 // ============================================================================
@@ -68,6 +87,7 @@ export class ExpenseService {
   async createExpense(input: CreateExpenseInput) {
     this.logger.log(`[EXPENSE] Creating ${input.type} expense: $${input.amount}`);
     assertAmount(input.amount);
+    const period = periodData(input.periodStart, input.periodEnd);
 
     // Idempotent replay: the offline-queue (iOS) may retry a write whose
     // original response was lost after it actually committed. Recognize the
@@ -87,6 +107,7 @@ export class ExpenseService {
         type: input.type,
         amount: new Prisma.Decimal(input.amount),
         date: input.date,
+        ...period,
         description: input.description,
         vendor: input.vendor,
         reference: input.reference,
@@ -134,12 +155,17 @@ export class ExpenseService {
   // --------------------------------------------------------------------------
   async updateExpense(id: string, updates: Partial<CreateExpenseInput>) {
     if (updates.amount !== undefined) assertAmount(updates.amount);
+    // Both ends are sent together; two nulls clear the period.
+    const period = updates.periodStart !== undefined || updates.periodEnd !== undefined
+      ? { periodStart: null, periodEnd: null, ...periodData(updates.periodStart, updates.periodEnd) }
+      : {};
     const expense = await this.prisma.expense.update({
       where: { id },
       data: {
         ...(updates.type && { type: updates.type }),
         ...(updates.amount !== undefined && { amount: new Prisma.Decimal(updates.amount) }),
         ...(updates.date && { date: updates.date }),
+        ...period,
         ...(updates.description !== undefined && { description: updates.description }),
         ...(updates.vendor !== undefined && { vendor: updates.vendor }),
         ...(updates.reference !== undefined && { reference: updates.reference }),
@@ -185,7 +211,7 @@ export class ExpenseService {
   // List expenses
   // --------------------------------------------------------------------------
   async listExpenses(options: {
-    locationId?: string;
+    locationId?: string | null;
     type?: ExpenseType;
     startDate?: Date;
     endDate?: Date;
@@ -196,14 +222,9 @@ export class ExpenseService {
 
     return this.prisma.expense.findMany({
       where: {
-        ...(locationId && { locationId }),
+        ...locationWhere(locationId),
         ...(type && { type }),
-        ...((startDate || endDate) && {
-          date: {
-            ...(startDate && { gte: startDate }),
-            ...(endDate && { lte: endDate }),
-          },
-        }),
+        ...expensePeriodOverlaps(startDate, endDate),
         ...(isPaid !== undefined && { isPaid }),
       },
       include: {
@@ -218,24 +239,17 @@ export class ExpenseService {
   // Get expense summary
   // --------------------------------------------------------------------------
   async getExpenseSummary(options: {
-    locationId?: string;
+    locationId?: string | null;
     startDate?: Date;
     endDate?: Date;
     includeMonthly?: boolean;
   }): Promise<ExpenseSummary> {
     const { locationId, startDate, endDate, includeMonthly } = options;
 
-    const where: Prisma.ExpenseWhereInput = {
-      ...(locationId && { locationId }),
-      ...((startDate || endDate) && {
-        date: {
-          ...(startDate && { gte: startDate }),
-          ...(endDate && { lte: endDate }),
-        },
-      }),
-    };
-
-    const expenses = await this.prisma.expense.findMany({ where });
+    const expenses = await this.prisma.expense.findMany({
+      where: { ...locationWhere(locationId), ...expensePeriodOverlaps(startDate, endDate) },
+    });
+    const [startDay, endDay] = reportDays(startDate, endDate);
 
     // Calculate totals
     let totalExpenses = new Prisma.Decimal(0);
@@ -246,32 +260,35 @@ export class ExpenseService {
     const byMonthMap = new Map<string, { total: Prisma.Decimal; count: number }>();
 
     for (const expense of expenses) {
-      totalExpenses = totalExpenses.add(expense.amount);
+      // Only the part of its period inside the range counts.
+      const share = expenseShareDecimal(expense, startDay, endDay);
+      totalExpenses = totalExpenses.add(share);
 
       if (expense.isPaid) {
-        paidExpenses = paidExpenses.add(expense.amount);
+        paidExpenses = paidExpenses.add(share);
       } else {
-        unpaidExpenses = unpaidExpenses.add(expense.amount);
+        unpaidExpenses = unpaidExpenses.add(share);
       }
 
       // By type
       const typeEntry = byTypeMap.get(expense.type);
       if (typeEntry) {
-        typeEntry.total = typeEntry.total.add(expense.amount);
+        typeEntry.total = typeEntry.total.add(share);
         typeEntry.count++;
       } else {
-        byTypeMap.set(expense.type, { total: expense.amount, count: 1 });
+        byTypeMap.set(expense.type, { total: share, count: 1 });
       }
 
-      // By month
+      // By month: a period across months counts in each, by its share.
       if (includeMonthly) {
-        const monthKey = businessDay(expense.date).slice(0, 7); // YYYY-MM
-        const monthEntry = byMonthMap.get(monthKey);
-        if (monthEntry) {
-          monthEntry.total = monthEntry.total.add(expense.amount);
-          monthEntry.count++;
-        } else {
-          byMonthMap.set(monthKey, { total: expense.amount, count: 1 });
+        for (const [monthKey, monthShare] of expenseSharesByMonth(expense, startDay, endDay)) {
+          const monthEntry = byMonthMap.get(monthKey);
+          if (monthEntry) {
+            monthEntry.total = monthEntry.total.add(monthShare);
+            monthEntry.count++;
+          } else {
+            byMonthMap.set(monthKey, { total: new Prisma.Decimal(monthShare), count: 1 });
+          }
         }
       }
     }

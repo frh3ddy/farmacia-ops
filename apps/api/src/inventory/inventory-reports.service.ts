@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { busyHours } from '../sales-history/sales-history';
 import { businessDay } from './business-date';
+import { expensePeriodOverlaps, expenseShareDecimal, reportDays } from './expense-period';
 import { Prisma } from '@prisma/client';
 import { NON_SHRINKAGE_TYPES, SHRINKAGE_RECOVERY_TYPES } from './adjustment-types';
 
@@ -930,27 +931,27 @@ export class InventoryReportsService {
     const grossProfit = revenue.sub(cogs);
 
     // 2. Get Operating Expenses
-    const expenseWhere: Prisma.ExpenseWhereInput = {
-      ...(locationId && { locationId }),
-      ...((startDate || endDate) && {
-        date: {
-          ...(startDate && { gte: startDate }),
-          ...(endDate && { lte: endDate }),
-        },
-      }),
-    };
+    // An expense counts in the period it covers, by its share of the range
+    // (expense-period.ts). A store's P&L leaves general (no-store) expenses out;
+    // the whole-business one shows them as their own line.
+    const expenses = await this.prisma.expense.findMany({
+      where: { ...(locationId && { locationId }), ...expensePeriodOverlaps(startDate, endDate) },
+    });
+    const [startDay, endDay] = reportDays(startDate, endDate);
 
-    const expenses = await this.prisma.expense.findMany({ where: expenseWhere });
-
-    // Group expenses by type
     const expensesByType = new Map<string, Prisma.Decimal>();
-    let totalExpenses = new Prisma.Decimal(0);
+    const generalByType = new Map<string, Prisma.Decimal>();
+    let storeExpenses = new Prisma.Decimal(0);
+    let generalExpenses = new Prisma.Decimal(0);
 
     for (const expense of expenses) {
-      totalExpenses = totalExpenses.add(expense.amount);
-      const existing = expensesByType.get(expense.type) || new Prisma.Decimal(0);
-      expensesByType.set(expense.type, existing.add(expense.amount));
+      const share = expenseShareDecimal(expense, startDay, endDay);
+      const byType = expense.locationId ? expensesByType : generalByType;
+      byType.set(expense.type, (byType.get(expense.type) || new Prisma.Decimal(0)).add(share));
+      if (expense.locationId) storeExpenses = storeExpenses.add(share);
+      else generalExpenses = generalExpenses.add(share);
     }
+    const totalExpenses = storeExpenses.add(generalExpenses);
 
     // 3. Net shrinkage: losses minus stock that turned up again (found, recounted up).
     // Can go negative in a period that recovers more than it loses.
@@ -1014,16 +1015,18 @@ export class InventoryReportsService {
       ? netProfit.div(totalRevenue).mul(100)
       : new Prisma.Decimal(0);
 
-    // 6. Build expense breakdown
-    const expenseBreakdown = Array.from(expensesByType.entries())
+    // 6. Build expense breakdown (types with no share in the range left out)
+    const breakdown = (byType: Map<string, Prisma.Decimal>, total: Prisma.Decimal) => Array.from(byType.entries())
+      .filter(([, amount]) => amount.gt(0))
       .map(([type, amount]) => ({
         type,
         amount: amount.toString(),
-        percentage: totalExpenses.gt(0)
-          ? amount.div(totalExpenses).mul(100).toFixed(2)
+        percentage: total.gt(0)
+          ? amount.div(total).mul(100).toFixed(2)
           : '0.00',
       }))
       .sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount));
+    const expenseBreakdown = breakdown(expensesByType, storeExpenses);
 
     return {
       period: { startDate, endDate },
@@ -1046,7 +1049,8 @@ export class InventoryReportsService {
         marginPercent: grossMarginPercent.toFixed(2),
       },
       operatingExpenses: {
-        byType: expenseBreakdown,
+        byType: expenseBreakdown, // store expenses
+        ...(!locationId && { general: { byType: breakdown(generalByType, generalExpenses), total: generalExpenses.toString() } }),
         shrinkage: shrinkage.toString(), // net: shrinkageLosses − shrinkageRecovered
         shrinkageLosses: shrinkageLosses.toString(),
         shrinkageRecovered: shrinkageRecovered.toString(), // found + recounted up
