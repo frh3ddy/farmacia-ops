@@ -145,10 +145,11 @@ export class BreakBulkService {
    * opening is caught. A cover is listed by the worker's label in its notes:
    * `squareId=<payment> · caja no abierta: <why>` (sale.worker.ts).
    */
-  async automaticOpenings(locationId: string) {
+  async automaticOpenings(locationId: string, since?: Date) {
     const rows = await this.prisma.inventoryAdjustment.findMany({
       where: {
         locationId,
+        ...(since && { adjustedAt: { gt: since } }),
         OR: [
           { type: 'BREAK_BULK_OUT', clientRequestId: { startsWith: 'auto-open:' } },
           { type: 'AUTO_SALE_COVER', notes: { contains: COVER_LABEL } },
