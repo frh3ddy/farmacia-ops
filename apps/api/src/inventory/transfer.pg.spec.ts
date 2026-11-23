@@ -8,6 +8,7 @@ import { startPostgres } from '../testing/pglite';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { TransferService } from './transfer.service';
+import { InventoryReportsService } from './inventory-reports.service';
 
 let prisma: PrismaService;
 let stop: () => Promise<void>;
@@ -153,6 +154,46 @@ describe('TransferService (Postgres, Square recorded)', () => {
         ],
         { synced: true },
       ],
+    });
+  });
+
+  test('units lost in transit', async () => {
+    const { transfers, productId } = await transferSetup();
+    const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 });
+    await transfers.receive({ transferId: transfer.id, lineReceipts: [{ transferLineId: transfer.lines[0].id, quantityReceived: 4 }] });
+
+    const losses = await prisma.inventoryAdjustment.findMany({
+      where: { productId, type: { notIn: ['TRANSFER_OUT', 'TRANSFER_IN'] } },
+      select: { locationId: true, type: true, quantity: true, unitCost: true, totalCost: true },
+    });
+    const reports = new InventoryReportsService(prisma);
+    const shrinkageAt = async (locationId: string) =>
+      Number((await reports.getProfitAndLossReport({ locationId })).operatingExpenses.shrinkageLosses);
+    // Other tests in this file also lose units at Centro, so its shrinkage is at least this loss.
+    assert({
+      given: '6 units at $2 shipped and 4 received',
+      should: 'record the 2 missing units as a transit loss at the origin, at their cost',
+      actual: losses.map((a) => [a.locationId, a.type, a.quantity, Number(a.unitCost), Number(a.totalCost)]),
+      expected: [[centro, 'TRANSIT_LOSS', -2, 2, 4]],
+    });
+    assert({
+      given: 'a transit loss at the origin',
+      should: 'count it as the origin’s shrinkage, not the destination’s',
+      actual: [(await shrinkageAt(centro)) >= 4, await shrinkageAt(norte)],
+      expected: [true, 0],
+    });
+  });
+
+  test('everything shipped arrives', async () => {
+    const { transfers, productId } = await transferSetup();
+    const { transfer } = await transfers.ship({ productId, fromLocationId: centro, toLocationId: norte, quantity: 6 });
+    await transfers.receive({ transferId: transfer.id });
+
+    assert({
+      given: 'a transfer received in full',
+      should: 'record no transit loss',
+      actual: await prisma.inventoryAdjustment.count({ where: { productId, type: { notIn: ['TRANSFER_OUT', 'TRANSFER_IN'] } } }),
+      expected: 0,
     });
   });
 

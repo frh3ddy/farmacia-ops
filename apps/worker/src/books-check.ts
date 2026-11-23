@@ -10,7 +10,7 @@ type Where = { productId: string; locationId: string };
 export type Books = {
   /** createdQuantity: what the receiving or adjustment that created the batch added; null for opening stock. */
   batches: Array<Where & { id: string; quantity: number; createdQuantity: number | null; splitOut?: number }>; // splitOut: units given to lot pieces
-  negativeAdjustments: Array<Where & { id: string; quantity: number }>;
+  negativeAdjustments: Array<Where & { id: string; quantity: number; type?: string }>;
   saleItems: Array<Where & { id: string; quantity: number }>;
   consumedByBatch: Record<string, number>;
   consumedByAdjustment: Record<string, number>;
