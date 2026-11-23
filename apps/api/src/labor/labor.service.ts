@@ -57,6 +57,8 @@ interface TeamMemberSummary {
   familyName: string;
   fullName: string;
   status: string | null;
+  /** Our open stores Square assigns them to. */
+  locations: { locationId: string; locationName: string }[];
 }
 
 // ============================================================================
@@ -272,14 +274,24 @@ export class LaborService {
       });
 
       const members = response.teamMembers || [];
+      const openStores = (await this.prisma.location.findMany({ select: { id: true, squareId: true, name: true, isActive: true } }))
+        .filter((l) => l.isActive && l.squareId)
+        .map((l) => ({ squareId: l.squareId, locationId: l.id, locationName: l.name }));
 
-      return members.map(m => ({
-        id: m.id || '',
-        givenName: m.givenName || '',
-        familyName: m.familyName || '',
-        fullName: [m.givenName, m.familyName].filter(Boolean).join(' ').trim(),
-        status: m.status ?? null,
-      }));
+      return members.map(m => {
+        const assigned = m.assignedLocations;
+        const stores = assigned?.assignmentType === 'ALL_CURRENT_AND_FUTURE_LOCATIONS'
+          ? openStores
+          : openStores.filter((s) => assigned?.locationIds?.includes(s.squareId!));
+        return {
+          id: m.id || '',
+          givenName: m.givenName || '',
+          familyName: m.familyName || '',
+          fullName: [m.givenName, m.familyName].filter(Boolean).join(' ').trim(),
+          status: m.status ?? null,
+          locations: stores.map(({ locationId, locationName }) => ({ locationId, locationName })),
+        };
+      });
     } catch (error) {
       this.logger.error('[LABOR] Failed to list team members', error);
       throw new HttpException(
