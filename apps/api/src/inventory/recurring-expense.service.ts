@@ -3,6 +3,7 @@ import {
   ExpenseType, PayrollMode, Prisma, RecurringExpense, RecurringExpenseKind, RecurringFrequency, RecurringPeriodRule,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { addDays, dueDates, occurrencePeriod } from './recurring-occurrence';
 
 /** A rule as a client sends it (create: all of it; update: any part). */
 export interface RecurringRuleInput {
@@ -31,10 +32,18 @@ export interface PayrollConfigInput {
   homeLocationId?: string | null;
 }
 
+/** Each person's Square shifts in [startDay, endDay], at every store (labor payroll summary). */
+export interface StaffHours {
+  teamMemberId: string;
+  name: string;
+  shifts: { date: string; locationId: string | null; workedMinutes: number; cost: number }[];
+}
+
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const BY_WEEKDAY: string[] = [RecurringFrequency.WEEKLY, RecurringFrequency.BIWEEKLY];
 const oneOf = (values: object, value: unknown) => Object.values(values).includes(value);
+const dayOf = (date: Date) => date.toISOString().slice(0, 10); // @db.Date comes back as UTC midnight
 const isInt = (n: unknown, min: number, max: number) => Number.isInteger(n) && (n as number) >= min && (n as number) <= max;
 const positive = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n > 0;
 
@@ -156,5 +165,88 @@ export class RecurringExpenseService {
       where: { teamMemberId }, create: { teamMemberId, ...fields }, update: fields,
     })));
     return this.getPayrollConfig();
+  }
+
+  /**
+   * Unpaid occurrences due up to `today + days`, overdue ones since each rule's
+   * startDate included. A bill is paid once an expense links to its due date; a
+   * payroll occurrence lists this store's people still unpaid for the period
+   * (a PAYROLL expense for that person, store and period) and drops out once
+   * none are left. VARIES: the average of the rule's last 3 payments.
+   */
+  async upcoming({ locationId, today, days, staff }: {
+    locationId?: string | null; // undefined: every store and general; null: general only
+    today: string;
+    days: number;
+    staff: (startDay: string, endDay: string) => Promise<StaffHours[]>;
+  }) {
+    const rules = await this.prisma.recurringExpense.findMany({
+      where: { paused: false, ...(locationId !== undefined && { locationId }) },
+      include: { expenses: { where: { occurrenceDate: { not: null } }, orderBy: [{ occurrenceDate: 'desc' }, { date: 'desc' }] } },
+    });
+    const until = addDays(today, days);
+    const occurrences = rules.flatMap((rule) => {
+      const paid = new Set(rule.expenses.map((e) => dayOf(e.occurrenceDate!)));
+      return dueDates(rule, until)
+        .filter((due) => rule.kind === 'PAYROLL' || !paid.has(due))
+        .map((due) => ({ rule, due, period: occurrencePeriod(rule, due) }));
+    });
+    const payrollFor = await this.payrollPeople(occurrences.filter((o) => o.rule.kind === 'PAYROLL').map((o) => o.period), staff);
+
+    return occurrences.flatMap(({ rule, due, period }) => {
+      const base = {
+        id: `${rule.id}:${due}`, ruleId: rule.id, dueDate: due, overdue: due < today, autoPaid: rule.autoPaid,
+        name: rule.name, type: rule.type, vendor: rule.vendor, locationId: rule.locationId, kind: rule.kind,
+        periodStart: period.start, periodEnd: period.end,
+        remind: rule.remindDaysBefore == null ? null : { daysBefore: rule.remindDaysBefore, time: rule.remindTime },
+      };
+      if (rule.kind === 'PAYROLL') {
+        const payroll = payrollFor(rule.locationId!, period);
+        if (!payroll.length && due < today) return [];
+        const total = payroll.reduce((sum, p) => sum.add(p.amount), new Prisma.Decimal(0));
+        return [{ ...base, amount: total.toString(), amountIsEstimate: period.end >= today, payroll }];
+      }
+      if (rule.kind === 'FIXED') return [{ ...base, amount: rule.amount!.toString(), amountIsEstimate: false }];
+      const last = rule.expenses.slice(0, 3);
+      const estimate = last.length
+        ? last.reduce((sum, e) => sum.add(e.amount), new Prisma.Decimal(0)).div(last.length).toDecimalPlaces(2).toString()
+        : null;
+      return [{ ...base, amount: estimate, amountIsEstimate: true }];
+    }).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Who is owed for a store and period: HOURS people with shifts there (their
+   * shifts' cost), FIXED people whose home it is (their salary); minus those
+   * left out and those already paid. Square is asked once, for the span of all periods.
+   */
+  private async payrollPeople(periods: { start: string; end: string }[], staff: (s: string, e: string) => Promise<StaffHours[]>) {
+    if (!periods.length) return () => [];
+    const from = periods.reduce((min, p) => (p.start < min ? p.start : min), periods[0].start);
+    const to = periods.reduce((max, p) => (p.end > max ? p.end : max), periods[0].end);
+    const [people, configs, paidRows] = await Promise.all([
+      staff(from, to),
+      this.getPayrollConfig(),
+      this.prisma.expense.findMany({
+        where: { type: 'PAYROLL', teamMemberId: { not: null }, periodStart: { gte: new Date(`${from}T00:00:00Z`) }, periodEnd: { lte: new Date(`${to}T00:00:00Z`) } },
+        select: { teamMemberId: true, locationId: true, periodStart: true, periodEnd: true },
+      }),
+    ]);
+    const config = new Map(configs.map((c) => [c.teamMemberId, c]));
+    const key = (teamMemberId: string, locationId: string | null, start: string, end: string) => [teamMemberId, locationId, start, end].join('|');
+    const paid = new Set(paidRows.map((e) => key(e.teamMemberId!, e.locationId, dayOf(e.periodStart!), dayOf(e.periodEnd!))));
+
+    return (locationId: string, period: { start: string; end: string }) => people.flatMap((person) => {
+      const c = config.get(person.teamMemberId);
+      if (c?.included === false || paid.has(key(person.teamMemberId, locationId, period.start, period.end))) return [];
+      const here = person.shifts.filter((s) => s.locationId === locationId && s.date >= period.start && s.date <= period.end);
+      const minutes = here.reduce((sum, s) => sum + s.workedMinutes, 0);
+      if (c?.mode === 'FIXED') {
+        return c.homeLocationId === locationId ? [{ teamMemberId: person.teamMemberId, name: person.name, mode: 'FIXED', minutes, amount: c.fixedAmount!.toString() }] : [];
+      }
+      if (!minutes) return [];
+      const cents = here.reduce((sum, s) => sum + Math.round(s.cost * 100), 0);
+      return [{ teamMemberId: person.teamMemberId, name: person.name, mode: 'HOURS', minutes, amount: new Prisma.Decimal(cents).div(100).toString() }];
+    });
   }
 }
