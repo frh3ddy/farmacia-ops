@@ -273,3 +273,63 @@ describe('InventoryReportsService valuation lots', () => {
     });
   });
 });
+
+describe('InventoryReportsService expenses in the P&L', () => {
+  const december = { startDate: new Date('2026-12-01T00:00:00-06:00'), endDate: new Date('2026-12-31T23:59:59.999-06:00') };
+
+  test('rent paid in one month for the next, and a payroll week across months', async () => {
+    const reports = new InventoryReportsService(prisma);
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Centro' } });
+    await prisma.expense.createMany({
+      data: [
+        { locationId, type: 'RENT', amount: 8000, date: new Date('2026-11-28T12:00:00-06:00'), periodStart: new Date('2026-12-01'), periodEnd: new Date('2026-12-31') },
+        { locationId, type: 'PAYROLL', amount: 700, date: new Date('2026-12-07T12:00:00-06:00'), periodStart: new Date('2026-11-30'), periodEnd: new Date('2026-12-06') },
+        { locationId, type: 'OTHER', amount: 50, date: new Date('2026-11-30T22:00:00-06:00') },
+      ],
+    });
+
+    const pnl = await reports.getProfitAndLossReport({ locationId, ...december });
+
+    assert({
+      given: "December rent paid in November, a payroll week from 30 Nov, and a late-night 30 Nov expense with no period",
+      should: "count the rent whole, six days of the payroll and nothing of the 30 Nov expense",
+      actual: [pnl.operatingExpenses.byType.map((t: { type: string; amount: string }) => [t.type, t.amount]), pnl.operatingExpenses.total],
+      expected: [[['RENT', '8000'], ['PAYROLL', '600']], '8600'],
+    });
+  });
+
+  test('general expenses', async () => {
+    const reports = new InventoryReportsService(prisma);
+    const { id: locationId } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Centro' } });
+    const date = new Date('2027-01-10T12:00:00-06:00');
+    await prisma.expense.createMany({
+      data: [
+        { locationId, type: 'RENT', amount: 500, date },
+        { locationId: null, type: 'PROFESSIONAL', amount: 1200, date },
+      ],
+    });
+    const january = { startDate: new Date('2027-01-01T00:00:00-06:00'), endDate: new Date('2027-01-31T23:59:59.999-06:00') };
+
+    const [store, business] = await Promise.all([
+      reports.getProfitAndLossReport({ locationId, ...january }),
+      reports.getProfitAndLossReport(january),
+    ]);
+
+    assert({
+      given: 'a store expense and a general one',
+      should: "leave the general one out of the store's P&L",
+      actual: [store.operatingExpenses.total, store.operatingExpenses.general],
+      expected: ['500', undefined],
+    });
+    assert({
+      given: 'the same month for the whole business',
+      should: 'show the general expense as its own line, included in the total',
+      actual: [
+        business.operatingExpenses.byType.map((t: { type: string }) => t.type),
+        business.operatingExpenses.general,
+        business.operatingExpenses.total,
+      ],
+      expected: [['RENT'], { byType: [{ type: 'PROFESSIONAL', amount: '1200', percentage: '100.00' }], total: '1200' }, '1700'],
+    });
+  });
+});
