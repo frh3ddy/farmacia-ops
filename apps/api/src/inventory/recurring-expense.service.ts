@@ -58,6 +58,8 @@ export interface StaffHours {
 // before adoption, and so Square is never asked for more than ~9 weeks); widen it if
 // late payroll ever needs to stay visible longer.
 const PAYROLL_LOOKBACK_DAYS = 56;
+// ponytail: fixed 7-day catch-up for a worker outage; older unpaid bills stay overdue for a person (they may be paid outside the app). Make it a setting if outages run longer.
+const AUTO_PAY_CATCH_UP_DAYS = 7;
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -406,9 +408,10 @@ export class RecurringExpenseService {
   }
 
   /**
-   * Daily job (worker `auto-pay` queue): books every unpaid occurrence of an
-   * active auto-paid (direct debit) fixed bill due up to `today`, dated on its
-   * due date. Each occurrence has a stable clientRequestId, so a rerun books
+   * Daily job (worker `auto-pay` queue): books the unpaid occurrences of each
+   * active auto-paid (direct debit) fixed bill due in the last week up to
+   * `today`, dated on their due date. Older ones are never backfilled: they
+   * stay overdue in upcoming for a person to settle. Each occurrence has a stable clientRequestId, so a rerun books
    * nothing twice; one failing occurrence is logged and the rest still book.
    */
   async autoPay(today: string) {
@@ -416,9 +419,10 @@ export class RecurringExpenseService {
       where: { autoPaid: true, paused: false }, // validation keeps autoPaid on FIXED rules only
       include: { expenses: { where: { occurrenceDate: { not: null } }, select: { occurrenceDate: true } } },
     });
+    const from = addDays(today, -AUTO_PAY_CATCH_UP_DAYS);
     const due = rules.flatMap((rule) => {
       const paid = new Set(rule.expenses.map((e) => e.occurrenceDate!.toISOString().slice(0, 10)));
-      return dueDates(rule, today).filter((d) => !paid.has(d)).map((d) => `${rule.id}:${d}`);
+      return dueDates(rule, today).filter((d) => d >= from && !paid.has(d)).map((d) => `${rule.id}:${d}`);
     });
     const paid: string[] = [];
     const failed: { occurrenceId: string; error: string }[] = [];

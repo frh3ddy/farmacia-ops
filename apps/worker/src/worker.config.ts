@@ -59,7 +59,7 @@ export const WORKERS: WorkerConfig[] = [
   },
   {
     // Daily direct-debit bills (RecurringExpenseService.autoPay). One attempt:
-    // the next day's run books every occurrence still unpaid.
+    // the next day's run catches up the last week.
     queueName: 'auto-pay',
     processor: () => postInternal('/internal/expenses/auto-pay'),
     concurrency: 1,
