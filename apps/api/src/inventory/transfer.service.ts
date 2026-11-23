@@ -10,6 +10,7 @@ import { Square, SquareClient, SquareError } from 'square';
 import { createSquareClient } from '../square/square-client';
 import { preferredMapping, sendInventoryChanges, type SquareSyncResult } from './square-sync';
 import { transferSuggestions } from './transfer-suggestions';
+import { employeeNames } from './movement-list';
 
 type SquareReceipt = {
   transfer: { id: string; fromLocationId: string; toLocationId: string; productId: string; quantity: number };
@@ -610,7 +611,13 @@ export class TransferService {
       orderBy: [{ shippedAt: 'desc' }, { id: 'asc' }],
       take: listLimit(undefined),
     });
-    return shipments.map(withStatus);
+    return this.withSender(shipments.map(withStatus));
+  }
+
+  /** Adds the name of the employee who sent each shipment (null for none). */
+  private async withSender<S extends { createdBy: string | null }>(shipments: S[]) {
+    const nameOf = await employeeNames(this.prisma, shipments.map((s) => s.createdBy));
+    return shipments.map((s) => ({ ...s, shippedByName: nameOf(s.createdBy) }));
   }
 
   /** The shipment a resend already made, refusing one another store's send made with that id. */
@@ -624,7 +631,7 @@ export class TransferService {
 
   private async findShipment(where: Prisma.ShipmentWhereUniqueInput) {
     const shipment = await this.prisma.shipment.findUnique({ where, include: shipmentInclude });
-    return shipment && withStatus(shipment);
+    return shipment && (await this.withSender([withStatus(shipment)]))[0];
   }
 
   /**
