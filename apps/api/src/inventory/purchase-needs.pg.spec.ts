@@ -99,6 +99,20 @@ describe('purchaseNeeds', () => {
     });
   });
 
+  test('a closed store that buys through it', async () => {
+    const { hub, spoke, product, needs } = await stores();
+    await product('SoloNorte', { [hub]: { stock: 50, sold: 9, typical: 5 }, [spoke]: { sold: 90, typical: 5 } });
+    await prisma.location.update({ where: { id: spoke }, data: { isActive: false } });
+    const r = await needs(hub);
+
+    assert({
+      given: 'Norte buying through Centro and then closed, out of a product Centro has plenty of',
+      should: 'not list Norte, and order nothing for it',
+      actual: [r.suppliesLocationIds, r.rows],
+      expected: [[], []],
+    });
+  });
+
   test('a store that buys through another', async () => {
     const { hub, spoke, product, needs } = await stores();
     const spare = await product('Sobra', { [hub]: { stock: 20, sold: 45, typical: 5 }, [spoke]: { sold: 90, typical: 5 } });

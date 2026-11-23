@@ -53,6 +53,12 @@ describe('updateStockAlertSettings', () => {
       expected: [hub, [other]],
     });
 
+    const closed = await store('Cerrada');
+    await updateStockAlertSettings(prisma, closed, { receivingLocationId: hub });
+    await prisma.location.update({ where: { id: closed }, data: { isActive: false } });
+    assert({ given: 'a store that buys through it and is then closed', should: 'leave the closed store out', actual: (await stockAlertSettingsOf(prisma, hub)).suppliesLocationIds, expected: [other] });
+    await prisma.stockAlertSettings.update({ where: { locationId: closed }, data: { receivingLocationId: null } });
+
     await updateStockAlertSettings(prisma, other, { receivingLocationId: null });
     assert({ given: 'that turned off', should: 'buy for itself again', actual: (await stockAlertSettingsOf(prisma, hub)).suppliesLocationIds, expected: [] });
   });
