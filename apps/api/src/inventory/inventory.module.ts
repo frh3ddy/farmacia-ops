@@ -13,6 +13,8 @@ import { InventoryReceivingService } from './inventory-receiving.service';
 import { InventoryReportsController } from './inventory-reports.controller';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ExpenseController } from './expense.controller';
+import { RecurringExpenseController } from './recurring-expense.controller';
+import { RecurringExpenseService } from './recurring-expense.service';
 import { LaborModule } from '../labor/labor.module';
 import { ExpenseService } from './expense.service';
 import { StockCountController } from './stock-count.controller';
@@ -32,11 +34,13 @@ import { ProductsModule } from '../products/products.module';
     TransferController,
     InventoryReceivingController,
     InventoryReportsController,
+    RecurringExpenseController, // before ExpenseController: its /expenses/:id would match /expenses/recurring
     ExpenseController,
     StockCountController,
     InventoryLotsController,
   ],
   providers: [
+    RecurringExpenseService,
     InventoryReconciliationService,
     InventoryAdjustmentService,
     BreakBulkService,

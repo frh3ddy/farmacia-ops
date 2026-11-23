@@ -13,19 +13,21 @@ model Location {
   address  String?
   isActive Boolean @default(true)
 
-  inventories     Inventory[]
-  expenses        Expense[]
-  sales           Sale[]
-  racks           Rack[]
-  catalogMappings CatalogMapping[]
-  cutoverLocks    CutoverLock[]
-  adjustments     InventoryAdjustment[]
-  stockCounts     StockCount[]
-  receivings      InventoryReceiving[]
-  transfersOut    Transfer[]            @relation("TransferFrom")
-  transfersIn     Transfer[]            @relation("TransferTo")
-  shipmentsOut    Shipment[]            @relation("ShipmentFrom")
-  shipmentsIn     Shipment[]            @relation("ShipmentTo")
+  inventories       Inventory[]
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+  payrollConfigs    PayrollConfig[]
+  sales             Sale[]
+  racks             Rack[]
+  catalogMappings   CatalogMapping[]
+  cutoverLocks      CutoverLock[]
+  adjustments       InventoryAdjustment[]
+  stockCounts       StockCount[]
+  receivings        InventoryReceiving[]
+  transfersOut      Transfer[]            @relation("TransferFrom")
+  transfersIn       Transfer[]            @relation("TransferTo")
+  shipmentsOut      Shipment[]            @relation("ShipmentFrom")
+  shipmentsIn       Shipment[]            @relation("ShipmentTo")
 
   // Authentication relations
   devices             Device[]
@@ -842,34 +844,109 @@ model Expense {
   id         String  @id @default(uuid())
   locationId String? // null: a general (business-wide) expense — owner and accountant only
 
-  type        ExpenseType
-  amount      Decimal
-  date        DateTime // when it was paid
+  type               ExpenseType
+  amount             Decimal
+  date               DateTime // when it was paid
   // The store days it covers (inclusive), both or neither; reports count it
   // there, split by day (expense-period.ts). Null: the day it was paid.
-  periodStart DateTime? @db.Date
-  periodEnd   DateTime? @db.Date
-  teamMemberId String? // PAYROLL: the Square team member paid (one expense per store they worked at)
-  description String? // Description of the expense
-  vendor      String? // Who was paid (landlord, utility company, etc.)
-  reference   String? // Invoice/receipt number
-  isPaid      Boolean     @default(true)
-  paidAt      DateTime?
-  notes       String?
-  createdBy   String? // User who recorded it
-  createdAt   DateTime    @default(now())
+  periodStart        DateTime?   @db.Date
+  periodEnd          DateTime?   @db.Date
+  teamMemberId       String? // PAYROLL: the Square team member paid (one expense per store they worked at)
+  // The recurring rule and due date this pays (expenses/upcoming), if any.
+  recurringExpenseId String?
+  occurrenceDate     DateTime?   @db.Date
+  description        String? // Description of the expense
+  vendor             String? // Who was paid (landlord, utility company, etc.)
+  reference          String? // Invoice/receipt number
+  isPaid             Boolean     @default(true)
+  paidAt             DateTime?
+  notes              String?
+  createdBy          String? // User who recorded it
+  createdAt          DateTime    @default(now())
 
   // Client-supplied dedup key for offline-queue replay (iOS) — see
   // InventoryAdjustment.clientRequestId for the full rationale.
   clientRequestId String? @unique
 
-  location Location? @relation(fields: [locationId], references: [id])
+  location         Location?         @relation(fields: [locationId], references: [id])
+  recurringExpense RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
 
+  @@index([recurringExpenseId, occurrenceDate])
   @@index([locationId])
   @@index([type])
   @@index([date])
   @@index([periodStart])
   @@index([teamMemberId])
+}
+
+/// A bill or payroll that comes back on a schedule; its due dates are
+/// computed (expenses/upcoming), an occurrence is paid when an Expense links to it.
+model RecurringExpense {
+  id         String  @id @default(uuid())
+  locationId String? // null: general (business-wide)
+
+  type   ExpenseType
+  name   String
+  vendor String?
+  kind   RecurringExpenseKind
+  amount Decimal? // FIXED only
+
+  freq       RecurringFrequency
+  dayOfMonth Int? // MONTHLY, BIMONTHLY, YEARLY (1–31, clamped to the month's end)
+  weekday    Int? // WEEKLY, BIWEEKLY (0 = Sunday … 6 = Saturday)
+  startDate  DateTime            @db.Date // first due date; nothing is overdue before it
+  periodRule RecurringPeriodRule @default(DUE_MONTH)
+
+  remindDaysBefore Int? // 0, 1, 3 or 7; null: no reminder
+  remindTime       String? // "HH:mm", store clock
+  autoPaid         Boolean @default(false) // direct debit, FIXED only
+  paused           Boolean @default(false)
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  location Location? @relation(fields: [locationId], references: [id])
+  expenses Expense[]
+
+  @@index([locationId])
+}
+
+enum RecurringExpenseKind {
+  FIXED
+  VARIES // estimated from the last 3 payments
+  PAYROLL
+}
+
+enum RecurringFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  BIMONTHLY
+  YEARLY
+}
+
+enum RecurringPeriodRule {
+  DUE_MONTH
+  PREVIOUS_MONTH
+  BILL_MONTHS // the months the frequency spans, before the due month
+}
+
+/// How a Square team member is paid in recurring payroll.
+model PayrollConfig {
+  teamMemberId   String      @id
+  included       Boolean     @default(true)
+  mode           PayrollMode @default(HOURS)
+  fixedAmount    Decimal? // FIXED: per pay period
+  homeLocationId String? // FIXED: the store charged
+  updatedAt      DateTime    @updatedAt
+
+  homeLocation Location? @relation(fields: [homeLocationId], references: [id])
+}
+
+enum PayrollMode {
+  HOURS
+  FIXED
 }
 
 enum ExpenseType {
