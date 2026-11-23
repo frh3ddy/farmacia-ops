@@ -424,6 +424,23 @@ export class TransferService {
     let totalReceived = 0;
     for (const line of transfer.lines) {
       const quantityReceived = resolveQuantityReceived(line.quantity, overrides.get(line.id));
+      const lost = line.quantity - quantityReceived;
+      if (lost > 0) {
+        // The origin's TRANSFER_OUT already took these units, so this only books the loss.
+        await tx.inventoryAdjustment.create({
+          data: {
+            locationId: transfer.fromLocationId,
+            productId: transfer.productId,
+            type: 'TRANSIT_LOSS',
+            quantity: -lost,
+            unitCost: line.unitCost,
+            totalCost: line.unitCost.mul(lost),
+            reason: `Transfer ${transfer.id} lost in transit`,
+            effectiveDate: now,
+            adjustedBy: receivedBy,
+          },
+        });
+      }
       if (quantityReceived <= 0) {
         await tx.transferLine.update({ where: { id: line.id }, data: { quantityReceived: 0 } });
         continue;

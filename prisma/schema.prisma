@@ -697,6 +697,7 @@ enum AdjustmentType {
   OTHER // Other reason (requires notes)
   AUTO_SALE_COVER // System-created to cover a Square sale that exceeded recorded stock
   OPENING_COUNT // Conteo inicial: fixes stock the migration loaded wrong; not a loss or gain
+  TRANSIT_LOSS // Shipped but not received: shrinkage at the origin, no FIFO consumption (TRANSFER_OUT already took the stock)
 }
 
 enum TransferStatus {
