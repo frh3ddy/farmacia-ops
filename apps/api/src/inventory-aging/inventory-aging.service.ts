@@ -119,10 +119,34 @@ export interface ActionableSignal {
   entityType: 'PRODUCT' | 'LOCATION' | 'CATEGORY';
   entityId: string;
   entityName: string;
+  /** English, kept for old clients; new ones write their own from the codes and numbers. */
   message: string;
   recommendedActions: string[];
+  actionCodes: SignalAction[];
+  /** The product's oldest batch age, or the category's average age (1 decimal). */
+  days: number;
+  units: number;
   cashAtRisk: Decimal | null;
 }
+
+export type SignalAction =
+  | 'DISCOUNT' | 'STOP_REORDER' | 'PRICE_REVIEW' | 'TRANSFER'
+  | 'RENEGOTIATE_SUPPLIER' | 'REVIEW_PURCHASING'
+  | 'REDUCE_PURCHASING' | 'ADJUST_ASSORTMENT' | 'REVIEW_CATEGORY';
+
+/** Each action code's old English text. */
+const ACTION_TEXT: Record<SignalAction, string> = {
+  DISCOUNT: 'Discount immediately',
+  STOP_REORDER: 'Stop reordering',
+  PRICE_REVIEW: 'Consider price adjustment',
+  TRANSFER: 'Transfer to other location',
+  RENEGOTIATE_SUPPLIER: 'Supplier renegotiation',
+  REVIEW_PURCHASING: 'Review purchasing strategy',
+  REDUCE_PURCHASING: 'Reduce purchasing',
+  ADJUST_ASSORTMENT: 'Adjust assortment',
+  REVIEW_CATEGORY: 'Review category strategy',
+};
+const actions = (codes: SignalAction[]) => ({ actionCodes: codes, recommendedActions: codes.map((c) => ACTION_TEXT[c]) });
 
 /**
  * Default aging buckets configuration
@@ -630,15 +654,9 @@ export class InventoryAgingService {
           }
         }
 
-        const recommendedActions: string[] = [];
-        if (product.oldestBatchAge >= 90) {
-          recommendedActions.push('Discount immediately');
-          recommendedActions.push('Stop reordering');
-        }
-        if (product.oldestBatchAge >= 60) {
-          recommendedActions.push('Consider price adjustment');
-          recommendedActions.push('Transfer to other location');
-        }
+        const codes: SignalAction[] = [];
+        if (product.oldestBatchAge >= 90) codes.push('DISCOUNT', 'STOP_REORDER');
+        if (product.oldestBatchAge >= 60) codes.push('PRICE_REVIEW', 'TRANSFER');
 
         signals.push({
           type: 'AT_RISK',
@@ -647,7 +665,9 @@ export class InventoryAgingService {
           entityId: product.productId,
           entityName: product.productName,
           message: `Product has ${product.oldestBatchAge} day old inventory with $${cashAtRisk.toFixed(2)} at risk`,
-          recommendedActions: recommendedActions,
+          ...actions(codes),
+          days: product.oldestBatchAge,
+          units: product.totalUnits,
           cashAtRisk: cashAtRisk,
         });
       }
@@ -670,11 +690,9 @@ export class InventoryAgingService {
           entityId: product.productId,
           entityName: product.productName,
           message: `High-value product ($${product.totalCashTiedUp.toFixed(2)}) with slow movement (${product.oldestBatchAge} days)`,
-          recommendedActions: [
-            'Price adjustment',
-            'Supplier renegotiation',
-            'Review purchasing strategy',
-          ],
+          ...actions(['PRICE_REVIEW', 'RENEGOTIATE_SUPPLIER', 'REVIEW_PURCHASING']),
+          days: product.oldestBatchAge,
+          units: product.totalUnits,
           cashAtRisk: product.totalCashTiedUp,
         });
       }
@@ -697,11 +715,9 @@ export class InventoryAgingService {
           entityId: category.categoryId,
           entityName: category.categoryName,
           message: `Category has $${category.totalCashTiedUp.toFixed(2)} tied up with ${category.averageAge.toFixed(1)} day average age`,
-          recommendedActions: [
-            'Reduce purchasing',
-            'Adjust assortment',
-            'Review category strategy',
-          ],
+          ...actions(['REDUCE_PURCHASING', 'ADJUST_ASSORTMENT', 'REVIEW_CATEGORY']),
+          days: Math.round(category.averageAge * 10) / 10,
+          units: category.totalUnits,
           cashAtRisk: category.totalCashTiedUp,
         });
       }

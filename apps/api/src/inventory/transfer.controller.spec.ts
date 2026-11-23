@@ -204,3 +204,40 @@ describe('TransferController.getStock', () => {
     });
   });
 });
+
+describe('TransferController.suggestions', () => {
+  test('who may see a store\'s transfer suggestions', async () => {
+    const transferService = { suggestions: vi.fn().mockResolvedValue({ suggestions: [], skipped: [] }) };
+    const controller = new TransferController(transferService as any);
+
+    assert({
+      given: 'a manager asking for another store\'s suggestions, and for their own',
+      should: 'refuse the other store and answer for their own',
+      actual: [
+        await outcome(controller.suggestions('norte', undefined, undefined, managerRequest())),
+        await outcome(controller.suggestions('centro', undefined, 'p1,p2', managerRequest())),
+        transferService.suggestions.mock.calls,
+      ],
+      expected: ['No tienes acceso a esta sucursal', 'done', [[{ fromLocationId: 'centro', toLocationId: undefined, productIds: ['p1', 'p2'] }]]],
+    });
+  });
+});
+
+describe('TransferController.suggestions limits', () => {
+  test('too many products', async () => {
+    const transferService = { suggestions: vi.fn().mockResolvedValue({ suggestions: [], skipped: [] }) };
+    const controller = new TransferController(transferService as any);
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `p${i}`).join(',');
+
+    assert({
+      given: 'suggestions asked for 201 products, and for 200',
+      should: 'refuse the first without computing anything, and answer the second',
+      actual: [
+        await outcome(controller.suggestions('centro', undefined, ids(201), managerRequest())),
+        await outcome(controller.suggestions('centro', undefined, ids(200), managerRequest())),
+        transferService.suggestions.mock.calls.length,
+      ],
+      expected: ['Envía hasta 200 productos', 'done', 1],
+    });
+  });
+});

@@ -1,4 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { PurchaseNeedsController } from './purchase-needs.controller';
+import { StockAlertSettingsController } from './stock-alert-settings.controller';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { ProductsModule } from '../products/products.module';
@@ -8,7 +10,7 @@ import { PauseSuggestionsController } from './pause-suggestions.controller';
 
 @Module({
   imports: [forwardRef(() => AuthModule), ProductsModule],
-  controllers: [InternalStockAlertsController, ProductPauseController, PauseSuggestionsController],
+  controllers: [InternalStockAlertsController, ProductPauseController, PauseSuggestionsController, StockAlertSettingsController, PurchaseNeedsController],
   providers: [PrismaService],
 })
 export class StockAlertsModule {}

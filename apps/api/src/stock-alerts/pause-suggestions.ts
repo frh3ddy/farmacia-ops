@@ -25,9 +25,9 @@ const KINDS: PauseSuggestionKind[] = ['NO_SALES_AT_ZERO', 'SLOW_WITH_STOCKOUTS',
  * - EQUIVALENT_SELLING: at 0, and a product in its EquivalenceGroup that isn't
  *   paused, is in stock here and sold ≥ equivalentMinUnits since it ran out. Only
  *   manual groups: a shared medicationDefinitionId is never trusted on its own (§6.5).
- * - NO_SALES_AT_ZERO: at 0, last sale before the window and none since the stats ran.
- * - SLOW_WITH_STOCKOUTS: units ≤ slowMaxUnits and (days at 0 ≥ slowMinDaysAtZero or
- *   ≥ 2 stock-outs).
+ * - NO_SALES_AT_ZERO: at 0, no sale in noSalesMinDays (180) and none since the stats ran.
+ * - SLOW_WITH_STOCKOUTS: 1 to slowMaxUnits units and (days at 0 ≥ slowMinDaysAtZero or
+ *   ≥ 2 stock-outs). None in the window isn't slow: it waits for NO_SALES_AT_ZERO (Fredy, 2026-11-21).
  *
  * One row per product: the first kind above whose rule it fits. Checked on the
  * rules, not on what's shown, so dismissing that kind hides the product rather
@@ -47,6 +47,7 @@ export async function pauseSuggestions(prisma: PrismaClient, locationId: string,
   const settings = await prisma.stockAlertSettings.findUnique({ where: { locationId } });
   const windowDays = settings?.windowDays ?? 90;
   const windowStart = new Date(now.getTime() - windowDays * 86_400_000);
+  const noSalesBefore = new Date(now.getTime() - (settings?.noSalesMinDays ?? 180) * 86_400_000);
 
   const rows = await prisma.$queryRaw<Array<{
     id: string; name: string; kind: PauseSuggestionKind; last_sold_at: Date | null; units: number; days_at_zero: number; stock_outs: number;
@@ -64,7 +65,7 @@ export async function pauseSuggestions(prisma: PrismaClient, locationId: string,
       SELECT c.id, p.name, c.qty, c.zero_since, p."equivalenceGroupId" AS group_id,
              st."unitsSold" AS units, st."lastSoldAt" AS last_sold_at, st."daysAtZero" AS days_at_zero, st."stockOuts" AS stock_outs,
              c.qty <= 0
-               AND (st."lastSoldAt" IS NULL OR st."lastSoldAt" < ${windowStart}::timestamp)
+               AND (st."lastSoldAt" IS NULL OR st."lastSoldAt" <= ${noSalesBefore}::timestamp)
                AND NOT EXISTS (SELECT 1 FROM sold WHERE sold."productId" = c.id AND sold.quantity > 0 AND sold.at >= st."computedAt") AS no_sales
         FROM catalog c
         JOIN "Product" p ON p.id = c.id
@@ -86,7 +87,7 @@ export async function pauseSuggestions(prisma: PrismaClient, locationId: string,
        WHERE b.no_sales AND b.id NOT IN (SELECT id FROM equivalent)
       UNION ALL
       SELECT b.*, 'SLOW_WITH_STOCKOUTS', 2, NULL, NULL, NULL FROM base b
-       WHERE NOT b.no_sales AND b.id NOT IN (SELECT id FROM equivalent) AND b.units <= ${settings?.slowMaxUnits ?? 2}
+       WHERE NOT b.no_sales AND b.id NOT IN (SELECT id FROM equivalent) AND b.units > 0 AND b.units <= ${settings?.slowMaxUnits ?? 2}
          AND (b.days_at_zero >= ${settings?.slowMinDaysAtZero ?? 30} OR b.stock_outs >= 2)
       UNION ALL
       SELECT b.*, 'EQUIVALENT_SELLING', 0, q.eq_id, q.eq_name, q.eq_units FROM base b JOIN equivalent q ON q.id = b.id

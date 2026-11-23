@@ -1,6 +1,6 @@
 # Stock Alerts Epic
 
-**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 and O6 are in production (2026-11-13). O7 is built (2026-11-21, branch feature/ios-inventory-backend, not deployed); O8–O9 are deferred; their requirements are below.
+**Status**: 🚧 IN PROGRESS. O1 and O2 are in production; the owner approved the history and it was saved on 2026-11-12 (98,747 rows). O3 is in production (2026-11-12). O4 is in production (2026-11-13; that night's stats ran in 2.2 s for 5,795 rows). O5 and O6 are in production (2026-11-13). O7 is built (2026-11-21, branch feature/ios-inventory-backend, not deployed); O8–O9 are deferred; their requirements are below. O10–O14 (iOS inventory handoff) are built (2026-11-21, not deployed).
 **Goal**: alert only on regular sellers that ran out or are running low, ranked by lost sales; let a product be paused per store; suggest pauses from history for a person to review
 
 ## Overview
@@ -132,3 +132,39 @@ A report showing how many of each store's stocked products have a `medicationDef
 - Requirements:
   - Given a store, should count its stocked products: linked, not linked, and not linked but regular sellers (the ones that matter most).
   - Should be visible to the owner and managers only.
+
+---
+
+## O10–O14: iOS inventory screens handoff (Fredy, 2026-11-21; built 2026-11-21, not deployed)
+
+Days to cover is `StockAlertSettings.coverDays` per store (default 14); it drives Stock bajo, Por pedir and transfer suggestions. "Sellable" stock leaves out lots past their expiry day (`expiryDayStart(1)`, as aging); lots without an expiry count.
+
+### O10. Fewer pause suggestions
+- `NO_SALES_AT_ZERO` needs no sale in `noSalesMinDays` (new per-store setting, default 180; `lastSoldAt` null or ≤ that many days ago). `windowDays` stays 90 for rates, stock-outs and `unitsInWindow`.
+- `SLOW_WITH_STOCKOUTS` needs at least one unit sold in the window: one with none waits for no-sales at 180 days (Fredy, 2026-11-21, after the dry run showed the 180-day rule alone only moved ~100 per store from no-sales to slow). "First kind it fits" and dismissals are unchanged.
+
+### O11. Sellable stock in the alerts
+- O4's `level` and `priority` (so `lowStock`, `outAlert`, `lowAlert` and their counts) read sellable stock. `qty` and `outOfStock` stay real stock.
+- A lot whose expiry day starts changes no row, so the nightly stats run touches products with lots expiring that day or the day before.
+
+### O12. Transfer suggestions
+`GET /transfers/suggestions?fromLocationId[&toLocationId][&productIds=a,b]` (`transfer-suggestions.ts`), computed on request; owners and managers with access to the origin.
+- need = max(⌈coverDays × rate⌉, typicalOnHand) − sellable − in transit to it; spare = origin sellable − max(⌈origin coverDays × origin rate⌉, origin typicalOnHand), symmetric with need so a move never makes the origin need the same units back (review and Fredy, 2026-11-21; the handoff had no typical at the origin). The spare goes to the stores losing the most sales first; a store with rate 0 gets none.
+- A transfer takes the oldest received lot first, expired or not: an expired first lot blocks the row (`EXPIRED_FIRST`, origin's expired units); one expiring within 60 days caps each store at ⌊rate × days left⌋ (`originalSuggested`, `firstLotDaysToExpiry`); a store the cap brings to 0 gets no row.
+- Skipped with a reason: `NOT_TRACKED`, `SOLD_AT_ONE_STORE`, `DISCONTINUED` (per product), `PAUSED_AT_DESTINATION`, `NO_STATS_AT_DESTINATION` (per store, only when the origin can spare some).
+- Known ceiling: the 60-day cap assumes the whole suggestion comes from the first lot.
+
+### O13. Settings
+`GET /inventory/stock-alert-settings?locationId` (owners anywhere, managers their store) and `PATCH` (owners) with every threshold, validated, plus `receivingLocationId`: the store this one's supplier orders go through (null: buys for itself; one level, no chains). `GET` also returns `suppliesLocationIds`, the stores that buy through it. A `coverDays` or `regularMinWeeks` change touches the store's products with stats (DB trigger), so the phones get the new levels.
+
+### O14. Aging signals as codes
+`GET /inventory/aging/signals` adds `actionCodes` (`DISCOUNT`, `STOP_REORDER`, `PRICE_REVIEW`, `TRANSFER`, `RENEGOTIATE_SUPPLIER`, `REVIEW_PURCHASING`, `REDUCE_PURCHASING`, `ADJUST_ASSORTMENT`, `REVIEW_CATEGORY`), `days` and `units`; `message` and `recommendedActions` stay in English for old clients.
+
+### O15. Por pedir with the receiving store (Cowork, 2026-11-22)
+`GET /inventory/purchase-needs?locationId` (`purchase-needs.ts`; owners anywhere, managers their store) → `{ receivingLocationId, suppliesLocationIds, rows }`, one row per product alerting (O4) at the store or at a store that buys through it, most urgent first (out, then lost sales a day).
+- A store that orders from suppliers: `{ product, level, priority, needHere, forOthers[{ locationId, need, fromSpare, toOrder }], toOrderTotal }`. `fromSpare` is exactly what `GET /transfers/suggestions` would send (same need, spare, allocation and expiry checks); `toOrder` is the rest.
+- A store that buys through another: `{ product, level, priority, need, receivingSends, receivingOrders }`, the receiving store's view of the same numbers.
+- need = O12's need at that store, never below 0; `needHere` is 0 unless the product alerts there (paused or not a regular seller here: nothing ordered for here).
+
+### Later: transfers that skip expired lots
+Today a transfer takes the oldest lot even when it's expired (O12 blocks the suggestion instead). Letting a transfer skip expired lots fits the batchId idea in `tasks/adjustment-lot-choice-epic.md`: the expired lot gets its merma by batch, the transfer takes the next one. Not started.
