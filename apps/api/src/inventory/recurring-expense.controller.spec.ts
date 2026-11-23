@@ -20,7 +20,7 @@ function setup(ruleLocationId: string | null) {
     updateRule: vi.fn().mockResolvedValue(rule),
     deleteRule: vi.fn().mockResolvedValue(undefined),
   };
-  return { service, controller: new RecurringExpenseController(service as any) };
+  return { service, controller: new RecurringExpenseController(service as any, {} as any) };
 }
 
 describe('RecurringExpenseController', () => {
@@ -79,7 +79,7 @@ describe('RecurringExpenseController payroll config', () => {
       getPayrollConfig: vi.fn().mockResolvedValue(stored),
       setPayrollConfig: vi.fn().mockResolvedValue(stored),
     };
-    return { service, controller: new RecurringExpenseController(service as any) };
+    return { service, controller: new RecurringExpenseController(service as any, {} as any) };
   }
 
   test("an accountant of one store and another store's salaries", async () => {
@@ -106,6 +106,60 @@ describe('RecurringExpenseController payroll config', () => {
       should: 'leave out the Norte-home row for the accountant only',
       actual: [await ids('ACCOUNTANT'), await ids('OWNER')],
       expected: [['TM-centro', 'TM-hours'], ['TM-centro', 'TM-norte', 'TM-hours']],
+    });
+  });
+});
+
+describe('RecurringExpenseController upcoming', () => {
+  function upcomingSetup() {
+    const service = { upcoming: vi.fn().mockResolvedValue([]) };
+    const labor = {
+      listTeamMembers: vi.fn().mockResolvedValue([{ id: 'ana', fullName: 'Ana López' }]),
+      getPayrollSummary: vi.fn().mockResolvedValue({ shifts: [{ date: '2026-11-20', locationId: 'centro', workedMinutes: 60, cost: 50 }] }),
+    };
+    return { service, labor, controller: new RecurringExpenseController(service as any, labor as any) };
+  }
+
+  test("a manager's upcoming list", async () => {
+    const { service, controller } = upcomingSetup();
+    await controller.upcoming(requestAs('MANAGER'));
+
+    assert({
+      given: 'a manager asking without a store or days',
+      should: 'read their own store, 30 days ahead',
+      actual: (({ locationId, days }) => ({ locationId, days }))(service.upcoming.mock.calls[0][0]),
+      expected: { locationId: 'centro', days: 30 },
+    });
+
+    assert({
+      given: 'a manager asking for general ones',
+      should: 'refuse it',
+      actual: await outcome(controller.upcoming(requestAs('MANAGER'), undefined, 'general')),
+      expected: 'Solo el dueño o el contador pueden ver gastos generales',
+    });
+
+    assert({
+      given: 'days that are not a whole number from 0 to 366',
+      should: 'refuse each',
+      actual: [await outcome(controller.upcoming(requestAs('OWNER'), undefined, undefined, 'x')), await outcome(controller.upcoming(requestAs('OWNER'), undefined, undefined, '400'))],
+      expected: Array(2).fill('days debe ser un número entero de 0 a 366'),
+    });
+  });
+
+  test("payroll hours come from each person's Square timecards", async () => {
+    const { service, labor, controller } = upcomingSetup();
+    await controller.upcoming(requestAs('OWNER'), undefined, undefined, '7');
+    const { staff, days } = service.upcoming.mock.calls[0][0];
+
+    assert({
+      given: 'the service asking for 1–27 Nov',
+      should: "give each active person's shifts in that span",
+      actual: [days, await staff('2026-11-01', '2026-11-27'), labor.getPayrollSummary.mock.calls],
+      expected: [
+        7,
+        [{ teamMemberId: 'ana', name: 'Ana López', shifts: [{ date: '2026-11-20', locationId: 'centro', workedMinutes: 60, cost: 50 }] }],
+        [['ana', { startDate: '2026-11-01', endDate: '2026-11-27' }]],
+      ],
     });
   });
 });

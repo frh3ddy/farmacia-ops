@@ -183,3 +183,118 @@ describe('RecurringExpenseService and deleted stores', () => {
     });
   });
 });
+
+describe('RecurringExpenseService upcoming', () => {
+  const noStaff = () => Promise.reject(new Error('Square asked without a payroll rule'));
+  const paid = (rule: { id: string; locationId: string | null }, occurrence: string, amount: number) =>
+    prisma.expense.create({ data: {
+      locationId: rule.locationId, type: 'RENT', amount, date: new Date(`${occurrence}T18:00:00Z`),
+      recurringExpenseId: rule.id, occurrenceDate: new Date(`${occurrence}T00:00:00Z`),
+    } });
+  const brief = (o: any) => [o.name, o.dueDate, o.overdue, o.amount, o.amountIsEstimate, o.periodStart, o.periodEnd];
+
+  test('fixed and varying bills', async () => {
+    const centro = await newLocation();
+    const renta = await service.createRule(rent(centro, { startDate: '2026-10-01', remindDaysBefore: 1, remindTime: '09:00' }));
+    const luz = await service.createRule(rent(centro, { type: 'UTILITIES', name: 'Luz', kind: 'VARIES', amount: null, freq: 'MONTHLY', dayOfMonth: 15, startDate: '2026-08-15', periodRule: 'PREVIOUS_MONTH' }));
+    await service.createRule(rent(centro, { name: 'Agua', kind: 'VARIES', amount: null, dayOfMonth: 10, startDate: '2026-12-10' }));
+    await service.createRule(rent(centro, { name: 'Pausada', paused: true }));
+    await paid(renta, '2026-10-01', 8000);
+    for (const [day, amount] of [['2026-08-15', 100], ['2026-09-15', 200], ['2026-10-15', 300], ['2026-11-15', 601]] as const) await paid(luz, day, amount);
+
+    const upcoming = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 30, staff: noStaff });
+
+    assert({
+      given: 'rent paid for October, Luz paid four times, Agua never paid, and a paused rule (today 23 Nov, 30 days)',
+      should: "list unpaid due dates up to 23 Dec with amount or the last 3 payments' average, in due order",
+      actual: upcoming.map(brief),
+      expected: [
+        ['Renta', '2026-11-01', true, '8000', false, '2026-11-01', '2026-11-30'],
+        ['Renta', '2026-12-01', false, '8000', false, '2026-12-01', '2026-12-31'],
+        ['Agua', '2026-12-10', false, null, true, '2026-12-01', '2026-12-31'],
+        ['Luz', '2026-12-15', false, '367', true, '2026-11-01', '2026-11-30'],
+      ],
+    });
+
+    assert({
+      given: 'an occurrence',
+      should: 'carry its id, rule, store and reminder',
+      actual: (({ id, ruleId, locationId, kind, type, autoPaid, remind, payroll }: any) => ({ id, ruleId, locationId, kind, type, autoPaid, remind, payroll }))(upcoming[0]),
+      expected: { id: `${renta.id}:2026-11-01`, ruleId: renta.id, locationId: centro, kind: 'FIXED', type: 'RENT', autoPaid: false, remind: { daysBefore: 1, time: '09:00' }, payroll: undefined },
+    });
+  });
+
+  test('which stores come back', async () => {
+    const centro = await newLocation();
+    const norte = await newLocation('Norte');
+    const tag = (name: string) => `${name} ${centro}`; // other tests' rules share the database
+    await service.createRule(rent(centro, { name: tag('Centro') }));
+    await service.createRule(rent(norte, { name: tag('Norte') }));
+    await service.createRule(rent(null, { name: tag('General'), type: 'PROFESSIONAL' }));
+    const names = async (locationId?: string | null) =>
+      (await service.upcoming({ locationId, today: '2026-11-23', days: 10, staff: async () => [] }))
+        .map((o) => o.name).filter((n) => n.endsWith(centro)).map((n) => n.split(' ')[0]).sort();
+
+    assert({
+      given: 'a store, general (null), and no scope',
+      should: 'list that store only, general only, and everything',
+      actual: [await names(centro), await names(null), await names(undefined)],
+      expected: [['Centro'], ['General'], ['Centro', 'General', 'Norte']],
+    });
+  });
+
+  test("payroll: this store's unpaid people", async () => {
+    const centro = await newLocation();
+    const norte = await newLocation('Norte');
+    const id = (name: string) => `${name}-${centro}`;
+    await service.setPayrollConfig([
+      { teamMemberId: id('beto'), mode: 'FIXED', fixedAmount: 3000, homeLocationId: centro },
+      { teamMemberId: id('carla'), included: false },
+      { teamMemberId: id('dan'), mode: 'FIXED', fixedAmount: 2000, homeLocationId: norte },
+    ]);
+    await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-14' }));
+    const shift = (date: string, locationId: string, workedMinutes: number, cost: number) => ({ date, locationId, workedMinutes, cost });
+    const staff = vi.fn().mockResolvedValue([
+      { teamMemberId: id('ana'), name: 'Ana', shifts: [shift('2026-11-10', centro, 480, 400), shift('2026-11-11', norte, 240, 200), shift('2026-11-15', centro, 300, 250.5), shift('2026-11-23', centro, 120, 100)] },
+      { teamMemberId: id('beto'), name: 'Beto', shifts: [] },
+      { teamMemberId: id('carla'), name: 'Carla', shifts: [shift('2026-11-16', centro, 600, 500)] },
+      { teamMemberId: id('dan'), name: 'Dan', shifts: [shift('2026-11-16', centro, 600, 500)] },
+    ]);
+    // Paid for 7–13 Nov: Ana's Centro part and Beto's salary (Ana's Norte part is Norte's).
+    for (const [teamMemberId, amount] of [[id('ana'), 400], [id('beto'), 3000]] as const) {
+      await prisma.expense.create({ data: {
+        locationId: centro, type: 'PAYROLL', amount, date: new Date('2026-11-14T18:00:00Z'), teamMemberId,
+        periodStart: new Date('2026-11-07T00:00:00Z'), periodEnd: new Date('2026-11-13T00:00:00Z'),
+      } });
+    }
+
+    const upcoming = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 6, staff });
+
+    assert({
+      given: 'a weekly payroll since 14 Nov, everyone paid for its first week, today Monday 23 Nov',
+      should: 'drop the paid week and list the overdue one and the current one (an estimate until it ends)',
+      actual: upcoming.map(brief),
+      expected: [
+        ['Nómina', '2026-11-21', true, '3250.5', false, '2026-11-14', '2026-11-20'],
+        ['Nómina', '2026-11-28', false, '3100', true, '2026-11-21', '2026-11-27'],
+      ],
+    });
+
+    assert({
+      given: 'Ana by hours, Beto fixed at Centro, Carla left out, Dan fixed at Norte',
+      should: "list Ana with Centro's hours and Beto's salary, nobody else",
+      actual: upcoming.map((o: any) => o.payroll),
+      expected: [
+        [{ teamMemberId: id('ana'), name: 'Ana', mode: 'HOURS', minutes: 300, amount: '250.5' }, { teamMemberId: id('beto'), name: 'Beto', mode: 'FIXED', minutes: 0, amount: '3000' }],
+        [{ teamMemberId: id('ana'), name: 'Ana', mode: 'HOURS', minutes: 120, amount: '100' }, { teamMemberId: id('beto'), name: 'Beto', mode: 'FIXED', minutes: 0, amount: '3000' }],
+      ],
+    });
+
+    assert({
+      given: 'three payroll weeks',
+      should: 'ask Square once, for the days they span',
+      actual: staff.mock.calls,
+      expected: [['2026-11-07', '2026-11-27']],
+    });
+  });
+});
