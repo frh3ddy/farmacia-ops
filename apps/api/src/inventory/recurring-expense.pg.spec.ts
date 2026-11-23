@@ -601,4 +601,28 @@ describe('RecurringExpenseService pay', () => {
       expected: [ana],
     });
   });
+
+  test('a one-off payroll payment overlapping the occurrence', async () => {
+    const centro = await newLocation();
+    const ana = `ana-${centro}`;
+    const nomina = await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-21' }));
+    const staff = async () => [
+      { teamMemberId: ana, name: 'Ana', shifts: [{ date: '2026-11-15', locationId: centro, workedMinutes: 60, cost: 50 }] },
+      { teamMemberId: `beto-${centro}`, name: 'Beto', shifts: [{ date: '2026-11-15', locationId: centro, workedMinutes: 60, cost: 50 }] },
+    ];
+    // Paid by hand (POST /expenses/payroll) for 10–16 Nov; the occurrence covers 14–20 Nov.
+    await prisma.expense.create({ data: {
+      locationId: centro, type: 'PAYROLL', amount: 50, date: new Date('2026-11-17T18:00:00Z'), teamMemberId: ana,
+      periodStart: new Date('2026-11-10T00:00:00Z'), periodEnd: new Date('2026-11-16T00:00:00Z'),
+    } });
+    const listed = (await service.upcoming({ locationId: centro, today: '2026-11-23', days: 0, staff })).data
+      .filter((o) => o.ruleId === nomina.id).map((o: any) => o.payroll.map((p: any) => p.name));
+
+    assert({
+      given: 'Ana paid by hand for a period overlapping the occurrence',
+      should: 'not list her as owed, and refuse paying her from it',
+      actual: [listed, await outcome(service.pay(`${nomina.id}:2026-11-21`, { date: '2026-11-21', people: [{ teamMemberId: ana }] }, { staff, assertAccess: () => undefined }))],
+      expected: [[['Beto']], 'Ya se le pagó a Ana en esta sucursal por este periodo'],
+    });
+  });
 });
