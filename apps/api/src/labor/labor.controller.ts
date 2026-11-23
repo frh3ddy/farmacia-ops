@@ -41,6 +41,18 @@ export class LaborController {
     return { success: true, count: members.length, data: members };
   }
 
+  /**
+   * GET /labor/active-shifts?locationId= — who is clocked in now ("En turno ahora").
+   * Scoped like payroll-summary: the owner sees every store unless naming one; anyone else gets their store.
+   */
+  @Get('active-shifts')
+  @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
+  async getActiveShifts(@Req() req: GuardedRequest, @Query('locationId') requestedLocationId?: string) {
+    const locationId = scopedLocationId(req, requestedLocationId);
+    if (locationId) assertLocationAccess(req, locationId);
+    return { success: true, data: await this.laborService.getActiveShifts(locationId) };
+  }
+
   // --------------------------------------------------------------------------
   // Payroll summary for a team member over a period
   // - ?teamMemberId=xxx (required)

@@ -301,6 +301,36 @@ export class LaborService {
     }
   }
 
+  /** Who is clocked in now (open timecards) at one store of ours, or at all of them. */
+  async getActiveShifts(locationId?: string) {
+    const locations = await this.prisma.location.findMany({ select: { id: true, squareId: true, name: true } });
+    const storeBySquareId = new Map(locations.map((l) => [l.squareId, l]));
+    const store = locationId ? locations.find((l) => l.id === locationId && l.squareId) : undefined;
+    if (locationId && !store) throw new NotFoundException(`No se encontró la sucursal ${locationId}`);
+
+    const client = this.getSquareClient();
+    try {
+      // ponytail: one page of 200 open timecards — more people than that never clock in at once.
+      const { timecards = [] } = await client.labor.searchTimecards({
+        query: { filter: { status: 'OPEN', ...(store && { locationIds: [store.squareId!] }) } },
+        limit: 200,
+      });
+      const ours = timecards.filter((t) => storeBySquareId.has(t.locationId));
+      const ids = [...new Set(ours.map((t) => t.teamMemberId))];
+      const members = await Promise.all(ids.map((teamMemberId) => client.teamMembers.get({ teamMemberId })));
+      const nameOf = new Map(members.map(({ teamMember: m }) => [m?.id, [m?.givenName, m?.familyName].filter(Boolean).join(' ')]));
+      return ours.map((t) => ({
+        teamMemberId: t.teamMemberId,
+        name: nameOf.get(t.teamMemberId) || null,
+        locationId: storeBySquareId.get(t.locationId)!.id,
+        startAt: t.startAt,
+      }));
+    } catch (error) {
+      this.logger.error('[LABOR] Failed to list active shifts', error);
+      throw new HttpException({ success: false, message: 'Failed to fetch active shifts from Square' }, HttpStatus.BAD_GATEWAY);
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Timecards + payroll summary
   // --------------------------------------------------------------------------
