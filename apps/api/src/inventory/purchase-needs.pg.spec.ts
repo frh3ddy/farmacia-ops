@@ -20,7 +20,7 @@ afterAll(() => stop?.());
 
 const NOW = new Date('2026-11-21T18:00:00Z');
 
-interface At { stock?: number; sold?: number; typical?: number }
+interface At { stock?: number; sold?: number; typical?: number; weeks?: number; paused?: boolean }
 
 /** A receiving store and one that buys through it (or none), all active, with a way to add products. */
 async function stores(o: { linked?: boolean } = {}) {
@@ -34,8 +34,9 @@ async function stores(o: { linked?: boolean } = {}) {
     for (const [locationId, a] of Object.entries(at)) {
       if (a.stock) await prisma.inventory.create({ data: { productId: id, locationId, quantity: a.stock, unitCost: 1, receivedAt: new Date('2026-10-01') } });
       await prisma.productStockStats.create({
-        data: { productId: id, locationId, windowDays: 90, unitsSold: a.sold ?? 0, weeksWithSales: 10, typicalOnHand: a.typical ?? 0, daysAtZero: 0, stockOuts: 0, computedAt: NOW },
+        data: { productId: id, locationId, windowDays: 90, unitsSold: a.sold ?? 0, weeksWithSales: a.weeks ?? 10, typicalOnHand: a.typical ?? 0, daysAtZero: 0, stockOuts: 0, computedAt: NOW },
       });
+      if (a.paused) await prisma.productStoreStatus.create({ data: { productId: id, locationId, pausedAt: NOW, pauseReason: 'OTHER' } });
     }
     return id;
   };
@@ -80,6 +81,22 @@ describe('purchaseNeeds', () => {
       ],
     });
     assert({ given: 'the receiving store', should: 'list the store that buys through it', actual: (await needs(hub)).suppliesLocationIds, expected: [spoke] });
+  });
+
+  test('short here without an alert here', async () => {
+    const { hub, spoke, product, needs } = await stores();
+    // At Centro, under its typical 10 (so a need) but paused, or not a regular seller: no alert there. Norte is out.
+    const paused = await product('PausadoAqui', { [hub]: { stock: 5, sold: 9, typical: 10, paused: true }, [spoke]: { sold: 90, typical: 5 } });
+    const irregular = await product('IrregularAqui', { [hub]: { stock: 5, sold: 9, typical: 10, weeks: 2 }, [spoke]: { sold: 90, typical: 5 } });
+    const rows = (await needs(hub)).rows;
+    const row = (id: string) => rows.find((r) => r.product.id === id) as { needHere: number; toOrderTotal: number; forOthers: Array<{ toOrder: number }> };
+
+    assert({
+      given: 'products Norte is out of, short of typical at Centro but paused there, or not a regular seller there',
+      should: 'order nothing for Centro itself, only Norte\'s part',
+      actual: [paused, irregular].map((id) => [row(id).needHere, row(id).toOrderTotal, row(id).forOthers[0].toOrder]),
+      expected: [[0, 14, 14], [0, 14, 14]],
+    });
   });
 
   test('a store that buys through another', async () => {
