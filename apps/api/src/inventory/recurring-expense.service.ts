@@ -354,7 +354,7 @@ export class RecurringExpenseService {
     const period = occurrencePeriod(rule, due);
     const payroll = (await this.payrollPeople([period], staff))!; // Square failing fails the payment
     const owed = payroll.owed(here, period);
-    const chosen = input.people ?? owed.map((p) => ({ teamMemberId: p.teamMemberId, amount: undefined }));
+    const chosen = input.people?.length ? input.people : owed.map((p) => ({ teamMemberId: p.teamMemberId, amount: undefined }));
     if (!chosen.length) {
       if (await this.anyPayrollPaid(here, period)) throw alreadyPaid();
       refuse('Sin horas registradas en el periodo');
@@ -370,10 +370,10 @@ export class RecurringExpenseService {
       if (!input.includeOtherStores || person.mode === 'FIXED') {
         return [{ teamMemberId, locationId: here, amount: new Prisma.Decimal(amount ?? person.amount) }];
       }
-      // This store first, then each other store still unpaid for the period.
+      // This store first, then each other store they worked at in the period (checked in otherStoreRules).
       const stores = new Map<string, { minutes: number; cents: number }>([[here, { minutes: 0, cents: 0 }]]);
       for (const s of payroll.person(teamMemberId)!.shifts) {
-        if (!s.locationId || s.date < period.start || s.date > period.end || (s.locationId !== here && payroll.isPaid(teamMemberId, s.locationId, period))) continue;
+        if (!s.locationId || s.date < period.start || s.date > period.end) continue;
         const store = stores.get(s.locationId) ?? { minutes: 0, cents: 0 };
         stores.set(s.locationId, { minutes: store.minutes + s.workedMinutes, cents: store.cents + Math.round(s.cost * 100) });
       }
@@ -385,23 +385,58 @@ export class RecurringExpenseService {
     for (const { locationId } of rows) if (locationId !== here) assertAccess(locationId);
 
     const periodDates = { periodStart: new Date(`${period.start}T00:00:00Z`), periodEnd: new Date(`${period.end}T00:00:00Z`) };
+    const overlaps = { periodStart: { lte: periodDates.periodEnd }, periodEnd: { gte: periodDates.periodStart } };
+    const ruleAt = await this.otherStoreRules(rows.filter((r) => r.locationId !== here), period, overlaps, (id) => payroll.person(id)?.name ?? id);
     // ponytail: one lock for every payroll payment (they're rare, a few a week); re-checked inside
     // so two phones paying the same person at once book it once.
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('payroll-pay'))`;
       const clash = await tx.expense.count({ where: {
-        type: 'PAYROLL', ...periodDates, OR: rows.map(({ teamMemberId, locationId }) => ({ teamMemberId, locationId })),
+        type: 'PAYROLL', ...overlaps, OR: rows.map(({ teamMemberId, locationId }) => ({ teamMemberId, locationId })),
       } });
       if (clash) throw alreadyPaid();
       const created = [];
       for (const row of rows) {
         created.push(await tx.expense.create({ data: {
-          ...common, ...periodDates, ...row, type: 'PAYROLL',
+          ...common, ...periodDates, ...row, type: 'PAYROLL', recurringExpenseId: ruleAt.get(row.locationId) ?? rule.id,
           clientRequestId: crid && `${crid}:${row.teamMemberId}:${row.locationId}`,
         } }));
       }
       return created;
     }).catch(racedOrPaid);
+  }
+
+  /**
+   * Paydays are per store. Another store's hours are booked only when it has no
+   * payroll rule, or its own rule has an occurrence with exactly this period
+   * (that rule is returned, to link its row); never over a payment there that
+   * overlaps the period.
+   */
+  private async otherStoreRules(
+    rows: { teamMemberId: string; locationId: string }[],
+    period: { start: string; end: string },
+    overlaps: Prisma.ExpenseWhereInput,
+    personName: (teamMemberId: string) => string,
+  ) {
+    const ruleAt = new Map<string, string>();
+    if (!rows.length) return ruleAt;
+    const stores = [...new Set(rows.map((r) => r.locationId))];
+    const [locations, rules, paid] = await Promise.all([
+      this.prisma.location.findMany({ where: { id: { in: stores } }, select: { id: true, name: true } }),
+      this.prisma.recurringExpense.findMany({ where: { kind: 'PAYROLL', locationId: { in: stores } } }),
+      this.prisma.expense.findFirst({ where: { type: 'PAYROLL', ...overlaps, OR: rows }, select: { teamMemberId: true, locationId: true } }),
+    ]);
+    const name = (id: string | null) => locations.find((l) => l.id === id)?.name ?? id;
+    if (paid) throw new ConflictException(`Ya se le pagó a ${personName(paid.teamMemberId!)} en ${name(paid.locationId)} por un periodo que se cruza`);
+    const due = addDays(period.end, 1); // a payroll period ends the day before its due date
+    for (const store of stores) {
+      const own = rules.filter((r) => r.locationId === store);
+      if (!own.length) continue;
+      const same = own.find((r) => dueDates(r, due).includes(due) && occurrencePeriod(r, due).start === period.start);
+      if (!same) refuse(`${name(store)} paga nómina con otro periodo; págalo desde ${name(store)}`);
+      ruleAt.set(store, same.id);
+    }
+    return ruleAt;
   }
 
   private async anyPayrollPaid(locationId: string, period: { start: string; end: string }) {
