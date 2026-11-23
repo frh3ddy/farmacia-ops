@@ -193,7 +193,7 @@ export class RecurringExpenseService {
    * Unpaid occurrences due up to `today + days`, overdue ones since each rule's
    * startDate included. A bill is paid once an expense links to its due date; a
    * payroll occurrence lists this store's people still unpaid for the period
-   * (a PAYROLL expense for that person, store and period) and drops out once
+   * (a PAYROLL expense for that person and store overlapping the period) and drops out once
    * none are left, or once it's older than the lookback. VARIES: the average of
    * the rule's last 3 payments. If Square fails, everything else is still listed:
    * payroll comes with payroll and amount null, and payrollUnavailable is set.
@@ -261,17 +261,16 @@ export class RecurringExpenseService {
       staff(from, to),
       this.getPayrollConfig(),
       this.prisma.expense.findMany({
-        where: { type: 'PAYROLL', teamMemberId: { not: null }, periodStart: { gte: new Date(`${from}T00:00:00Z`) }, periodEnd: { lte: new Date(`${to}T00:00:00Z`) } },
+        where: { type: 'PAYROLL', teamMemberId: { not: null }, periodStart: { lte: new Date(`${to}T00:00:00Z`) }, periodEnd: { gte: new Date(`${from}T00:00:00Z`) } },
         select: { teamMemberId: true, locationId: true, periodStart: true, periodEnd: true },
       }),
     ]);
     if (!people) return null;
     const config = new Map(configs.map((c) => [c.teamMemberId, c]));
-    const key = (teamMemberId: string, locationId: string | null, start: string, end: string) => [teamMemberId, locationId, start, end].join('|');
-    const paid = new Set(paidRows.map((e) => key(e.teamMemberId!, e.locationId, dayOf(e.periodStart!), dayOf(e.periodEnd!))));
+    // Paid for a period: any of their payroll payments at that store overlaps it.
+    const isPaid = (teamMemberId: string, locationId: string, period: { start: string; end: string }) => paidRows.some((e) =>
+      e.teamMemberId === teamMemberId && e.locationId === locationId && dayOf(e.periodStart!) <= period.end && dayOf(e.periodEnd!) >= period.start);
 
-    const isPaid = (teamMemberId: string, locationId: string, period: { start: string; end: string }) =>
-      paid.has(key(teamMemberId, locationId, period.start, period.end));
     const person = (teamMemberId: string) => people.find((p) => p.teamMemberId === teamMemberId);
     const owed = (locationId: string, period: { start: string; end: string }) => people.flatMap((person) => {
       const c = config.get(person.teamMemberId);
@@ -441,7 +440,7 @@ export class RecurringExpenseService {
 
   private async anyPayrollPaid(locationId: string, period: { start: string; end: string }) {
     return !!(await this.prisma.expense.count({ where: {
-      type: 'PAYROLL', locationId, periodStart: new Date(`${period.start}T00:00:00Z`), periodEnd: new Date(`${period.end}T00:00:00Z`),
+      type: 'PAYROLL', locationId, periodStart: { lte: new Date(`${period.end}T00:00:00Z`) }, periodEnd: { gte: new Date(`${period.start}T00:00:00Z`) },
     } }));
   }
 }
