@@ -530,4 +530,75 @@ describe('RecurringExpenseService pay', () => {
       expected: 'No tienes acceso a esta sucursal',
     });
   });
+
+  describe('other stores with their own payday', () => {
+    const weekly = (locationId: string, overrides: Record<string, unknown> = {}) => service.createRule(rent(locationId, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-21', ...overrides }));
+    const setup = async () => {
+      const centro = await newLocation();
+      const norte = await newLocation('Norte');
+      const ana = `ana-${centro}`;
+      const staff = async () => [{ teamMemberId: ana, name: 'Ana', shifts: [{ date: '2026-11-15', locationId: centro, workedMinutes: 60, cost: 50 }, { date: '2026-11-16', locationId: norte, workedMinutes: 180, cost: 150 }] }];
+      const nomina = await weekly(centro);
+      const payAna = () => service.pay(`${nomina.id}:2026-11-21`, { date: '2026-11-21', includeOtherStores: true }, { staff, assertAccess: () => undefined });
+      return { centro, norte, ana, staff, payAna };
+    };
+
+    test('Norte pays on another schedule', async () => {
+      const { norte, ana, payAna } = await setup();
+      await weekly(norte, { freq: 'BIWEEKLY' }); // 7–20 Nov, not Centro's 14–20
+
+      assert({
+        given: "Ana paid from Centro's weekly payroll with her hours at Norte, which pays every two weeks",
+        should: 'refuse, naming Norte, and book nothing',
+        actual: [await outcome(payAna()), await prisma.expense.count({ where: { teamMemberId: ana } })],
+        expected: ['Norte paga nómina con otro periodo; págalo desde Norte', 0],
+      });
+    });
+
+    test('Norte pays on the same schedule', async () => {
+      const { centro, norte, staff, payAna } = await setup();
+      const norteNomina = await weekly(norte);
+
+      const booked = await payAna();
+      const norteUpcoming = (await service.upcoming({ locationId: norte, today: '2026-11-23', days: 0, staff })).data.filter((o) => o.ruleId === norteNomina.id);
+
+      assert({
+        given: "Ana paid from Centro with her hours at Norte, which pays the same week",
+        should: "link Norte's part to Norte's own occurrence, so Norte no longer lists her",
+        actual: [booked.map((e) => [e.locationId, e.recurringExpenseId, dayOf(e.occurrenceDate)]), norteUpcoming],
+        expected: [[[centro, booked[0].recurringExpenseId, '2026-11-21'], [norte, norteNomina.id, '2026-11-21']], []],
+      });
+    });
+
+    test('Norte already paid her for an overlapping period', async () => {
+      const { norte, ana, payAna } = await setup();
+      await prisma.expense.create({ data: {
+        locationId: norte, type: 'PAYROLL', amount: 150, date: new Date('2026-11-17T18:00:00Z'), teamMemberId: ana,
+        periodStart: new Date('2026-11-10T00:00:00Z'), periodEnd: new Date('2026-11-16T00:00:00Z'),
+      } });
+
+      assert({
+        given: 'Ana paid at Norte for 10–16 Nov, then paid from Centro for 14–20 Nov with other stores',
+        should: 'refuse, naming Norte, and book nothing more',
+        actual: [await outcome(payAna()), await prisma.expense.count({ where: { teamMemberId: ana } })],
+        expected: ['Ya se le pagó a Ana en Norte por un periodo que se cruza', 1],
+      });
+    });
+  });
+
+  test('an empty list of people', async () => {
+    const centro = await newLocation();
+    const ana = `ana-${centro}`;
+    const nomina = await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-21' }));
+    const staff = async () => [{ teamMemberId: ana, name: 'Ana', shifts: [{ date: '2026-11-15', locationId: centro, workedMinutes: 60, cost: 50 }] }];
+
+    const booked = await service.pay(`${nomina.id}:2026-11-21`, { date: '2026-11-21', people: [] }, { staff, assertAccess: () => undefined });
+
+    assert({
+      given: 'a payroll paid with people: []',
+      should: 'pay everyone owed',
+      actual: booked.map((e) => e.teamMemberId),
+      expected: [ana],
+    });
+  });
 });
