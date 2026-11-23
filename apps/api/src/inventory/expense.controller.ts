@@ -242,6 +242,9 @@ export class ExpenseController {
         return ours;
       },
     });
+    // A replay returns its rows without asking Square (so without the check in
+    // hours()): the payer still needs access to each one's store.
+    for (const e of expenses) assertLocationAccess(req, e.locationId!);
     return {
       success: true,
       data: { expenses: expenses.map((e) => ({ ...e, amount: e.amount.toString() })) },
