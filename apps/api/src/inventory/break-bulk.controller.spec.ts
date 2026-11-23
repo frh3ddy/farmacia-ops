@@ -32,7 +32,7 @@ describe('BreakBulkController', () => {
       given: 'an owner opening boxes and reading the openings at another store',
       should: 'do both at that store',
       actual: [service.breakBulk.mock.calls[0][0].locationId, service.automaticOpenings.mock.calls[0]],
-      expected: ['oriente', ['oriente']],
+      expected: ['oriente', ['oriente', undefined]],
     });
   });
 
@@ -44,7 +44,7 @@ describe('BreakBulkController', () => {
       given: 'a manager reading the boxes sales opened without naming a store',
       should: 'read their session\'s store',
       actual: service.automaticOpenings.mock.calls[0],
-      expected: ['centro'],
+      expected: ['centro', undefined],
     });
   });
 
@@ -56,6 +56,29 @@ describe('BreakBulkController', () => {
       should: 'refuse with 403',
       actual: [await statusOf(controller.automatic('oriente', requestAt('MANAGER'))), service.automaticOpenings.mock.calls.length],
       expected: [403, 0],
+    });
+  });
+
+  test('openings since a time', async () => {
+    const { controller, service } = routes();
+    await controller.automatic(undefined, requestAt('MANAGER'), '2026-11-20T15:00:00.000Z');
+
+    assert({
+      given: 'a manager reading the openings since the last time they looked',
+      should: 'read only those after that time',
+      actual: service.automaticOpenings.mock.calls[0],
+      expected: ['centro', new Date('2026-11-20T15:00:00.000Z')],
+    });
+  });
+
+  test('openings since something that is not a time', async () => {
+    const { controller, service } = routes();
+
+    assert({
+      given: 'a since that is not a date',
+      should: 'refuse with 400 and read nothing',
+      actual: [await statusOf(controller.automatic(undefined, requestAt('MANAGER'), 'ayer')), service.automaticOpenings.mock.calls.length],
+      expected: [400, 0],
     });
   });
 });
