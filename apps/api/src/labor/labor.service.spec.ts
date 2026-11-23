@@ -233,3 +233,49 @@ describe('LaborService.listTeamMembers', () => {
     });
   });
 });
+
+describe('LaborService.getActiveShifts', () => {
+  /** The service over recorded open timecards and team members, and our two stores. */
+  const onShift = (timecards: object[]) => {
+    const searchTimecards = vi.fn().mockResolvedValue({ timecards });
+    const get = vi.fn(async ({ teamMemberId }: { teamMemberId: string }) => ({ teamMember: { id: teamMemberId, givenName: `Nombre-${teamMemberId}`, familyName: 'Pérez' } }));
+    const service = laborWith({ searchTimecards });
+    service['squareClient'] = { labor: { searchTimecards }, teamMembers: { get } } as any;
+    return { service, searchTimecards, get };
+  };
+  const open = (id: string, teamMemberId: string, locationId: string) => ({ ...timecard(id, '2026-11-23T08:00:00-06:00', null, 5000, locationId), teamMemberId });
+
+  test('people clocked in at our stores', async () => {
+    const { service, searchTimecards, get } = onShift([open('t1', 'ana', 'L1'), open('t2', 'beto', 'L2'), open('t3', 'ana', 'L-not-ours')]);
+
+    const active = await service.getActiveShifts();
+
+    assert({
+      given: 'open timecards at two of our stores and one at a Square location that is not ours',
+      should: 'list who is on shift at our stores, by our store id, with their name and start, asking Square for open timecards only',
+      actual: [active, searchTimecards.mock.calls[0][0].query.filter, get.mock.calls.length],
+      expected: [
+        [
+          { teamMemberId: 'ana', name: 'Nombre-ana Pérez', locationId: 'lolita', startAt: '2026-11-23T08:00:00-06:00' },
+          { teamMemberId: 'beto', name: 'Nombre-beto Pérez', locationId: 'oriente', startAt: '2026-11-23T08:00:00-06:00' },
+        ],
+        { status: 'OPEN' },
+        2,
+      ],
+    });
+  });
+
+  test('one store', async () => {
+    const { service, searchTimecards } = onShift([]);
+
+    await service.getActiveShifts('oriente');
+    const unknown = await service.getActiveShifts('nope').then(() => 200, (e: any) => e.getStatus());
+
+    assert({
+      given: 'one of our stores, then one that does not exist',
+      should: "ask Square for that store's open timecards, and answer 404 for the unknown one",
+      actual: [searchTimecards.mock.calls[0][0].query.filter, unknown],
+      expected: [{ status: 'OPEN', locationIds: ['L2'] }, 404],
+    });
+  });
+});

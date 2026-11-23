@@ -48,3 +48,23 @@ describe('LaborController.getPayrollSummary store scope', () => {
     });
   });
 });
+
+describe('LaborController.getActiveShifts store scope', () => {
+  /** The store each request reads, or the refusal's status. */
+  const activeFor = async (role: string, locationId?: string) => {
+    const getActiveShifts = vi.fn().mockResolvedValue([]);
+    const controller = new LaborController({ getActiveShifts } as any);
+    const here = { locationId: 'lolita', role, isActive: true };
+    const req = { currentLocation: here, accessibleLocations: [here] } as any; // fixture: only the fields the controller reads
+    return controller.getActiveShifts(req, locationId).then(() => getActiveShifts.mock.calls[0][0], (e) => e.getStatus?.());
+  };
+
+  test('a manager and the owner', async () => {
+    assert({
+      given: 'a manager naming no store, a manager naming another, and the owner with and without one',
+      should: "show the manager their own store only, and the owner every store or the one named",
+      actual: [await activeFor('MANAGER'), await activeFor('MANAGER', 'oriente'), await activeFor('OWNER'), await activeFor('OWNER', 'oriente')],
+      expected: ['lolita', 403, undefined, 'oriente'],
+    });
+  });
+});
