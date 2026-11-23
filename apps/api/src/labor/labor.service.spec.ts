@@ -203,3 +203,33 @@ describe('LaborService.deleteShift', () => {
     assert({ given: 'an unknown timecard id', should: 'answer 404, not 502', actual: status, expected: 404 });
   });
 });
+
+describe('LaborService.listTeamMembers', () => {
+  /** The service over recorded Square team members and our stores: Lolita and Oriente open, Centro closed. */
+  const teamWith = (teamMembers: object[]) => {
+    const prisma = { location: { findMany: vi.fn().mockResolvedValue([...stores.map((s) => ({ ...s, isActive: true })), { id: 'centro', squareId: 'L3', name: 'Centro', isActive: false }]) } };
+    const service = new LaborService(prisma as any);
+    service['squareClient'] = { teamMembers: { search: vi.fn().mockResolvedValue({ teamMembers }) } } as any;
+    return service;
+  };
+  const member = (id: string, assignedLocations?: object) => ({ id, givenName: id, familyName: '', status: 'ACTIVE', assignedLocations });
+
+  test('assigned stores', async () => {
+    const members = await teamWith([
+      member('ana', { assignmentType: 'EXPLICIT_LOCATIONS', locationIds: ['L2', 'L3', 'L-not-ours'] }),
+      member('beto', { assignmentType: 'ALL_CURRENT_AND_FUTURE_LOCATIONS' }),
+      member('caro'),
+    ]).listTeamMembers();
+
+    assert({
+      given: 'a member assigned some Square locations, one assigned all, and one with none',
+      should: "list each one's open stores of ours, by our id and name",
+      actual: members.map((m) => [m.id, m.locations]),
+      expected: [
+        ['ana', [{ locationId: 'oriente', locationName: 'Oriente' }]],
+        ['beto', [{ locationId: 'lolita', locationName: 'Lolita' }, { locationId: 'oriente', locationName: 'Oriente' }]],
+        ['caro', []],
+      ],
+    });
+  });
+});
