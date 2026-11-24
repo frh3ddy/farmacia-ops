@@ -202,7 +202,7 @@ export class InventoryReportsController {
 
     return {
       success: true,
-      data: { ...report, ...(pendingExpenses && { pendingExpenses }) },
+      data: { ...report, pendingExpenses },
     };
   }
 

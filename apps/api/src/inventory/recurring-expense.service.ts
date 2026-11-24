@@ -411,7 +411,7 @@ export class RecurringExpenseService {
    * P&L "faltan $X por registrar" (E12): the unpaid occurrences whose period
    * overlaps [startDay, endDay], each with its share of the range (the D8 day
    * split), as upcoming lists them (same store scope). Not part of net profit.
-   * null when the range ended before today. Unknown amounts (a VARIES bill with
+   * A closed range lists them too: its bills stay pending until paid. Unknown amounts (a VARIES bill with
    * no estimate, payroll while Square is down) are listed but not totalled.
    */
   async pending({ locationId, startDay, endDay, today, staff }: {
@@ -422,8 +422,7 @@ export class RecurringExpenseService {
     staff: (startDay: string, endDay: string) => Promise<StaffHours[]>;
   }) {
     const end = endDay ?? today;
-    if (end < today) return null;
-    // A bill due up to a year after the range can still cover it (BILL_MONTHS, PREVIOUS_MONTH).
+    // A bill due up to a year after the range can still cover it (BILL_MONTHS, PREVIOUS_MONTH); past ones come back as overdue.
     const days = Math.round((Date.parse(end) - Date.parse(today)) / 86_400_000) + 366;
     const { data, payrollUnavailable } = await this.upcoming({ locationId, today, days, staff });
     const asDate = (day: string) => new Date(`${day}T00:00:00Z`);
