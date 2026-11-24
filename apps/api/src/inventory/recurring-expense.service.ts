@@ -5,7 +5,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { addDays, dueDates, occurrencePeriod } from './recurring-occurrence';
 import { assertAmount, periodData } from './expense.service';
-import { split } from './expense-period';
+import { expenseShareDecimal, split } from './expense-period';
 import { parseDateParam } from './business-date';
 
 /** A rule as a client sends it (create: all of it; update: any part). */
@@ -405,6 +405,40 @@ export class RecurringExpenseService {
       }
       return created;
     }).catch(racedOrPaid);
+  }
+
+  /**
+   * P&L "faltan $X por registrar" (E12): the unpaid occurrences whose period
+   * overlaps [startDay, endDay], each with its share of the range (the D8 day
+   * split), as upcoming lists them (same store scope). Not part of net profit.
+   * null when the range ended before today. Unknown amounts (a VARIES bill with
+   * no estimate, payroll while Square is down) are listed but not totalled.
+   */
+  async pending({ locationId, startDay, endDay, today, staff }: {
+    locationId?: string | null;
+    startDay?: string;
+    endDay?: string;
+    today: string;
+    staff: (startDay: string, endDay: string) => Promise<StaffHours[]>;
+  }) {
+    const end = endDay ?? today;
+    if (end < today) return null;
+    // A bill due up to a year after the range can still cover it (BILL_MONTHS, PREVIOUS_MONTH).
+    const days = Math.round((Date.parse(end) - Date.parse(today)) / 86_400_000) + 366;
+    const { data, payrollUnavailable } = await this.upcoming({ locationId, today, days, staff });
+    const asDate = (day: string) => new Date(`${day}T00:00:00Z`);
+    const items = data
+      .filter((o) => o.periodStart <= end && (!startDay || o.periodEnd >= startDay))
+      .map((o) => ({
+        id: o.id, ruleId: o.ruleId, name: o.name, type: o.type, dueDate: o.dueDate, locationId: o.locationId,
+        amountIsEstimate: o.amountIsEstimate,
+        amount: o.amount === null ? null : expenseShareDecimal(
+          { type: o.type, amount: new Prisma.Decimal(o.amount), date: asDate(o.dueDate), periodStart: asDate(o.periodStart), periodEnd: asDate(o.periodEnd) },
+          startDay, end,
+        ).toString(),
+      }));
+    const total = items.reduce((sum, i) => (i.amount === null ? sum : sum.add(i.amount)), new Prisma.Decimal(0));
+    return { total: total.toString(), count: items.length, items, payrollUnavailable };
   }
 
   /**

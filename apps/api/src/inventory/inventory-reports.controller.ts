@@ -10,7 +10,10 @@ import {
 } from '@nestjs/common';
 import { EmployeeRole } from '@prisma/client';
 import { InventoryReportsService } from './inventory-reports.service';
-import { parseDateParam, startOfBusinessMonth } from './business-date';
+import { businessDay, parseDateParam, startOfBusinessMonth } from './business-date';
+import { reportDays } from './expense-period';
+import { RecurringExpenseService } from './recurring-expense.service';
+import { LaborService } from '../labor/labor.service';
 import { AuthGuard, LocationGuard, Roles, scopedLocationId, assertLocationAccess, GuardedRequest, RoleGuardedRequest } from '../auth/guards/auth.guard';
 
 const PROFIT_LOSS_ROLES: EmployeeRole[] = ['OWNER', 'ACCOUNTANT'];
@@ -40,7 +43,11 @@ export function dashboardWithoutCosts<
 @Controller('inventory/reports')
 @UseGuards(AuthGuard, LocationGuard)
 export class InventoryReportsController {
-  constructor(private readonly reportsService: InventoryReportsService) {}
+  constructor(
+    private readonly reportsService: InventoryReportsService,
+    private readonly recurring: RecurringExpenseService,
+    private readonly labor: LaborService,
+  ) {}
 
   // --------------------------------------------------------------------------
   // COGS Report (Cost of Goods Sold) - OWNER, MANAGER, ACCOUNTANT
@@ -182,15 +189,20 @@ export class InventoryReportsController {
   ) {
     const targetLocationId = scopedLocationId(req, locationId);
 
-    const report = await this.reportsService.getProfitAndLossReport({
-      locationId: targetLocationId,
-      startDate: parseDateParam(startDate, 'startDate', 'start'),
-      endDate: parseDateParam(endDate, 'endDate', 'end'),
-    });
+    const range = { startDate: parseDateParam(startDate, 'startDate', 'start'), endDate: parseDateParam(endDate, 'endDate', 'end') };
+    const [startDay, endDay] = reportDays(range.startDate, range.endDate);
+    const [report, pendingExpenses] = await Promise.all([
+      this.reportsService.getProfitAndLossReport({ locationId: targetLocationId, ...range }),
+      // "Faltan $X por registrar": unpaid recurring bills of the range, kept out of net profit.
+      this.recurring.pending({
+        locationId: targetLocationId, startDay, endDay, today: businessDay(new Date()),
+        staff: (from, to) => this.labor.getShiftsByPerson(from, to),
+      }),
+    ]);
 
     return {
       success: true,
-      data: report,
+      data: { ...report, ...(pendingExpenses && { pendingExpenses }) },
     };
   }
 
