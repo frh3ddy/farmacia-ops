@@ -214,15 +214,17 @@ describe('InventoryReportsController.getProfitAndLossReport', () => {
   });
 
   test('a closed month', async () => {
-    const { controller } = pendingFor(null);
+    const pending = { total: '8000', count: 1, items: [], payrollUnavailable: false };
+    const { recurring, controller } = pendingFor(pending);
 
     const { data } = await controller.getProfitAndLossReport(requestAs('OWNER'), undefined, '2026-10-01', '2026-10-31');
+    const { startDay, endDay } = recurring.pending.mock.calls[0][0];
 
     assert({
-      given: 'a range with nothing pending',
-      should: 'leave pendingExpenses out',
-      actual: 'pendingExpenses' in data,
-      expected: false,
+      given: 'a month that already ended',
+      should: 'still ask for its unrecorded bills and add them beside net profit',
+      actual: [startDay, endDay, (data as any).pendingExpenses],
+      expected: ['2026-10-01', '2026-10-31', pending],
     });
   });
 });

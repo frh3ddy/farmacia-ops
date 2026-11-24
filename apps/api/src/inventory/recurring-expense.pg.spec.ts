@@ -717,7 +717,7 @@ describe('RecurringExpenseService pending', () => {
     });
   });
 
-  test('part of a month, the whole business, and a closed range', async () => {
+  test('part of a month and the whole business', async () => {
     const centro = await newLocation();
     const renta = await service.createRule(rent(centro, { startDate: '2026-11-01' }));
     const contador = await service.createRule(rent(null, { type: 'OTHER', name: 'Contador', amount: 1500, startDate: '2026-11-01' }));
@@ -725,7 +725,6 @@ describe('RecurringExpenseService pending', () => {
     const second = await service.pending({ ...november, startDay: '2026-11-16', locationId: centro });
     const business = await service.pending({ ...november, locationId: undefined });
     const store = await service.pending({ ...november, locationId: centro });
-    const october = await service.pending({ ...november, startDay: '2026-10-01', endDay: '2026-10-31', locationId: centro });
 
     assert({
       given: 'the second half of November',
@@ -740,12 +739,36 @@ describe('RecurringExpenseService pending', () => {
       actual: [brief(business, [renta.id, contador.id]), brief(store, [renta.id, contador.id])],
       expected: [[['Contador', '1500', false], ['Renta', '8000', false]], [['Renta', '8000', false]]],
     });
+  });
+
+  test('a range that already ended', async () => {
+    const centro = await newLocation();
+    const renta = await service.createRule(rent(centro, { startDate: '2026-10-01' }));
+    const luz = await service.createRule(rent(centro, { type: 'UTILITIES', name: 'Luz', amount: 3000, startDate: '2026-12-05', dayOfMonth: 5, periodRule: 'PREVIOUS_MONTH' }));
+
+    const october = await service.pending({ ...november, startDay: '2026-10-01', endDay: '2026-10-31', locationId: centro });
+    const firstDays = await service.pending({ ...november, startDay: '2026-11-01', endDay: '2026-11-20', locationId: centro });
+    const longAgo = await service.pending({ ...november, startDay: '2025-01-01', endDay: '2025-01-31', locationId: centro });
 
     assert({
-      given: 'a range that ended before today',
+      given: 'a closed month whose rent was never paid',
+      should: 'still list it as pending',
+      actual: brief(october, [renta.id, luz.id]),
+      expected: [['Renta', '8000', false]],
+    });
+
+    assert({
+      given: 'a range that ended before today, covered by a bill due next month',
+      should: "list that bill's share of the range too",
+      actual: brief(firstDays, [renta.id, luz.id]),
+      expected: [['Renta', '5333.4', false], ['Luz', '2000', false]], // the first 20 days carry the spare cents: 266.67 each
+    });
+
+    assert({
+      given: 'a range from before any rule started, over a year ago',
       should: 'have nothing pending',
-      actual: october,
-      expected: null,
+      actual: [longAgo.count, longAgo.total],
+      expected: [0, '0'],
     });
   });
 });
