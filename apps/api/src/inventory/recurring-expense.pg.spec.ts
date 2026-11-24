@@ -693,3 +693,59 @@ describe('RecurringExpenseService autoPay', () => {
     });
   });
 });
+
+describe('RecurringExpenseService pending', () => {
+  const noPayroll = () => Promise.resolve([]);
+  const november = { startDay: '2026-11-01', endDay: '2026-11-30', today: '2026-11-23', staff: noPayroll };
+  const brief = (p: any, ruleIds: string[]) => p.items.filter((i: any) => ruleIds.includes(i.ruleId)).map((i: any) => [i.name, i.amount, i.amountIsEstimate]);
+
+  test('the bills of a month not yet recorded', async () => {
+    const centro = await newLocation();
+    const renta = await service.createRule(rent(centro, { startDate: '2026-11-01' }));
+    const internet = await service.createRule(rent(centro, { type: 'UTILITIES', name: 'Internet', amount: 600, dayOfMonth: 15, startDate: '2026-11-15', periodRule: 'PREVIOUS_MONTH' }));
+    const luz = await service.createRule(rent(centro, { type: 'UTILITIES', name: 'Luz', kind: 'VARIES', amount: null, startDate: '2026-11-10', dayOfMonth: 10 }));
+    const agua = await service.createRule(rent(centro, { type: 'UTILITIES', name: 'Agua', amount: 300, startDate: '2026-11-05', dayOfMonth: 5 }));
+    await service.pay(`${agua.id}:2026-11-05`, { date: '2026-11-05' }, { staff: noPayroll, assertAccess: () => undefined });
+
+    const pending = await service.pending({ ...november, locationId: centro });
+
+    assert({
+      given: "a store's unpaid November rent, an internet bill due in December for November, a varying bill with no estimate, and a paid bill",
+      should: 'list each unpaid one whose period is in the range by due date, total the known amounts, and leave out the paid one and the October internet',
+      actual: [brief(pending, [renta.id, internet.id, luz.id, agua.id]), pending!.total, pending!.count],
+      expected: [[['Renta', '8000', false], ['Luz', null, true], ['Internet', '600', false]], '8600', 3],
+    });
+  });
+
+  test('part of a month, the whole business, and a closed range', async () => {
+    const centro = await newLocation();
+    const renta = await service.createRule(rent(centro, { startDate: '2026-11-01' }));
+    const contador = await service.createRule(rent(null, { type: 'OTHER', name: 'Contador', amount: 1500, startDate: '2026-11-01' }));
+
+    const second = await service.pending({ ...november, startDay: '2026-11-16', locationId: centro });
+    const business = await service.pending({ ...november, locationId: undefined });
+    const store = await service.pending({ ...november, locationId: centro });
+    const october = await service.pending({ ...november, startDay: '2026-10-01', endDay: '2026-10-31', locationId: centro });
+
+    assert({
+      given: 'the second half of November',
+      should: "count only that half's share of the rent, split by day as a paid one is (spare cents go to the first days)",
+      actual: brief(second, [renta.id]),
+      expected: [['Renta', '3999.95', false]],
+    });
+
+    assert({
+      given: 'the whole-business call and the store call',
+      should: 'list general bills only in the whole-business one',
+      actual: [brief(business, [renta.id, contador.id]), brief(store, [renta.id, contador.id])],
+      expected: [[['Contador', '1500', false], ['Renta', '8000', false]], [['Renta', '8000', false]]],
+    });
+
+    assert({
+      given: 'a range that ended before today',
+      should: 'have nothing pending',
+      actual: october,
+      expected: null,
+    });
+  });
+});

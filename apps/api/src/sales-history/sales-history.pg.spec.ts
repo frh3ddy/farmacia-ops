@@ -334,7 +334,7 @@ describe('busyHours in summer (Postgres)', () => {
 describe('sales history endpoints (Postgres)', () => {
   const at = (locationId: string, role = 'MANAGER') =>
     ({ currentLocation: { locationId, role }, accessibleLocations: [{ locationId, isActive: true }] }) as any;
-  const reports = () => new InventoryReportsController(new InventoryReportsService(prisma));
+  const reports = () => new InventoryReportsController(new InventoryReportsService(prisma), {} as any, {} as any);
 
   test('busy hours over a number of days', async () => {
     await historyLine({ locationId: centro, at: new Date(Date.now() - 20 * DAY), quantity: 1 });
