@@ -13,7 +13,7 @@ const RANGES = {
 } as const;
 type NumberSetting = keyof typeof RANGES;
 
-export type StockAlertSettingsPatch = Partial<Record<NumberSetting, number>> & { receivingLocationId?: string | null };
+export type StockAlertSettingsPatch = Partial<Record<NumberSetting, number>> & { receivingLocationId?: string | null; receivingReviewed?: true };
 
 /**
  * A store's stock alert settings (defaults when it has no row), the store its
@@ -37,15 +37,26 @@ export async function stockAlertSettingsOf(prisma: PrismaClient, locationId: str
     noSalesMinDays: s.noSalesMinDays,
     receivingLocationId: s.receivingLocationId,
     suppliesLocationIds: supplied.map((r) => r.locationId),
+    receivingReviewed: await reviewedOf(prisma, row),
   };
+}
+
+/** Who confirmed who receives from suppliers, and when; null until someone does. */
+async function reviewedOf(prisma: PrismaClient, row: { receivingReviewedAt: Date | null; receivingReviewedBy: string | null } | null) {
+  if (!row?.receivingReviewedAt) return null;
+  const by = row.receivingReviewedBy ? await prisma.employee.findUnique({ where: { id: row.receivingReviewedBy }, select: { id: true, name: true } }) : null;
+  return { at: row.receivingReviewedAt, by };
 }
 
 /**
  * Changes a store's settings; fields not sent are kept. A receiving store
  * buys for itself (one level only: no chains). Changing what the alert reads
- * re-sends the store's products to the phones (DB trigger).
+ * re-sends the store's products to the phones (DB trigger). Confirming
+ * (`receivingReviewed: true`) or sending `receivingLocationId` marks who
+ * receives as reviewed by `by` in every open store: it's one business-wide choice.
  */
-export async function updateStockAlertSettings(prisma: PrismaClient, locationId: string, patch: StockAlertSettingsPatch) {
+export async function updateStockAlertSettings(prisma: PrismaClient, locationId: string, patch: StockAlertSettingsPatch, by?: string) {
+  if (patch?.receivingReviewed !== undefined && patch.receivingReviewed !== true) throw new BadRequestException('receivingReviewed solo puede ser true');
   const data: StockAlertSettingsPatch = {};
   for (const key of Object.keys(RANGES) as NumberSetting[]) {
     const value = patch?.[key];
@@ -67,5 +78,10 @@ export async function updateStockAlertSettings(prisma: PrismaClient, locationId:
     data.receivingLocationId = to;
   }
   await prisma.stockAlertSettings.upsert({ where: { locationId }, create: { locationId, ...data }, update: data });
+  if (patch?.receivingReviewed || patch?.receivingLocationId !== undefined) {
+    const mark = { receivingReviewedAt: new Date(), receivingReviewedBy: by ?? null };
+    const open = await prisma.location.findMany({ where: { isActive: true }, select: { id: true } });
+    await prisma.$transaction(open.map(({ id }) => prisma.stockAlertSettings.upsert({ where: { locationId: id }, create: { locationId: id, ...mark }, update: mark })));
+  }
   return stockAlertSettingsOf(prisma, locationId);
 }

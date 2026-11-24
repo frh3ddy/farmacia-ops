@@ -13,6 +13,7 @@ const API_PREFIXES = [
   "/yastas",
   "/transfers",
   "/internal",
+  "/store-setup",
 ];
 
 /** True for a page load the web app routes: a GET outside the api, not a file. */

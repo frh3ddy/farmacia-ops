@@ -11,6 +11,7 @@ import { ProductsModule } from './products/products.module';
 import { LaborModule } from './labor/labor.module';
 import { YastasModule } from './yastas/yastas.module';
 import { StockAlertsModule } from './stock-alerts/stock-alerts.module';
+import { StoreSetupModule } from './store-setup/store-setup.module';
 import { PrismaService } from './prisma/prisma.service';
 
 @Module({
@@ -27,6 +28,7 @@ import { PrismaService } from './prisma/prisma.service';
     LaborModule,
     YastasModule,
     StockAlertsModule,
+    StoreSetupModule,
   ],
   providers: [PrismaService],
   exports: [PrismaService],
