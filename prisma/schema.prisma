@@ -840,12 +840,16 @@ model InventoryReceiving {
 }
 
 model Expense {
-  id         String @id @default(uuid())
-  locationId String
+  id         String  @id @default(uuid())
+  locationId String? // null: a general (business-wide) expense — owner and accountant only
 
   type        ExpenseType
   amount      Decimal
-  date        DateTime
+  date        DateTime // when it was paid
+  // The store days it covers (inclusive), both or neither; reports count it
+  // there, split by day (expense-period.ts). Null: the day it was paid.
+  periodStart DateTime? @db.Date
+  periodEnd   DateTime? @db.Date
   description String? // Description of the expense
   vendor      String? // Who was paid (landlord, utility company, etc.)
   reference   String? // Invoice/receipt number
@@ -859,11 +863,12 @@ model Expense {
   // InventoryAdjustment.clientRequestId for the full rationale.
   clientRequestId String? @unique
 
-  location Location @relation(fields: [locationId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id], onDelete: Restrict) // stores are deactivated, never deleted
 
   @@index([locationId])
   @@index([type])
   @@index([date])
+  @@index([periodStart])
 }
 
 enum ExpenseType {
