@@ -33,11 +33,18 @@ export class LaborController {
 
   // --------------------------------------------------------------------------
   // List Square team members - OWNER, MANAGER, ACCOUNTANT
+  // A manager sees only the staff of their stores, each with only those stores.
   // --------------------------------------------------------------------------
   @Get('team-members')
   @Roles('OWNER', 'MANAGER', 'ACCOUNTANT')
-  async listTeamMembers() {
-    const members = await this.laborService.listTeamMembers();
+  async listTeamMembers(@Req() req: GuardedRequest) {
+    let members = await this.laborService.listTeamMembers();
+    if (req.currentLocation?.role === 'MANAGER') {
+      const mine = new Set((req.accessibleLocations ?? []).filter((a) => a.isActive).map((a) => a.locationId));
+      members = members
+        .map((m) => ({ ...m, locations: m.locations.filter((l) => mine.has(l.locationId)) }))
+        .filter((m) => m.locations.length);
+    }
     return { success: true, count: members.length, data: members };
   }
 
