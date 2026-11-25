@@ -202,11 +202,12 @@ export class RecurringExpenseService {
    * and amount null, hasPayments (some payroll here overlaps the week, read from
    * the DB) and payrollUnavailable set.
    */
-  async upcoming({ locationId, today, days, staff }: {
+  async upcoming({ locationId, today, days, staff, futurePayroll = false }: {
     locationId?: string | null; // undefined: every store and general; null: general only
     today: string;
     days: number;
     staff: (startDay: string, endDay: string) => Promise<StaffHours[]>;
+    futurePayroll?: boolean; // keep payroll weeks that haven't started (the P&L counts their fixed salaries)
   }) {
     const rules = await this.prisma.recurringExpense.findMany({
       where: { paused: false, ...(locationId !== undefined && { locationId }) },
@@ -219,7 +220,7 @@ export class RecurringExpenseService {
       return dueDates(rule, until)
         .filter((due) => (rule.kind === 'PAYROLL' ? due >= payrollFrom : !paid.has(due)))
         .map((due) => ({ rule, due, period: occurrencePeriod(rule, due) }))
-        .filter(({ period }) => rule.kind !== 'PAYROLL' || period.start <= today);
+        .filter(({ period }) => futurePayroll || rule.kind !== 'PAYROLL' || period.start <= today);
     });
     const payrollPeriods = occurrences.filter((o) => o.rule.kind === 'PAYROLL').map((o) => o.period);
     // Only Square failing is tolerated: a database error still fails the request.
@@ -431,7 +432,7 @@ export class RecurringExpenseService {
     const end = endDay ?? today;
     // A bill due up to a year after the range can still cover it (BILL_MONTHS, PREVIOUS_MONTH); past ones come back as overdue.
     const days = Math.round((Date.parse(end) - Date.parse(today)) / 86_400_000) + 366;
-    const { data, payrollUnavailable } = await this.upcoming({ locationId, today, days, staff });
+    const { data, payrollUnavailable } = await this.upcoming({ locationId, today, days, staff, futurePayroll: true });
     const asDate = (day: string) => new Date(`${day}T00:00:00Z`);
     const items = data
       .filter((o) => o.periodStart <= end && (!startDay || o.periodEnd >= startDay))
