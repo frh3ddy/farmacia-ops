@@ -21,7 +21,7 @@ function setup() {
       netProfit: { amount: '1000', marginPercent: '20.00' },
     }),
   };
-  return { reports, controller: new InventoryReportsController(reports as any) };
+  return { reports, controller: new InventoryReportsController(reports as any, {} as any, {} as any) };
 }
 
 const profitLossKeys = (data: object) => ['operatingExpenses', 'netProfit'].filter((key) => key in data);
@@ -130,7 +130,7 @@ describe('InventoryReportsController.getBatchDetail', () => {
   test('a batch by id', async () => {
     const outcomeAt = (locationId: string) => {
       const reports = { getBatchDetail: vi.fn().mockResolvedValue({ batchId: 'b1', locationId }) };
-      return new InventoryReportsController(reports as any)
+      return new InventoryReportsController(reports as any, {} as any, {} as any)
         .getBatchDetail('b1', requestAs('MANAGER'))
         .then(() => 'done', (e: any) => e.response?.message ?? e.message);
     };
@@ -184,6 +184,47 @@ describe('InventoryReportsController.getCOGSReport', () => {
       should: 'cover the current business month, not every sale ever',
       actual: reports.getCOGSReport.mock.calls[0][0].startDate?.toISOString(),
       expected: startOfBusinessMonth().toISOString(),
+    });
+  });
+});
+
+describe('InventoryReportsController.getProfitAndLossReport', () => {
+  const pendingFor = (result: unknown) => {
+    const { reports } = setup();
+    const recurring = { pending: vi.fn().mockResolvedValue(result) };
+    return { recurring, controller: new InventoryReportsController(reports as any, recurring as any, {} as any) };
+  };
+
+  test('a month that has not ended', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-24T03:00:00Z')); // still Nov 23 at the store
+    const pending = { total: '8000', count: 1, items: [], payrollUnavailable: false };
+    const { recurring, controller } = pendingFor(pending);
+
+    const { data } = await controller.getProfitAndLossReport(requestAs('OWNER'), undefined, '2026-11-01', '2026-11-30');
+    vi.useRealTimers();
+    const { staff, ...asked } = recurring.pending.mock.calls[0][0];
+
+    assert({
+      given: 'the whole-business P&L for the current month',
+      should: "ask for the bills not yet recorded in the range's store days, as of the store's today, and add them beside net profit",
+      actual: [asked, (data as any).pendingExpenses, data.netProfit.amount],
+      expected: [{ locationId: undefined, startDay: '2026-11-01', endDay: '2026-11-30', today: '2026-11-23' }, pending, '1000'],
+    });
+  });
+
+  test('a closed month', async () => {
+    const pending = { total: '8000', count: 1, items: [], payrollUnavailable: false };
+    const { recurring, controller } = pendingFor(pending);
+
+    const { data } = await controller.getProfitAndLossReport(requestAs('OWNER'), undefined, '2026-10-01', '2026-10-31');
+    const { startDay, endDay } = recurring.pending.mock.calls[0][0];
+
+    assert({
+      given: 'a month that already ended',
+      should: 'still ask for its unrecorded bills and add them beside net profit',
+      actual: [startDay, endDay, (data as any).pendingExpenses],
+      expected: ['2026-10-01', '2026-10-31', pending],
     });
   });
 });

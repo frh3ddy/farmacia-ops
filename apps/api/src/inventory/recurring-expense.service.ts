@@ -5,7 +5,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { addDays, dueDates, occurrencePeriod } from './recurring-occurrence';
 import { assertAmount, periodData } from './expense.service';
-import { split } from './expense-period';
+import { expenseShareDecimal, split } from './expense-period';
 import { businessDay, parseDateParam } from './business-date';
 
 /** A rule as a client sends it (create: all of it; update: any part). */
@@ -202,11 +202,12 @@ export class RecurringExpenseService {
    * and amount null, hasPayments (some payroll here overlaps the week, read from
    * the DB) and payrollUnavailable set.
    */
-  async upcoming({ locationId, today, days, staff }: {
+  async upcoming({ locationId, today, days, staff, futurePayroll = false }: {
     locationId?: string | null; // undefined: every store and general; null: general only
     today: string;
     days: number;
     staff: (startDay: string, endDay: string) => Promise<StaffHours[]>;
+    futurePayroll?: boolean; // keep payroll weeks that haven't started (the P&L counts their fixed salaries)
   }) {
     const rules = await this.prisma.recurringExpense.findMany({
       where: { paused: false, ...(locationId !== undefined && { locationId }) },
@@ -219,7 +220,7 @@ export class RecurringExpenseService {
       return dueDates(rule, until)
         .filter((due) => (rule.kind === 'PAYROLL' ? due >= payrollFrom : !paid.has(due)))
         .map((due) => ({ rule, due, period: occurrencePeriod(rule, due) }))
-        .filter(({ period }) => rule.kind !== 'PAYROLL' || period.start <= today);
+        .filter(({ period }) => futurePayroll || rule.kind !== 'PAYROLL' || period.start <= today);
     });
     const payrollPeriods = occurrences.filter((o) => o.rule.kind === 'PAYROLL').map((o) => o.period);
     // Only Square failing is tolerated: a database error still fails the request.
@@ -412,6 +413,39 @@ export class RecurringExpenseService {
       }
       return created;
     }).catch(racedOrPaid);
+  }
+
+  /**
+   * P&L "faltan $X por registrar" (E12): the unpaid occurrences whose period
+   * overlaps [startDay, endDay], each with its share of the range (the D8 day
+   * split), as upcoming lists them (same store scope). Not part of net profit.
+   * A closed range lists them too: its bills stay pending until paid. Unknown amounts (a VARIES bill with
+   * no estimate, payroll while Square is down) are listed but not totalled.
+   */
+  async pending({ locationId, startDay, endDay, today, staff }: {
+    locationId?: string | null;
+    startDay?: string;
+    endDay?: string;
+    today: string;
+    staff: (startDay: string, endDay: string) => Promise<StaffHours[]>;
+  }) {
+    const end = endDay ?? today;
+    // A bill due up to a year after the range can still cover it (BILL_MONTHS, PREVIOUS_MONTH); past ones come back as overdue.
+    const days = Math.round((Date.parse(end) - Date.parse(today)) / 86_400_000) + 366;
+    const { data, payrollUnavailable } = await this.upcoming({ locationId, today, days, staff, futurePayroll: true });
+    const asDate = (day: string) => new Date(`${day}T00:00:00Z`);
+    const items = data
+      .filter((o) => o.periodStart <= end && (!startDay || o.periodEnd >= startDay))
+      .map((o) => ({
+        id: o.id, ruleId: o.ruleId, name: o.name, type: o.type, dueDate: o.dueDate, locationId: o.locationId,
+        amountIsEstimate: o.amountIsEstimate,
+        amount: o.amount === null ? null : expenseShareDecimal(
+          { type: o.type, amount: new Prisma.Decimal(o.amount), date: asDate(o.dueDate), periodStart: asDate(o.periodStart), periodEnd: asDate(o.periodEnd) },
+          startDay, end,
+        ).toString(),
+      }));
+    const total = items.reduce((sum, i) => (i.amount === null ? sum : sum.add(i.amount)), new Prisma.Decimal(0));
+    return { total: total.toString(), count: items.length, items, payrollUnavailable };
   }
 
   /**

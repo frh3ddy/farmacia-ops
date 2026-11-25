@@ -16,7 +16,7 @@ describe('integrity report', () => {
   test('latest run', async () => {
     const run = { id: 'r2', ranAt: new Date('2026-10-27T09:00:00Z'), mismatchCount: 1, checks: {} };
     const prisma = { integrityRun: { findFirst: vi.fn().mockResolvedValue(run) } };
-    const controller = new InventoryReportsController(new InventoryReportsService(prisma as any));
+    const controller = new InventoryReportsController(new InventoryReportsService(prisma as any), {} as any, {} as any);
 
     assert({
       given: 'stored integrity runs',
@@ -28,7 +28,7 @@ describe('integrity report', () => {
 
   test('no run yet', async () => {
     const prisma = { integrityRun: { findFirst: vi.fn().mockResolvedValue(null) } };
-    const controller = new InventoryReportsController(new InventoryReportsService(prisma as any));
+    const controller = new InventoryReportsController(new InventoryReportsService(prisma as any), {} as any, {} as any);
 
     assert({
       given: 'no integrity run stored yet',
