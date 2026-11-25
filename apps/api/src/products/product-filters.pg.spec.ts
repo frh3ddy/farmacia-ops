@@ -91,15 +91,15 @@ describe('ProductsService.getProducts with a filter', () => {
     const { store, thinMargin } = await storeWithStockLevels();
     const { id: fifth } = await prisma.product.create({ data: { name: `Quinto-${Math.random()}`, soldOnlyAtLocationId: store } });
     await prisma.catalogMapping.create({ data: { squareVariationId: `v-${fifth}`, productId: fifth, locationId: store, priceCents: 1000 } });
-    await prisma.inventory.create({ data: { productId: fifth, locationId: store, quantity: 10, unitCost: 8, receivedAt: new Date('2026-10-01') } });
+    await prisma.inventory.create({ data: { productId: fifth, locationId: store, quantity: 10, unitCost: 8.5, receivedAt: new Date('2026-10-01') } });
     const before = await listed(products, store, 'lowMargin');
-    await prisma.stockAlertSettings.create({ data: { locationId: store, lowMarginPct: 25 } });
+    await prisma.stockAlertSettings.create({ data: { locationId: store, lowMarginPct: 10 } });
 
     assert({
-      given: 'a product with a 20% margin, before and after the store calls a margin low under 25%',
-      should: 'count it as low margin only under the store\'s line, in the list and the chip, leaving the 60% one out',
+      given: 'a product with a 15% margin, under the default line and after the store calls a margin low under 10%',
+      should: 'count it as low margin under the 20% default only, in the list and the chip, leaving the 60% one out',
       actual: [before.ids, (await listed(products, store, 'lowMargin')).ids, (await counts(products, store)).lowMargin],
-      expected: [[thinMargin], [thinMargin, fifth].sort(), 2],
+      expected: [[thinMargin, fifth].sort(), [thinMargin], 1],
     });
   });
 

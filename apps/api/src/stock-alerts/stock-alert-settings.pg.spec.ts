@@ -27,7 +27,7 @@ describe('stockAlertSettingsOf', () => {
       should: 'read the defaults, buying for itself and for no other store',
       actual: await stockAlertSettingsOf(prisma, locationId),
       expected: {
-        locationId, windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, lowMarginPct: 10,
+        locationId, windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, lowMarginPct: 20,
         receivingLocationId: null, suppliesLocationIds: [],
       },
     });
