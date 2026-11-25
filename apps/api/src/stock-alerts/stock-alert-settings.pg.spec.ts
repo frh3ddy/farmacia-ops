@@ -27,7 +27,7 @@ describe('stockAlertSettingsOf', () => {
       should: 'read the defaults, buying for itself and for no other store',
       actual: await stockAlertSettingsOf(prisma, locationId),
       expected: {
-        locationId, windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180,
+        locationId, windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, lowMarginPct: 20,
         receivingLocationId: null, suppliesLocationIds: [],
       },
     });
@@ -40,6 +40,21 @@ describe('updateStockAlertSettings', () => {
     await updateStockAlertSettings(prisma, locationId, { coverDays: 21, noSalesMinDays: 120 });
     const s = await stockAlertSettingsOf(prisma, locationId);
     assert({ given: 'a change to two settings', should: 'save those and keep the rest', actual: [s.coverDays, s.noSalesMinDays, s.windowDays], expected: [21, 120, 90] });
+  });
+
+  test('the low margin line', async () => {
+    const locationId = await store();
+    await updateStockAlertSettings(prisma, locationId, { lowMarginPct: 25 });
+    assert({
+      given: 'a store that calls a margin low under 25%, then a line of 0% and one over 60%',
+      should: 'save the 25 and refuse the others',
+      actual: [
+        (await stockAlertSettingsOf(prisma, locationId)).lowMarginPct,
+        await refusal(updateStockAlertSettings(prisma, locationId, { lowMarginPct: 0 })),
+        await refusal(updateStockAlertSettings(prisma, locationId, { lowMarginPct: 61 })),
+      ],
+      expected: [25, 'lowMarginPct debe ser un número entero entre 1 y 60', 'lowMarginPct debe ser un número entero entre 1 y 60'],
+    });
   });
 
   test('the store that receives from suppliers', async () => {

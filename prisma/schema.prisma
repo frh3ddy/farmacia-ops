@@ -1421,6 +1421,7 @@ model StockAlertSettings {
   slowMinDaysAtZero   Int     @default(30)
   equivalentMinUnits  Int     @default(3)
   noSalesMinDays      Int     @default(180) // NO_SALES_AT_ZERO: no sale in at least this many days
+  lowMarginPct        Int     @default(20) // lowMargin: margin on the selling price under this %
   receivingLocationId String? // the store this one's supplier orders go through; null: it buys for itself
 
   location          Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
