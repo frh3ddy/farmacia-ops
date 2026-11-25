@@ -68,3 +68,37 @@ describe('LaborController.getActiveShifts store scope', () => {
     });
   });
 });
+
+describe('LaborController.listTeamMembers store scope', () => {
+  const at = (...ids: string[]) => ids.map((id) => ({ locationId: id, locationName: id.toUpperCase() }));
+  const members = [
+    { id: 'ana', fullName: 'Ana', locations: at('centro') },
+    { id: 'beto', fullName: 'Beto', locations: at('norte') },
+    { id: 'caro', fullName: 'Caro', locations: at('centro', 'norte') },
+  ];
+  const listAs = (role: string) => {
+    const controller = new LaborController({ listTeamMembers: vi.fn().mockResolvedValue(members) } as any);
+    const here = { locationId: 'centro', role, isActive: true };
+    const formerlyNorte = { locationId: 'norte', role, isActive: false };
+    return controller.listTeamMembers({ currentLocation: here, accessibleLocations: [here, formerlyNorte] } as any);
+  };
+
+  test('a manager', async () => {
+    const { data, count } = await listAs('MANAGER');
+    assert({
+      given: 'a Centro manager (no longer at Norte), a Norte-only member, and a member of both stores',
+      should: "list only Centro's staff, each showing only Centro",
+      actual: [count, data.map((m: any) => [m.id, m.locations.map((l: any) => l.locationId)])],
+      expected: [2, [['ana', ['centro']], ['caro', ['centro']]]],
+    });
+  });
+
+  test('the owner and the accountant', async () => {
+    assert({
+      given: 'the owner and an accountant',
+      should: 'list every member with all their stores, as before',
+      actual: [(await listAs('OWNER')).data, (await listAs('ACCOUNTANT')).data],
+      expected: [members, members],
+    });
+  });
+});
