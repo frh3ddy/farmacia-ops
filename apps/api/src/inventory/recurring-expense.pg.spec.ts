@@ -772,3 +772,91 @@ describe('RecurringExpenseService pending', () => {
     });
   });
 });
+
+describe('RecurringExpenseService payroll weeks', () => {
+  // A weekly payroll paid on Saturdays since 14 Nov; Beto has a fixed salary, so every week owes something.
+  const weeklyPayroll = async () => {
+    const centro = await newLocation();
+    const beto = `beto-${centro}`;
+    await service.setPayrollConfig([{ teamMemberId: beto, mode: 'FIXED', fixedAmount: 3000, homeLocationId: centro }]);
+    const nomina = await service.createRule(rent(centro, { type: 'PAYROLL', name: 'Nómina', kind: 'PAYROLL', amount: null, freq: 'WEEKLY', dayOfMonth: null, weekday: 6, startDate: '2026-11-14' }));
+    const staff = vi.fn().mockResolvedValue([{ teamMemberId: beto, name: 'Beto', shifts: [] }]);
+    return { centro, beto, nomina, staff };
+  };
+  const payrollPaid = (locationId: string, start: string, end: string) => prisma.expense.create({ data: {
+    locationId, type: 'PAYROLL', amount: 500, date: new Date(`${end}T18:00:00Z`),
+    periodStart: new Date(`${start}T00:00:00Z`), periodEnd: new Date(`${end}T00:00:00Z`),
+  } });
+
+  test('weeks that have not started', async () => {
+    const { centro, staff } = await weeklyPayroll();
+
+    const { data } = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 30, staff });
+
+    assert({
+      given: 'a month of upcoming payroll, today Monday 23 Nov',
+      should: 'list the overdue week and the week in progress, not the weeks that have not started',
+      actual: data.map((o: any) => [o.dueDate, o.periodStart, o.periodEnd]),
+      expected: [['2026-11-14', '2026-11-07', '2026-11-13'], ['2026-11-21', '2026-11-14', '2026-11-20'], ['2026-11-28', '2026-11-21', '2026-11-27']],
+    });
+
+    const { data: onPayday } = await service.upcoming({ locationId: centro, today: '2026-11-21', days: 30, staff });
+    assert({
+      given: 'today a payday, when the next week starts',
+      should: 'list that week as in progress',
+      actual: onPayday.map((o: any) => o.dueDate),
+      expected: ['2026-11-14', '2026-11-21', '2026-11-28'],
+    });
+  });
+
+  test('Square down, with weeks that already have payments', async () => {
+    const { centro, nomina } = await weeklyPayroll();
+    const norte = await newLocation('Norte');
+    await payrollPaid(centro, '2026-11-07', '2026-11-13');
+    await payrollPaid(norte, '2026-11-14', '2026-11-20');
+
+    const { data } = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 6, staff: () => Promise.reject(new Error('Square 502')) });
+
+    assert({
+      given: 'a week with a payroll payment at this store, a week paid only at another store, and the week in progress',
+      should: 'keep listing every week, and say which one already has payments here',
+      actual: data.filter((o: any) => o.ruleId === nomina.id).map((o: any) => [o.dueDate, o.amount, o.hasPayments]),
+      expected: [['2026-11-14', null, true], ['2026-11-21', null, false], ['2026-11-28', null, false]],
+    });
+  });
+
+  test('Square answering', async () => {
+    const { centro, staff } = await weeklyPayroll();
+
+    const { data } = await service.upcoming({ locationId: centro, today: '2026-11-23', days: 6, staff });
+
+    assert({
+      given: 'Square answering',
+      should: 'not send hasPayments',
+      actual: data.map((o: any) => 'hasPayments' in o),
+      expected: [false, false, false],
+    });
+  });
+
+  test('paying a week before it ends', async () => {
+    const { nomina, staff } = await weeklyPayroll();
+    const ctx = (today: string) => ({ staff, assertAccess: () => undefined, today });
+
+    assert({
+      given: 'the week in progress, paid early in the week and on its last day',
+      should: 'refuse both',
+      actual: [
+        await outcome(service.pay(`${nomina.id}:2026-11-28`, { date: '2026-11-23' }, ctx('2026-11-23'))),
+        await outcome(service.pay(`${nomina.id}:2026-11-28`, { date: '2026-11-27' }, ctx('2026-11-27'))),
+      ],
+      expected: ['La semana todavía no termina', 'La semana todavía no termina'],
+    });
+
+    assert({
+      given: 'the same week, paid on its payday',
+      should: 'book it',
+      actual: (await service.pay(`${nomina.id}:2026-11-28`, { date: '2026-11-28' }, ctx('2026-11-28'))).map((e) => e.amount.toString()),
+      expected: ['3000'],
+    });
+  });
+});
