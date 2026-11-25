@@ -26,7 +26,7 @@ export async function stockAlertSettingsOf(prisma: PrismaClient, locationId: str
     prisma.stockAlertSettings.findUnique({ where: { locationId } }),
     prisma.stockAlertSettings.findMany({ where: { receivingLocationId: locationId, location: { isActive: true } }, select: { locationId: true }, orderBy: { locationId: 'asc' } }),
   ]);
-  const s = row ?? { windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, lowMarginPct: 10, receivingLocationId: null };
+  const s = row ?? { windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, lowMarginPct: 20, receivingLocationId: null };
   return {
     locationId,
     windowDays: s.windowDays,

@@ -177,7 +177,7 @@ export type ProductListFilter = (typeof PRODUCT_LIST_FILTERS)[number];
 /**
  * One row per stocked product this location sells (not Yastás services, not
  * discontinued, not another store's one-store product), with its stock,
- * whether its margin is under the store's lowMarginPct (default 10%), and its stock alert. The counts, the filtered
+ * whether its margin is under the store's lowMarginPct (default 20%), and its stock alert. The counts, the filtered
  * list and the rows' `stockAlert` all read it, so a chip's count is always the
  * length of its list.
  *
@@ -228,7 +228,7 @@ export function catalogRowsSql(locationId: string, now = new Date()): Prisma.Sql
             AND inv.qty IS NOT NULL
             AND inv.qty > 0
             AND (m."priceCents" / 100.0 - (inv.total_cost / inv.qty))
-                / NULLIF(m."priceCents" / 100.0, 0) * 100 < COALESCE(cfg."lowMarginPct", 10),
+                / NULLIF(m."priceCents" / 100.0, 0) * 100 < COALESCE(cfg."lowMarginPct", 20),
           false
         ) AS low_margin,
         m."squareVariationId" AS square_variation_id,
