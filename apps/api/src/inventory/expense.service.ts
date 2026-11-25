@@ -48,7 +48,7 @@ interface ExpenseSummary {
 }
 
 /** The controller's DTO is a plain interface, so nothing has checked what the client sent. */
-function assertAmount(amount: unknown): void {
+export function assertAmount(amount: unknown): asserts amount is number {
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
     throw new BadRequestException('El monto del gasto debe ser un número mayor que cero');
   }
@@ -57,7 +57,7 @@ function assertAmount(amount: unknown): void {
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The period as stored (@db.Date), or a 400 in Spanish. Neither end: no period. */
-function periodData(start?: string | null, end?: string | null) {
+export function periodData(start?: string | null, end?: string | null) {
   if (!start && !end) return {};
   if (!start || !end) throw new BadRequestException('El periodo necesita inicio y fin');
   if (![start, end].every((d) => DATE_ONLY.test(d) && !isNaN(Date.parse(`${d}T00:00:00Z`)))) {

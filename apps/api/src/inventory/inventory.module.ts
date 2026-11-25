@@ -5,6 +5,7 @@ import { InventoryAdjustmentController } from './inventory-adjustment.controller
 import { InventoryAdjustmentService } from './inventory-adjustment.service';
 import { BreakBulkController } from './break-bulk.controller';
 import { InternalBreakBulkController } from './internal-break-bulk.controller';
+import { InternalExpensesController } from './internal-expenses.controller';
 import { BreakBulkService } from './break-bulk.service';
 import { TransferController } from './transfer.controller';
 import { TransferService } from './transfer.service';
@@ -13,6 +14,8 @@ import { InventoryReceivingService } from './inventory-receiving.service';
 import { InventoryReportsController } from './inventory-reports.controller';
 import { InventoryReportsService } from './inventory-reports.service';
 import { ExpenseController } from './expense.controller';
+import { RecurringExpenseController } from './recurring-expense.controller';
+import { RecurringExpenseService } from './recurring-expense.service';
 import { LaborModule } from '../labor/labor.module';
 import { ExpenseService } from './expense.service';
 import { StockCountController } from './stock-count.controller';
@@ -29,14 +32,17 @@ import { ProductsModule } from '../products/products.module';
     InventoryAdjustmentController,
     BreakBulkController,
     InternalBreakBulkController,
+    InternalExpensesController,
     TransferController,
     InventoryReceivingController,
     InventoryReportsController,
+    RecurringExpenseController, // before ExpenseController: its /expenses/:id would match /expenses/recurring
     ExpenseController,
     StockCountController,
     InventoryLotsController,
   ],
   providers: [
+    RecurringExpenseService,
     InventoryReconciliationService,
     InventoryAdjustmentService,
     BreakBulkService,

@@ -33,7 +33,7 @@ function assertExpenseType(type: unknown): void {
  * General (no-store) expenses are for the owner and the accountant only. A
  * record's null locationId, or a request for scope=general, comes through here.
  */
-function assertGeneralAccess(req: GuardedRequest): void {
+export function assertGeneralAccess(req: GuardedRequest): void {
   if (!['OWNER', 'ACCOUNTANT'].includes(req.currentLocation?.role as string)) {
     throw new HttpException(
       { success: false, message: 'Solo el dueño o el contador pueden ver gastos generales' },
@@ -49,7 +49,7 @@ function assertExpenseAccess(req: GuardedRequest, locationId: string | null): vo
 }
 
 /** scope=general: only general expenses (null); otherwise the usual store scope. */
-function readScope(req: GuardedRequest, locationId?: string, scope?: string): string | null | undefined {
+export function readScope(req: GuardedRequest, locationId?: string, scope?: string): string | null | undefined {
   if (scope === 'general') {
     assertGeneralAccess(req);
     return null;

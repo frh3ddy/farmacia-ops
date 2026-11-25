@@ -57,6 +57,15 @@ export const WORKERS: WorkerConfig[] = [
     schedule: { pattern: '0 3 * * *', tz: 'America/Mexico_City' },
     options: { attempts: 1 },
   },
+  {
+    // Daily direct-debit bills (RecurringExpenseService.autoPay). One attempt:
+    // the next day's run catches up the last week.
+    queueName: 'auto-pay',
+    processor: () => postInternal('/internal/expenses/auto-pay'),
+    concurrency: 1,
+    schedule: { pattern: '0 6 * * *', tz: 'America/Mexico_City' },
+    options: { attempts: 1 },
+  },
   // Add more workers here as needed:
   // {
   //   queueName: 'inventory',
