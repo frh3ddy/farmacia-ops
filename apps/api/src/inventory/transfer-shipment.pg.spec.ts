@@ -460,6 +460,24 @@ describe('TransferService.getShipments (Postgres)', () => {
       expected: [[partly.id, received.id, inTransit.id], [partly.id, inTransit.id], [received.id]],
     });
   });
+
+  test("the sender's name", async () => {
+    const { transfers } = services();
+    const { id: sur } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Sur' } });
+    await prisma.cutoverLock.create({ data: { locationId: sur, cutoverDate: new Date('2026-09-01') } });
+    const { id: ana } = await prisma.employee.create({ data: { name: 'Ana' } });
+    const byAna = await send(transfers, [{ productId: await productWith(), quantity: 1 }], { toLocationId: sur, createdBy: ana });
+    const byNobody = await send(transfers, [{ productId: await productWith(), quantity: 1 }], { toLocationId: sur });
+
+    const listed = await transfers.getShipments({ locationId: sur });
+
+    assert({
+      given: 'shipments sent by an employee and by no one',
+      should: "name the employee who sent each, both in the list and in the send's answer",
+      actual: [listed.map((s) => [s.id, s.shippedByName]), byAna.shippedByName],
+      expected: [[[byNobody.id, null], [byAna.id, 'Ana']], 'Ana'],
+    });
+  });
 });
 
 describe('TransferController shipments', () => {
