@@ -28,7 +28,7 @@ describe('stockAlertSettingsOf', () => {
       actual: await stockAlertSettingsOf(prisma, locationId),
       expected: {
         locationId, windowDays: 90, coverDays: 14, regularMinWeeks: 4, slowMaxUnits: 2, slowMinDaysAtZero: 30, equivalentMinUnits: 3, noSalesMinDays: 180, lowMarginPct: 20,
-        receivingLocationId: null, suppliesLocationIds: [],
+        receivingLocationId: null, suppliesLocationIds: [], receivingReviewed: null,
       },
     });
   });
@@ -122,6 +122,62 @@ describe('updateStockAlertSettings', () => {
       should: 're-send the store\'s products only for the change that moves their alert',
       actual: [afterOther === before, afterCover === before],
       expected: [true, false],
+    });
+  });
+});
+
+describe('the reviewed mark on who receives from suppliers', () => {
+  const owner = async () => (await prisma.employee.create({ data: { name: 'Fredy Méndez' } })).id;
+  const reviewedOf = async (locationId: string) => (await stockAlertSettingsOf(prisma, locationId)).receivingReviewed;
+
+  test('the owner confirms the choice', async () => {
+    const by = await owner();
+    const centro = await store('Centro');
+    const norte = await store('Norte');
+    const closed = await store('Cerrada');
+    await prisma.location.update({ where: { id: closed }, data: { isActive: false } });
+    const before = Date.now();
+    await updateStockAlertSettings(prisma, centro, { receivingReviewed: true }, by);
+    const centroMark = await reviewedOf(centro);
+    assert({
+      given: 'the owner confirming in one store',
+      should: 'mark every open store reviewed by that owner, and not a closed store',
+      actual: [centroMark?.by, (await reviewedOf(norte))?.by, await reviewedOf(closed), centroMark!.at.getTime() >= before],
+      expected: [{ id: by, name: 'Fredy Méndez' }, { id: by, name: 'Fredy Méndez' }, null, true],
+    });
+    assert({
+      given: 'the same confirmation',
+      should: 'keep the store buying for itself',
+      actual: (await stockAlertSettingsOf(prisma, norte)).receivingLocationId,
+      expected: null,
+    });
+  });
+
+  test('choosing a receiving store', async () => {
+    const by = await owner();
+    const hub = await store('Centro');
+    const other = await store('Norte');
+    await updateStockAlertSettings(prisma, other, { receivingLocationId: hub }, by);
+    const keptDefault = await store('Sur');
+    await updateStockAlertSettings(prisma, keptDefault, { receivingLocationId: null }, by);
+    assert({
+      given: 'a change to the receiving store, and a PATCH that keeps the default',
+      should: 'count each as reviewed',
+      actual: [(await reviewedOf(hub))?.by?.id, (await reviewedOf(keptDefault))?.by?.id],
+      expected: [by, by],
+    });
+  });
+
+  test('other changes and bad values', async () => {
+    const by = await owner();
+    const locationId = await store();
+    await updateStockAlertSettings(prisma, locationId, { coverDays: 20 }, by);
+    const afterOther = await reviewedOf(locationId);
+    assert({
+      given: 'a change that does not touch receiving, then a reviewed mark that is not true',
+      should: 'leave it unreviewed, and refuse the bad mark',
+      actual: [afterOther, await refusal(updateStockAlertSettings(prisma, locationId, { receivingReviewed: false as never }, by))],
+      expected: [null, 'receivingReviewed solo puede ser true'],
     });
   });
 });

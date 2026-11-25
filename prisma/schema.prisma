@@ -1507,6 +1507,8 @@ model StockAlertSettings {
   noSalesMinDays      Int     @default(180) // NO_SALES_AT_ZERO: no sale in at least this many days
   lowMarginPct        Int     @default(20) // lowMargin: margin on the selling price under this %
   receivingLocationId String? // the store this one's supplier orders go through; null: it buys for itself
+  receivingReviewedAt DateTime? // when the owner confirmed who receives (business-wide: set on every open store at once)
+  receivingReviewedBy String? // Employee id
 
   location          Location  @relation(fields: [locationId], references: [id], onDelete: Cascade)
   receivingLocation Location? @relation("StockAlertReceivingStore", fields: [receivingLocationId], references: [id], onDelete: SetNull)

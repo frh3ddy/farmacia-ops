@@ -20,12 +20,12 @@ export class StockAlertSettingsController {
     return { success: true, data: await stockAlertSettingsOf(this.prisma, store) };
   }
 
-  /** PATCH /inventory/stock-alert-settings { locationId?, coverDays?, windowDays?, noSalesMinDays?, …, receivingLocationId? } */
+  /** PATCH /inventory/stock-alert-settings { locationId?, coverDays?, windowDays?, noSalesMinDays?, …, receivingLocationId?, receivingReviewed? } — receiving choices mark it reviewed business-wide */
   @Patch()
   @Roles('OWNER')
   async update(@Body() body: StockAlertSettingsPatch & { locationId?: string }, @Req() req: GuardedRequest) {
     const store = body?.locationId || req.currentLocation?.locationId;
     if (!store) throw new BadRequestException('Falta la sucursal');
-    return { success: true, data: await updateStockAlertSettings(this.prisma, store, body) };
+    return { success: true, data: await updateStockAlertSettings(this.prisma, store, body, req.employee.id) };
   }
 }

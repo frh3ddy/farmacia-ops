@@ -40,9 +40,9 @@ describe('StockAlertSettingsController', () => {
     await controller.update({ locationId: 'norte', coverDays: 21 }, requestAt('OWNER'));
     assert({
       given: 'an owner changing another store\'s days of cover',
-      should: 'change that store\'s settings',
+      should: 'change that store\'s settings, as that owner',
       actual: vi.mocked(updateStockAlertSettings).mock.calls[0].slice(1) as unknown[],
-      expected: ['norte', { locationId: 'norte', coverDays: 21 }],
+      expected: ['norte', { locationId: 'norte', coverDays: 21 }, 'emp-1'],
     });
   });
 });
