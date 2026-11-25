@@ -19,7 +19,7 @@ function setup(locationId: string) {
     updateExpense: vi.fn().mockResolvedValue(expenseAt(locationId)),
     deleteExpense: vi.fn().mockResolvedValue({ success: true }),
   };
-  return { service, controller: new ExpenseController(service as any) };
+  return { service, controller: new ExpenseController(service as any, {} as any) };
 }
 
 describe('ExpenseController by id', () => {
@@ -77,7 +77,7 @@ function generalSetup() {
     listExpenses: vi.fn().mockResolvedValue([]),
     getExpenseSummary: vi.fn().mockResolvedValue({}),
   };
-  return { service, controller: new ExpenseController(service as any) };
+  return { service, controller: new ExpenseController(service as any, {} as any) };
 }
 
 const newExpense = { type: 'PROFESSIONAL' as const, amount: 1200, date: '2026-11-10' };
@@ -158,6 +158,78 @@ describe('ExpenseController period', () => {
         [service.updateExpense.mock.calls[0][1].periodStart, service.updateExpense.mock.calls[0][1].periodEnd],
       ],
       expected: [['2026-12-01', '2026-12-31'], [null, null]],
+    });
+  });
+});
+
+describe('ExpenseController payroll by store', () => {
+  /** A labor service whose payroll summary has these store rows (null: a Square location that isn't ours). */
+  function payrollSetup(stores: { locationId: string | null; workedMinutes: number }[]) {
+    const labor = { getPayrollSummary: vi.fn().mockResolvedValue({ stores }) };
+    const service = {
+      createPayrollExpenses: vi.fn().mockImplementation(async (input) => (await input.hours()).map((s: { locationId: string }) => ({ ...s, amount: { toString: () => '1' } }))),
+    };
+    return { labor, service, controller: new ExpenseController(service as any, labor as any) };
+  }
+  const body = { teamMemberId: 'TM1', periodStart: '2026-11-30', periodEnd: '2026-12-06', amount: 1000, date: '2026-12-07' };
+
+  test("hours at a store the manager doesn't run", async () => {
+    const { controller } = payrollSetup([{ locationId: 'centro', workedMinutes: 60 }, { locationId: 'norte', workedMinutes: 60 }]);
+
+    assert({
+      given: 'a manager of Centro paying someone who also worked at Norte',
+      should: 'refuse the payment',
+      actual: await outcome(controller.createPayrollExpense(body, requestAs('MANAGER'))),
+      expected: 'No tienes acceso a esta sucursal',
+    });
+  });
+
+  test("the person's hours for the period", async () => {
+    const { labor, service, controller } = payrollSetup([{ locationId: 'centro', workedMinutes: 90 }, { locationId: null, workedMinutes: 30 }]);
+
+    await controller.createPayrollExpense(body, requestAs('MANAGER'));
+
+    assert({
+      given: "a payment for a period, with some hours at a Square location that isn't ours",
+      should: "read that person's hours for that period and split only over our stores",
+      actual: [
+        labor.getPayrollSummary.mock.calls[0],
+        await service.createPayrollExpenses.mock.calls[0][0].hours(),
+        service.createPayrollExpenses.mock.calls[0][0].createdBy,
+      ],
+      expected: [
+        ['TM1', { startDate: '2026-11-30', endDate: '2026-12-06' }],
+        [{ locationId: 'centro', workedMinutes: 90 }],
+        'e1',
+      ],
+    });
+  });
+
+  test('missing fields', async () => {
+    const { labor, controller } = payrollSetup([]);
+
+    assert({
+      given: 'no team member, amount or date',
+      should: "refuse without asking Square for hours",
+      actual: [
+        await outcome(controller.createPayrollExpense({ ...body, teamMemberId: undefined } as any, requestAs('OWNER'))),
+        await outcome(controller.createPayrollExpense({ ...body, date: undefined } as any, requestAs('OWNER'))),
+        labor.getPayrollSummary.mock.calls.length,
+      ],
+      expected: ['Missing required fields: teamMemberId, amount, date', 'Missing required fields: teamMemberId, amount, date', 0],
+    });
+  });
+
+  test("a replay of a payment booked at a store the manager doesn't run", async () => {
+    const labor = { getPayrollSummary: vi.fn() };
+    const service = { createPayrollExpenses: vi.fn().mockResolvedValue([{ locationId: 'norte', amount: { toString: () => '1000' } }]) };
+    const controller = new ExpenseController(service as any, labor as any);
+
+    assert({
+      given: "a manager of Centro resending a request id that booked a payment at Norte",
+      should: 'refuse rather than return Norte\'s expense',
+      actual: await outcome(controller.createPayrollExpense({ ...body, clientRequestId: 'k' }, requestAs('MANAGER'))),
+      expected: 'No tienes acceso a esta sucursal',
     });
   });
 });

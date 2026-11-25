@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { listLimit } from './list-limit';
-import { expensePeriodOverlaps, expenseShareDecimal, expenseSharesByMonth, reportDays } from './expense-period';
+import { split, expensePeriodOverlaps, expenseShareDecimal, expenseSharesByMonth, reportDays } from './expense-period';
 import { Prisma, ExpenseType } from '@prisma/client';
 
 // ============================================================================
@@ -148,6 +148,70 @@ export class ExpenseService {
       throw new ConflictException('This clientRequestId was already used for a different expense');
     }
     return existing;
+  }
+
+  // --------------------------------------------------------------------------
+  // Payroll: one expense per store, by the minutes worked there
+  // --------------------------------------------------------------------------
+  async createPayrollExpenses(input: {
+    teamMemberId: string;
+    periodStart?: string;
+    periodEnd?: string;
+    amount: number;
+    date: Date;
+    reference?: string;
+    createdBy?: string;
+    clientRequestId?: string;
+    /** Minutes per store in the period (the labor payroll summary); asked only once the request is valid. */
+    hours: () => Promise<{ locationId: string; workedMinutes: number }[]>;
+  }) {
+    // A replay's expenses carry "<clientRequestId>:<locationId>" (the column is
+    // unique). Found by the prefix, before asking Square: the hours may have
+    // changed since (or Square may be down), and the payment was already booked.
+    const replayed = async () => {
+      if (!input.clientRequestId) return [];
+      const existing = await this.prisma.expense.findMany({
+        where: { clientRequestId: { startsWith: `${input.clientRequestId}:` } },
+        orderBy: { createdAt: 'asc' },
+      });
+      // A replay repeats its request: same person, same total.
+      const total = existing.reduce((sum, e) => sum.add(e.amount), new Prisma.Decimal(0));
+      if (existing.length && (existing.some((e) => e.teamMemberId !== input.teamMemberId) || !total.equals(input.amount))) {
+        throw new ConflictException('This clientRequestId was already used for a different expense');
+      }
+      return existing;
+    };
+    const existing = await replayed();
+    if (existing.length) return existing;
+
+    assertAmount(input.amount);
+    const period = periodData(input.periodStart ?? null, input.periodEnd ?? null);
+    if (!period.periodStart) throw new BadRequestException('El periodo necesita inicio y fin');
+    const worked = (await input.hours()).filter((s) => s.workedMinutes > 0);
+    if (!worked.length) throw new BadRequestException('Sin horas registradas en el periodo');
+    const keys = input.clientRequestId ? worked.map((s) => `${input.clientRequestId}:${s.locationId}`) : [];
+
+    const cents = split(BigInt(new Prisma.Decimal(input.amount).mul(100).toFixed(0)), worked.map((s) => BigInt(s.workedMinutes)));
+    return this.prisma.$transaction(worked.map((s, i) => this.prisma.expense.create({
+      data: {
+        locationId: s.locationId,
+        type: 'PAYROLL',
+        amount: new Prisma.Decimal(cents[i].toString()).div(100),
+        date: input.date,
+        ...period,
+        teamMemberId: input.teamMemberId,
+        reference: input.reference,
+        createdBy: input.createdBy,
+        clientRequestId: keys[i],
+      },
+    }))).catch(async (error) => {
+      // Two copies of the same replay raced past the lookup above.
+      if (keys.length && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await replayed();
+        if (existing.length) return existing;
+      }
+      throw error;
+    });
   }
 
   // --------------------------------------------------------------------------

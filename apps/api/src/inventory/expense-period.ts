@@ -34,7 +34,7 @@ export function expensePeriod(expense: PeriodExpense): { start: string; end: str
 }
 
 /** Largest-remainder split of `total` by `weights`; ties go to the earlier part. */
-function split(total: bigint, weights: bigint[]): bigint[] {
+export function split(total: bigint, weights: bigint[]): bigint[] {
   const sum = weights.reduce((a, b) => a + b, 0n);
   const parts = weights.map((w) => (total * w) / sum);
   let left = total - parts.reduce((a, b) => a + b, 0n);
