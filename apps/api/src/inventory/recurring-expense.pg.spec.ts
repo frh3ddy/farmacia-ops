@@ -838,6 +838,28 @@ describe('RecurringExpenseService payroll weeks', () => {
     });
   });
 
+  test('the P&L of the current month', async () => {
+    const { centro, nomina, staff } = await weeklyPayroll();
+    const today = '2026-11-27'; // Friday: the next payroll week starts tomorrow
+
+    const pending = await service.pending({ locationId: centro, startDay: '2026-11-01', endDay: '2026-11-30', today, staff });
+    const { data: upcoming } = await service.upcoming({ locationId: centro, today, days: 30, staff });
+
+    assert({
+      given: "November's pending bills, with Beto's fixed salary for a week that starts tomorrow",
+      should: "count that week's November days, as a bill due later in the month is",
+      actual: pending.items.filter((i: any) => i.ruleId === nomina.id).map((i: any) => [i.dueDate, i.amount]),
+      expected: [['2026-11-14', '3000'], ['2026-11-21', '3000'], ['2026-11-28', '3000'], ['2026-12-05', '1285.71']], // 3 of 7 days; split by month first, December's larger remainder takes the spare cent
+    });
+
+    assert({
+      given: 'the same day',
+      should: 'leave that week out of the upcoming list',
+      actual: upcoming.map((o: any) => o.dueDate),
+      expected: ['2026-11-14', '2026-11-21', '2026-11-28'],
+    });
+  });
+
   test('paying a week before it ends', async () => {
     const { nomina, staff } = await weeklyPayroll();
     const ctx = (today: string) => ({ staff, assertAccess: () => undefined, today });
