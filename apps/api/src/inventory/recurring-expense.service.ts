@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { addDays, dueDates, occurrencePeriod } from './recurring-occurrence';
 import { assertAmount, periodData } from './expense.service';
 import { split } from './expense-period';
-import { parseDateParam } from './business-date';
+import { businessDay, parseDateParam } from './business-date';
 
 /** A rule as a client sends it (create: all of it; update: any part). */
 export interface RecurringRuleInput {
@@ -197,8 +197,10 @@ export class RecurringExpenseService {
    * payroll occurrence lists this store's people still unpaid for the period
    * (a PAYROLL expense for that person and store overlapping the period) and drops out once
    * none are left, or once it's older than the lookback. VARIES: the average of
-   * the rule's last 3 payments. If Square fails, everything else is still listed:
-   * payroll comes with payroll and amount null, and payrollUnavailable is set.
+   * the rule's last 3 payments. Payroll weeks that haven't started are left out.
+   * If Square fails, everything else is still listed: payroll comes with payroll
+   * and amount null, hasPayments (some payroll here overlaps the week, read from
+   * the DB) and payrollUnavailable set.
    */
   async upcoming({ locationId, today, days, staff }: {
     locationId?: string | null; // undefined: every store and general; null: general only
@@ -216,7 +218,8 @@ export class RecurringExpenseService {
       const paid = new Set(rule.expenses.map((e) => dayOf(e.occurrenceDate!)));
       return dueDates(rule, until)
         .filter((due) => (rule.kind === 'PAYROLL' ? due >= payrollFrom : !paid.has(due)))
-        .map((due) => ({ rule, due, period: occurrencePeriod(rule, due) }));
+        .map((due) => ({ rule, due, period: occurrencePeriod(rule, due) }))
+        .filter(({ period }) => rule.kind !== 'PAYROLL' || period.start <= today);
     });
     const payrollPeriods = occurrences.filter((o) => o.rule.kind === 'PAYROLL').map((o) => o.period);
     // Only Square failing is tolerated: a database error still fails the request.
@@ -225,6 +228,8 @@ export class RecurringExpenseService {
       return null;
     });
     const payrollFor = (await this.payrollPeople(payrollPeriods, squareStaff))?.owed;
+    const hasPayments = new Map<string, boolean>(payrollFor ? [] : await Promise.all(occurrences.filter((o) => o.rule.kind === 'PAYROLL')
+      .map(async ({ rule, due, period }) => [`${rule.id}:${due}`, await this.anyPayrollPaid(rule.locationId!, period)] as const)));
 
     const data = occurrences.flatMap(({ rule, due, period }) => {
       const base = {
@@ -234,7 +239,7 @@ export class RecurringExpenseService {
         remind: rule.remindDaysBefore == null ? null : { daysBefore: rule.remindDaysBefore, time: rule.remindTime },
       };
       if (rule.kind === 'PAYROLL') {
-        if (!payrollFor) return [{ ...base, amount: null, amountIsEstimate: true, payroll: null }];
+        if (!payrollFor) return [{ ...base, amount: null, amountIsEstimate: true, payroll: null, hasPayments: hasPayments.get(base.id)! }];
         const payroll = payrollFor(rule.locationId!, period);
         if (!payroll.length && due < today) return [];
         const total = payroll.reduce((sum, p) => sum.add(p.amount), new Prisma.Decimal(0));
@@ -297,10 +302,11 @@ export class RecurringExpenseService {
    * also gets their unpaid hours at other stores, their amount split by minutes
    * as POST /expenses/payroll does. Each store booked is access-checked.
    */
-  async pay(occurrenceId: string, input: PayOccurrenceInput, { staff, assertAccess, createdBy }: {
+  async pay(occurrenceId: string, input: PayOccurrenceInput, { staff, assertAccess, createdBy, today = businessDay(new Date()) }: {
     staff: (startDay: string, endDay: string) => Promise<StaffHours[]>;
     assertAccess: (locationId: string | null) => void;
     createdBy?: string;
+    today?: string; // the store's today; payroll is paid once its week has ended
   }) {
     const sep = occurrenceId.lastIndexOf(':');
     const due = occurrenceId.slice(sep + 1);
@@ -353,6 +359,7 @@ export class RecurringExpenseService {
     if (input.periodStart || input.periodEnd) refuse('La nómina se paga por el periodo de la ocurrencia');
     const here = rule.locationId!;
     const period = occurrencePeriod(rule, due);
+    if (period.end >= today) refuse('La semana todavía no termina');
     const payroll = (await this.payrollPeople([period], staff))!; // Square failing fails the payment
     const owed = payroll.owed(here, period);
     const chosen = input.people?.length ? input.people : owed.map((p) => ({ teamMemberId: p.teamMemberId, amount: undefined }));
