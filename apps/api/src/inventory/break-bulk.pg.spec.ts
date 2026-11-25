@@ -363,4 +363,27 @@ describe('BreakBulkService.automaticOpenings', () => {
       ],
     });
   });
+
+  test('since the last look', async () => {
+    const { id: store } = await prisma.location.create({ data: { squareId: `SQ-${Math.random()}`, name: 'Norte' } });
+    const breakBulk = new BreakBulkService(prisma, new InventoryAdjustmentService(prisma));
+    const loose = await prisma.product.create({ data: { name: 'Ibuprofeno suelto' } });
+    const cover = (paymentId: string, adjustedAt: Date) =>
+      prisma.inventoryAdjustment.create({
+        data: { locationId: store, productId: loose.id, type: 'AUTO_SALE_COVER', quantity: 1, unitCost: 5, totalCost: 5, notes: `squareId=${paymentId} · caja no abierta: sin caja`, adjustedBy: 'SYSTEM', adjustedAt },
+      });
+    const seenAt = new Date('2026-11-20T15:00:00Z');
+    await cover('before', new Date('2026-11-20T14:00:00Z'));
+    await cover('seen', seenAt);
+    await cover('after', new Date('2026-11-20T16:00:00Z'));
+
+    const listed = await breakBulk.automaticOpenings(store, seenAt);
+
+    assert({
+      given: 'covers before, at and after the time the list was last seen',
+      should: 'list only the ones after it, so the count clears once seen',
+      actual: listed.map((r) => r.paymentId),
+      expected: ['after'],
+    });
+  });
 });

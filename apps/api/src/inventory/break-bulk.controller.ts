@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Query, Req, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { BreakBulkService } from './break-bulk.service';
+import { parseDateParam } from './business-date';
 import { AuthGuard, LocationGuard, Roles, GuardedRequest, RoleGuardedRequest, assertActingAtOwnStore } from '../auth/guards/auth.guard';
 
 interface BreakBulkDto {
@@ -55,12 +56,16 @@ export class BreakBulkController {
     };
   }
 
-  /** GET ?locationId= (default the session's store): boxes opened by sales there, and shortfalls covered without a box. */
+  /**
+   * GET ?locationId= (default the session's store)&since= (ISO time; only rows after it, so a count can clear once seen):
+   * boxes opened by sales there, and shortfalls covered without a box.
+   */
   @Get('automatic')
   @Roles('OWNER', 'MANAGER')
-  async automatic(@Query('locationId') queryLocationId: string | undefined, @Req() req: RoleGuardedRequest) {
+  async automatic(@Query('locationId') queryLocationId: string | undefined, @Req() req: RoleGuardedRequest, @Query('since') since?: string) {
     const locationId = queryLocationId || req.currentLocation.locationId;
     assertActingAtOwnStore(req, locationId);
-    return { success: true, data: await this.breakBulkService.automaticOpenings(locationId) };
+    const after = parseDateParam(since, 'since', 'start');
+    return { success: true, data: await this.breakBulkService.automaticOpenings(locationId, after) };
   }
 }
