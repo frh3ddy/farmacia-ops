@@ -10,7 +10,7 @@ type Where = { productId: string; locationId: string };
 export type Books = {
   /** createdQuantity: what the receiving or adjustment that created the batch added; null for opening stock. */
   batches: Array<Where & { id: string; quantity: number; createdQuantity: number | null; splitOut?: number }>; // splitOut: units given to lot pieces
-  negativeAdjustments: Array<Where & { id: string; quantity: number }>;
+  negativeAdjustments: Array<Where & { id: string; quantity: number; type?: string }>;
   saleItems: Array<Where & { id: string; quantity: number }>;
   consumedByBatch: Record<string, number>;
   consumedByAdjustment: Record<string, number>;
@@ -49,6 +49,7 @@ export function booksMismatches(books: Books): BooksMismatch[] {
     }
   }
   for (const adjustment of books.negativeAdjustments) {
+    if (adjustment.type === 'TRANSIT_LOSS') continue; // books a loss the shipment's TRANSFER_OUT already took from stock
     report('adjustment', adjustment, -adjustment.quantity, books.consumedByAdjustment[adjustment.id] ?? 0);
   }
   for (const item of books.saleItems) {
@@ -80,7 +81,7 @@ export async function loadBooks(prisma: PrismaClient): Promise<Books> {
     }),
     prisma.inventoryAdjustment.findMany({
       where: { quantity: { lt: 0 } },
-      select: { id: true, productId: true, locationId: true, quantity: true },
+      select: { id: true, productId: true, locationId: true, quantity: true, type: true },
     }),
     prisma.saleItem.findMany({
       select: { id: true, productId: true, quantity: true, sale: { select: { locationId: true } } },

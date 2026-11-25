@@ -51,6 +51,13 @@ describe('booksMismatches', () => {
     ]);
   });
 
+  it('given units lost in transit, which the shipment already took from stock, reports nothing', () => {
+    const books = balancedBooks();
+    books.negativeAdjustments.push({ id: 'adj-lost', productId: 'jarabe', locationId: 'centro', quantity: -1, type: 'TRANSIT_LOSS' });
+
+    expect(booksMismatches(books)).toEqual([]);
+  });
+
   it('given a sale item whose consumption differs from the quantity sold, reports the sale item', () => {
     const books = balancedBooks();
     delete books.consumedBySaleItem['si-1']; // sold 4, nothing consumed (not costed)
