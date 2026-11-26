@@ -10,6 +10,7 @@ const RECENT_SALES_LIMIT = 200;
 const RETURNS_LIMIT = 200;
 const CASH_DAYS = 31;
 const REASON_MAX_LENGTH = 500;
+const PRODUCT_SEARCH_MAX_LENGTH = 100;
 
 type ReturnBody = { items?: Array<{ saleItemId: string; quantity: number }>; reason?: string; clientRequestId?: string };
 
@@ -30,6 +31,9 @@ export class SaleReturnsController {
   @Get('recent')
   @Roles('OWNER') // staff return in Square; by hand is the owner's fallback
   async recent(@Req() req: RoleGuardedRequest, @Query('locationId') locationId?: string, @Query('days') days?: string, @Query('product') product?: string) {
+    if (product !== undefined && (typeof product !== 'string' || product.length > PRODUCT_SEARCH_MAX_LENGTH)) {
+      throw new BadRequestException(`La búsqueda debe ser texto de hasta ${PRODUCT_SEARCH_MAX_LENGTH} caracteres`);
+    }
     const scoped = scopedLocationId(req, locationId);
     const lookBack = Number(days) > 0 ? Math.min(Number(days), 14) : 3;
     const since = new Date(Date.now() - lookBack * DAY_MS);
