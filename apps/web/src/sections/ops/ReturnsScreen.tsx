@@ -52,14 +52,20 @@ export function ReturnsScreen() {
   }, []);
 
   useEffect(() => {
+    // Drop the old list at once and ignore an answer that arrives after a newer filter was chosen.
+    let current = true;
+    setSales(null);
     setError(null);
     setOpenId(null);
     const params = new URLSearchParams({ days: String(days) });
     if (locationId) params.set("locationId", locationId);
     if (search) params.set("product", search);
     apiFetch<{ data: RecentSale[] }>(`/api/sales/recent?${params}`)
-      .then(body => setSales(body.data))
-      .catch(err => setError(err instanceof ApiError ? err.message : "No se pudieron cargar las ventas"));
+      .then(body => current && setSales(body.data))
+      .catch(err => current && setError(err instanceof ApiError ? err.message : "No se pudieron cargar las ventas"));
+    return () => {
+      current = false;
+    };
   }, [days, locationId, search]);
 
   // The worker records the return in a moment; count it here right away.
@@ -125,7 +131,9 @@ export function ReturnsScreen() {
       <>
       <h2 id="recent-sales" className="mb-2 text-sm font-semibold text-(--color-ink)">Ventas recientes</h2>
       {sales.length === 0 ? (
-        <p className="text-sm text-(--color-ink-tertiary)">No hay ventas recientes.</p>
+        <p className="text-sm text-(--color-ink-tertiary)">
+          {search ? "Ninguna venta coincide con la búsqueda." : "No hay ventas recientes."}
+        </p>
       ) : (
         <ul aria-labelledby="recent-sales" className="divide-y divide-(--color-border-standard) rounded-md border border-(--color-border-standard) bg-(--color-surface-raised)">
           {sales.map(s => (
