@@ -6,7 +6,7 @@ import { ReturnsHistoryScreen, ReturnsScreen } from "./ReturnsScreen";
 vi.mock("../../lib/apiFetch", () => ({
   ApiError: class extends Error {},
   apiFetch: vi.fn(async (path: string) => {
-    if (path === "/api/sales/recent")
+    if (path.startsWith("/api/sales/recent"))
       return {
         data: [
           {
@@ -59,6 +59,22 @@ describe("ReturnsScreen", () => {
     expect(body).toMatchObject({ items: [{ saleItemId: "si-jarabe", quantity: 1 }], reason: "No le sirvió" });
     expect(typeof body.clientRequestId).toBe("string");
     await waitFor(() => expect(screen.getByLabelText("Jarabe (quedan 0)")).toBeTruthy());
+  });
+});
+
+describe("ReturnsScreen search", () => {
+  it("searches sales by period and store, and says which period it covers", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByText(/Oriente/);
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "14" } });
+    await waitFor(() =>
+      expect(vi.mocked(apiFetch).mock.calls.some(([path]) => String(path) === "/api/sales/recent?days=14")).toBe(true),
+    );
+    fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value: "loc-oriente" } });
+    await waitFor(() =>
+      expect(vi.mocked(apiFetch).mock.calls.some(([path]) => String(path) === "/api/sales/recent?days=14&locationId=loc-oriente")).toBe(true),
+    );
+    expect(screen.getByText(/Ventas de los últimos 14 días/)).toBeTruthy();
   });
 });
 
