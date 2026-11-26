@@ -36,6 +36,14 @@ export function ReturnsScreen() {
   const [days, setDays] = useState<number>(3);
   const [locationId, setLocationId] = useState("");
   const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [product, setProduct] = useState("");
+  const [search, setSearch] = useState("");
+
+  // Typing waits a moment, so each keystroke doesn't send a request.
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(product.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [product]);
 
   useEffect(() => {
     apiFetch<{ data: LocationOption[] }>("/locations")
@@ -48,10 +56,11 @@ export function ReturnsScreen() {
     setOpenId(null);
     const params = new URLSearchParams({ days: String(days) });
     if (locationId) params.set("locationId", locationId);
+    if (search) params.set("product", search);
     apiFetch<{ data: RecentSale[] }>(`/api/sales/recent?${params}`)
       .then(body => setSales(body.data))
       .catch(err => setError(err instanceof ApiError ? err.message : "No se pudieron cargar las ventas"));
-  }, [days, locationId]);
+  }, [days, locationId, search]);
 
   // The worker records the return in a moment; count it here right away.
   const returned = (saleId: string, items: Record<string, number>) =>
@@ -68,6 +77,16 @@ export function ReturnsScreen() {
         paga en efectivo.
       </p>
       <div className="mb-4 flex flex-wrap gap-4 text-sm">
+        <label className="block w-full text-(--color-ink-secondary) sm:w-auto">
+          Buscar producto
+          <input
+            aria-label="Buscar producto"
+            type="search"
+            value={product}
+            onChange={e => setProduct(e.target.value)}
+            className="ml-2 rounded-sm border border-(--color-border-standard) px-2 py-1"
+          />
+        </label>
         <label className="text-(--color-ink-secondary)">
           Periodo
           <select

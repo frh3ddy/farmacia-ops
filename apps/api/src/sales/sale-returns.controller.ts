@@ -29,12 +29,17 @@ export class SaleReturnsController {
   /** Recent sales to return from, with what is left of each item. */
   @Get('recent')
   @Roles('OWNER') // staff return in Square; by hand is the owner's fallback
-  async recent(@Req() req: RoleGuardedRequest, @Query('locationId') locationId?: string, @Query('days') days?: string) {
+  async recent(@Req() req: RoleGuardedRequest, @Query('locationId') locationId?: string, @Query('days') days?: string, @Query('product') product?: string) {
     const scoped = scopedLocationId(req, locationId);
     const lookBack = Number(days) > 0 ? Math.min(Number(days), 14) : 3;
     const since = new Date(Date.now() - lookBack * DAY_MS);
+    const name = product?.trim();
     const sales = await this.prisma.sale.findMany({
-      where: { createdAt: { gte: since }, ...(scoped && { locationId: scoped }) },
+      where: {
+        createdAt: { gte: since },
+        ...(scoped && { locationId: scoped }),
+        ...(name && { items: { some: { product: { name: { contains: name, mode: 'insensitive' } } } } }),
+      },
       include: {
         location: { select: { name: true } },
         items: { include: { product: { select: { name: true } }, returns: { select: { quantity: true } } } },
