@@ -77,6 +77,15 @@ describe("ReturnsScreen search", () => {
     );
     expect(screen.getByText(/Ventas de los últimos 14 días/)).toBeTruthy();
   });
+
+  it("searches sales by product name, in the last 3 days by default", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    fireEvent.change(screen.getByLabelText("Buscar producto"), { target: { value: "jarabe" } });
+    await waitFor(() =>
+      expect(vi.mocked(apiFetch).mock.calls.some(([path]) => String(path) === "/api/sales/recent?days=3&product=jarabe")).toBe(true),
+    );
+  });
 });
 
 describe("ReturnsScreen list", () => {
