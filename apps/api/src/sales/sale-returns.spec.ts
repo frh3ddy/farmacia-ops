@@ -89,6 +89,21 @@ describe('recent sales to return from', () => {
     return { days: Math.round((before - where.createdAt.gte.getTime()) / 86_400_000), take, orderBy };
   };
 
+  test('the product search', async () => {
+    const findMany = vi.fn(async () => []);
+    const controller = new SaleReturnsController({ sale: { findMany } } as any, {} as any);
+    const req = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] } as any;
+    await controller.recent(req, 'centro', '14', 'jarabe');
+    await controller.recent(req, 'centro', '14', '   ');
+    const [[withQuery], [blank]] = findMany.mock.calls as any[];
+    assert({
+      given: 'a product search of jarabe and a blank search',
+      should: 'match product names without case, and add no filter when blank',
+      actual: [withQuery.where.items, blank.where.items],
+      expected: [{ some: { product: { name: { contains: 'jarabe', mode: 'insensitive' } } } }, undefined],
+    });
+  });
+
   test('the window and the limit', async () => {
     assert({
       given: 'no days, 7, 30, zero and a negative number',
