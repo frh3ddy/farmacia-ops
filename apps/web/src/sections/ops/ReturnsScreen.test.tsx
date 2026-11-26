@@ -6,7 +6,7 @@ import { ReturnsHistoryScreen, ReturnsScreen } from "./ReturnsScreen";
 vi.mock("../../lib/apiFetch", () => ({
   ApiError: class extends Error {},
   apiFetch: vi.fn(async (path: string) => {
-    if (path === "/api/sales/recent")
+    if (path.startsWith("/api/sales/recent"))
       return {
         data: [
           {
@@ -21,6 +21,7 @@ vi.mock("../../lib/apiFetch", () => ({
           },
         ],
       };
+    if (path === "/locations") return { success: true, data: [{ id: "loc-oriente", name: "Oriente" }, { id: "loc-centro", name: "Centro" }] };
     if (path === "/api/sales/returns")
       return {
         data: [
@@ -45,7 +46,7 @@ vi.mock("../../lib/apiFetch", () => ({
 describe("ReturnsScreen", () => {
   it("returns the chosen units of a recent sale with a reason, once", async () => {
     render(<ReturnsScreen />);
-    fireEvent.click(await screen.findByText(/Oriente/));
+    fireEvent.click(await screen.findByRole("button", { name: /Oriente/ }));
     // One jarabe was already returned, so only one is left.
     expect(screen.getByLabelText("Jarabe (quedan 1)")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Jarabe (quedan 1)"), { target: { value: "1" } });
@@ -59,6 +60,84 @@ describe("ReturnsScreen", () => {
     expect(body).toMatchObject({ items: [{ saleItemId: "si-jarabe", quantity: 1 }], reason: "No le sirvió" });
     expect(typeof body.clientRequestId).toBe("string");
     await waitFor(() => expect(screen.getByLabelText("Jarabe (quedan 0)")).toBeTruthy());
+  });
+});
+
+describe("ReturnsScreen search", () => {
+  it("searches sales by period and store, and says which period it covers", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "14" } });
+    await waitFor(() =>
+      expect(vi.mocked(apiFetch).mock.calls.some(([path]) => String(path) === "/api/sales/recent?days=14")).toBe(true),
+    );
+    fireEvent.change(screen.getByLabelText("Sucursal"), { target: { value: "loc-oriente" } });
+    await waitFor(() =>
+      expect(vi.mocked(apiFetch).mock.calls.some(([path]) => String(path) === "/api/sales/recent?days=14&locationId=loc-oriente")).toBe(true),
+    );
+    expect(screen.getByText(/Ventas de los últimos 14 días/)).toBeTruthy();
+  });
+
+  it("searches sales by product name, in the last 3 days by default", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    fireEvent.change(screen.getByLabelText("Buscar producto"), { target: { value: "jarabe" } });
+    await waitFor(() =>
+      expect(vi.mocked(apiFetch).mock.calls.some(([path]) => String(path) === "/api/sales/recent?days=3&product=jarabe")).toBe(true),
+    );
+  });
+});
+
+describe("ReturnsScreen filters", () => {
+  const sale = (id: string, place: string) => ({
+    data: [{ id, createdAt: "2026-10-27T18:00:00Z", totalRevenue: "10", location: { name: place }, items: [] }],
+  });
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(r => (resolve = r));
+    return { promise, resolve };
+  };
+
+  it("shows only the newest filter's sales when an older answer arrives late", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    const older = deferred<unknown>();
+    const newer = deferred<unknown>();
+    vi.mocked(apiFetch).mockImplementationOnce(() => older.promise as never).mockImplementationOnce(() => newer.promise as never);
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "14" } });
+    newer.resolve(sale("s-14", "Sucursal de 14"));
+    expect(await screen.findByRole("button", { name: /Sucursal de 14/ })).toBeTruthy();
+    older.resolve(sale("s-7", "Sucursal de 7"));
+    await new Promise(r => setTimeout(r, 20));
+    expect(screen.queryByRole("button", { name: /Sucursal de 7/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Sucursal de 14/ })).toBeTruthy();
+  });
+
+  it("hides the old sales while a new filter loads", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    vi.mocked(apiFetch).mockImplementationOnce(() => new Promise(() => {}) as never);
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "7" } });
+    expect(await screen.findByText("Cargando…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Oriente/ })).toBeNull();
+  });
+
+  it("warns when the list was cut at the limit, so a sale may be missing", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    expect(screen.queryByText(/Hay más ventas/)).toBeNull();
+    vi.mocked(apiFetch).mockImplementationOnce(async () => ({ data: [], truncated: true }) as never);
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "7" } });
+    expect(await screen.findByText(/Hay más ventas de las que se muestran/)).toBeTruthy();
+  });
+
+  it("says no sale matches when a product search finds nothing", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    vi.mocked(apiFetch).mockImplementationOnce(async () => ({ data: [] }) as never);
+    fireEvent.change(screen.getByLabelText("Buscar producto"), { target: { value: "zzz" } });
+    expect(await screen.findByText("Ninguna venta coincide con la búsqueda.")).toBeTruthy();
   });
 });
 

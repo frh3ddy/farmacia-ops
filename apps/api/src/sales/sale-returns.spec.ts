@@ -89,12 +89,87 @@ describe('recent sales to return from', () => {
     return { days: Math.round((before - where.createdAt.gte.getTime()) / 86_400_000), take, orderBy };
   };
 
+  test('the product search', async () => {
+    const findMany = vi.fn(async () => []);
+    const controller = new SaleReturnsController({ sale: { findMany } } as any, {} as any);
+    const req = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] } as any;
+    await controller.recent(req, 'centro', '14', 'jarabe');
+    await controller.recent(req, 'centro', '14', '   ');
+    const [[withQuery], [blank]] = findMany.mock.calls as any[];
+    assert({
+      given: 'a product search of jarabe and a blank search',
+      should: 'match product names without case, and add no filter when blank',
+      actual: [withQuery.where.items, blank.where.items],
+      expected: [{ some: { product: { name: { contains: 'jarabe', mode: 'insensitive' } } } }, undefined],
+    });
+  });
+
+  test('the filters together', async () => {
+    const findMany = vi.fn(async () => []);
+    const controller = new SaleReturnsController({ sale: { findMany } } as any, {} as any);
+    const req = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] } as any;
+    await controller.recent(req, 'oriente', '7', '  Jarabe ');
+    const { where } = (findMany.mock.calls[0] as any)[0];
+    assert({
+      given: 'a store, 7 days and a padded product search',
+      should: 'filter by all three together, with the search trimmed',
+      actual: [where.locationId, where.items.some.product.name.contains, Boolean(where.createdAt.gte)],
+      expected: ['oriente', 'Jarabe', true],
+    });
+  });
+
+  test('a product search that is too long or repeated', async () => {
+    const findMany = vi.fn(async () => []);
+    const controller = new SaleReturnsController({ sale: { findMany } } as any, {} as any);
+    const req = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] } as any;
+    const attempt = async (product: unknown) => {
+      try {
+        await controller.recent(req, 'centro', '14', product as string);
+        return 'accepted';
+      } catch (error) {
+        return [(error as HttpException).getStatus(), (error as Error).message];
+      }
+    };
+    assert({
+      given: 'a search of 101 characters, a repeated search, and one of 100 characters',
+      should: 'refuse the first two in Spanish with a 400 and accept the third',
+      actual: [await attempt('a'.repeat(101)), await attempt(['a', 'b']), await attempt('a'.repeat(100))],
+      expected: [
+        [400, 'La búsqueda debe ser texto de hasta 100 caracteres'],
+        [400, 'La búsqueda debe ser texto de hasta 100 caracteres'],
+        'accepted',
+      ],
+    });
+    assert({
+      given: 'the two refused searches',
+      should: 'not query sales',
+      actual: findMany.mock.calls.length,
+      expected: 1,
+    });
+  });
+
+  test('more sales than the limit', async () => {
+    const sales = (count: number) => Array.from({ length: count }, (_, i) => ({ id: `s-${i}` }));
+    const run = async (count: number) => {
+      const controller = new SaleReturnsController({ sale: { findMany: vi.fn(async () => sales(count)) } } as any, {} as any);
+      const req = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] } as any;
+      const { data, truncated } = (await controller.recent(req, 'centro', '14')) as any;
+      return [data.length, truncated];
+    };
+    assert({
+      given: '200 sales and 201 sales in the period',
+      should: 'return at most 200 and flag that more exist only when there are more than 200',
+      actual: [await run(200), await run(201)],
+      expected: [[200, false], [200, true]],
+    });
+  });
+
   test('the window and the limit', async () => {
     assert({
       given: 'no days, 7, 30, zero and a negative number',
       should: 'look back 3 days by default and at most 14, newest first and at most 200 sales',
       actual: [await recent(), await recent('7'), await recent('30'), await recent('0'), await recent('-5')],
-      expected: [3, 7, 14, 3, 3].map((days) => ({ days, take: 200, orderBy: { createdAt: 'desc' } })),
+      expected: [3, 7, 14, 3, 3].map((days) => ({ days, take: 201, orderBy: { createdAt: 'desc' } })),
     });
   });
 });

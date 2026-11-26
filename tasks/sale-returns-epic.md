@@ -70,3 +70,17 @@ A return made in the app is paid back in cash outside Square.
 Done: the worker sums a request's items before checking (`recordReturn`), records `SaleReturn.cashRefunded` for returns by hand and no longer touches the sale; migration `20261031120000_returns_in_their_own_month` adds the column, fills it for earlier hand returns and puts earlier returns back on their sales (production count not checked — the add-back is correct for any count). COGS and margin net returned units by product on the day they came back (`returnedLines`; `sale-item-net.ts` removed); the P&L shows `revenue.sales`, `returns`, `netSales` and `costOfGoodsSold.returns`; the dashboard's `netProfit.salesRevenue` stays net (so current clients add up) with `salesReturns` beside it. `GET /api/sales/returns` adds `cashByDay` (31 days, per Mexico City day and store) and `failed` (failed `record-return` jobs never recorded, from BullMQ's 30-day failed set); pending lines carry `matchError`. The books check is a stock check, unaffected by money; the worker tests assert it stays clean after returns.
 
 Follow-up: a "Devoluciones" row on the iOS dashboard's P&L card from `netProfit.salesReturns` (farmacia-ios was mid-branch with uncommitted work).
+
+---
+
+## ✅ Find a sale further back, by store and product
+
+**Requirements**:
+- Given the "Devoluciones" screen, should let the owner choose the last 3, 7 or 14 days (3 by default) and a store (all by default), and say which period it shows
+- Given a product search, should list only sales with a product whose name contains it, ignoring case, within the chosen period and store
+- Given a search of more than 100 characters, or one repeated in the address, should answer 400 in Spanish and not query sales
+- Given filters changed while a list is loading, should clear the old list at once and ignore an answer to an older choice
+- Given a search that finds nothing, should say no sale matches, not that there are no recent sales
+- Given more than 200 sales in the period, should show the newest 200 and say there are more, so a missing sale is not read as absent
+
+Done: `GET /api/sales/recent` takes `product` next to `days` (still at most 14) and `locationId`; `ReturnsScreen.tsx` has the period, store and product filters (search waits 300 ms after typing). Still at most 200 sales, now with `truncated` and a warning on the screen; the search does not match the sale's receipt or `manualName`.

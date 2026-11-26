@@ -10,6 +10,7 @@ const RECENT_SALES_LIMIT = 200;
 const RETURNS_LIMIT = 200;
 const CASH_DAYS = 31;
 const REASON_MAX_LENGTH = 500;
+const PRODUCT_SEARCH_MAX_LENGTH = 100;
 
 type ReturnBody = { items?: Array<{ saleItemId: string; quantity: number }>; reason?: string; clientRequestId?: string };
 
@@ -29,20 +30,28 @@ export class SaleReturnsController {
   /** Recent sales to return from, with what is left of each item. */
   @Get('recent')
   @Roles('OWNER') // staff return in Square; by hand is the owner's fallback
-  async recent(@Req() req: RoleGuardedRequest, @Query('locationId') locationId?: string, @Query('days') days?: string) {
+  async recent(@Req() req: RoleGuardedRequest, @Query('locationId') locationId?: string, @Query('days') days?: string, @Query('product') product?: string) {
+    if (product !== undefined && (typeof product !== 'string' || product.length > PRODUCT_SEARCH_MAX_LENGTH)) {
+      throw new BadRequestException(`La búsqueda debe ser texto de hasta ${PRODUCT_SEARCH_MAX_LENGTH} caracteres`);
+    }
     const scoped = scopedLocationId(req, locationId);
     const lookBack = Number(days) > 0 ? Math.min(Number(days), 14) : 3;
     const since = new Date(Date.now() - lookBack * DAY_MS);
+    const name = product?.trim();
     const sales = await this.prisma.sale.findMany({
-      where: { createdAt: { gte: since }, ...(scoped && { locationId: scoped }) },
+      where: {
+        createdAt: { gte: since },
+        ...(scoped && { locationId: scoped }),
+        ...(name && { items: { some: { product: { name: { contains: name, mode: 'insensitive' } } } } }),
+      },
       include: {
         location: { select: { name: true } },
         items: { include: { product: { select: { name: true } }, returns: { select: { quantity: true } } } },
       },
       orderBy: { createdAt: 'desc' },
-      take: RECENT_SALES_LIMIT,
+      take: RECENT_SALES_LIMIT + 1, // one more than shown, to know the list was cut
     });
-    return { success: true, data: sales };
+    return { success: true, data: sales.slice(0, RECENT_SALES_LIMIT), truncated: sales.length > RECENT_SALES_LIMIT };
   }
 
   /** The worker restocks and records the return, so this only queues it. */
