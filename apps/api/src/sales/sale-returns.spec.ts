@@ -104,6 +104,20 @@ describe('recent sales to return from', () => {
     });
   });
 
+  test('the filters together', async () => {
+    const findMany = vi.fn(async () => []);
+    const controller = new SaleReturnsController({ sale: { findMany } } as any, {} as any);
+    const req = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] } as any;
+    await controller.recent(req, 'oriente', '7', '  Jarabe ');
+    const { where } = (findMany.mock.calls[0] as any)[0];
+    assert({
+      given: 'a store, 7 days and a padded product search',
+      should: 'filter by all three together, with the search trimmed',
+      actual: [where.locationId, where.items.some.product.name.contains, Boolean(where.createdAt.gte)],
+      expected: ['oriente', 'Jarabe', true],
+    });
+  });
+
   test('the window and the limit', async () => {
     assert({
       given: 'no days, 7, 30, zero and a negative number',

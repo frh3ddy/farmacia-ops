@@ -88,6 +88,50 @@ describe("ReturnsScreen search", () => {
   });
 });
 
+describe("ReturnsScreen filters", () => {
+  const sale = (id: string, place: string) => ({
+    data: [{ id, createdAt: "2026-10-27T18:00:00Z", totalRevenue: "10", location: { name: place }, items: [] }],
+  });
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(r => (resolve = r));
+    return { promise, resolve };
+  };
+
+  it("shows only the newest filter's sales when an older answer arrives late", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    const older = deferred<unknown>();
+    const newer = deferred<unknown>();
+    vi.mocked(apiFetch).mockImplementationOnce(() => older.promise as never).mockImplementationOnce(() => newer.promise as never);
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "14" } });
+    newer.resolve(sale("s-14", "Sucursal de 14"));
+    expect(await screen.findByRole("button", { name: /Sucursal de 14/ })).toBeTruthy();
+    older.resolve(sale("s-7", "Sucursal de 7"));
+    await new Promise(r => setTimeout(r, 20));
+    expect(screen.queryByRole("button", { name: /Sucursal de 7/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Sucursal de 14/ })).toBeTruthy();
+  });
+
+  it("hides the old sales while a new filter loads", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    vi.mocked(apiFetch).mockImplementationOnce(() => new Promise(() => {}) as never);
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "7" } });
+    expect(await screen.findByText("Cargando…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Oriente/ })).toBeNull();
+  });
+
+  it("says no sale matches when a product search finds nothing", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    vi.mocked(apiFetch).mockImplementationOnce(async () => ({ data: [] }) as never);
+    fireEvent.change(screen.getByLabelText("Buscar producto"), { target: { value: "zzz" } });
+    expect(await screen.findByText("Ninguna venta coincide con la búsqueda.")).toBeTruthy();
+  });
+});
+
 describe("ReturnsScreen list", () => {
   it("labels the list as recent sales, so no row reads as a return", async () => {
     render(<ReturnsScreen />);
