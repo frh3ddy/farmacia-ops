@@ -49,9 +49,9 @@ export class SaleReturnsController {
         items: { include: { product: { select: { name: true } }, returns: { select: { quantity: true } } } },
       },
       orderBy: { createdAt: 'desc' },
-      take: RECENT_SALES_LIMIT,
+      take: RECENT_SALES_LIMIT + 1, // one more than shown, to know the list was cut
     });
-    return { success: true, data: sales };
+    return { success: true, data: sales.slice(0, RECENT_SALES_LIMIT), truncated: sales.length > RECENT_SALES_LIMIT };
   }
 
   /** The worker restocks and records the return, so this only queues it. */

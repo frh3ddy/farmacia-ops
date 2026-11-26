@@ -31,6 +31,7 @@ const PERIODS = [3, 7, 14] as const;
 /** Customer returns by hand: pick a sale from a chosen period and store, the units coming back, and why. */
 export function ReturnsScreen() {
   const [sales, setSales] = useState<RecentSale[] | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [days, setDays] = useState<number>(3);
@@ -60,8 +61,12 @@ export function ReturnsScreen() {
     const params = new URLSearchParams({ days: String(days) });
     if (locationId) params.set("locationId", locationId);
     if (search) params.set("product", search);
-    apiFetch<{ data: RecentSale[] }>(`/api/sales/recent?${params}`)
-      .then(body => current && setSales(body.data))
+    apiFetch<{ data: RecentSale[]; truncated?: boolean }>(`/api/sales/recent?${params}`)
+      .then(body => {
+        if (!current) return;
+        setSales(body.data);
+        setTruncated(Boolean(body.truncated));
+      })
       .catch(err => current && setError(err instanceof ApiError ? err.message : "No se pudieron cargar las ventas"));
     return () => {
       current = false;
@@ -130,6 +135,11 @@ export function ReturnsScreen() {
       ) : (
       <>
       <h2 id="recent-sales" className="mb-2 text-sm font-semibold text-(--color-ink)">Ventas recientes</h2>
+      {truncated && (
+        <p className="mb-2 text-sm text-(--color-ink-secondary)">
+          Hay más ventas de las que se muestran. Busca un producto o elige una sucursal o menos días.
+        </p>
+      )}
       {sales.length === 0 ? (
         <p className="text-sm text-(--color-ink-tertiary)">
           {search ? "Ninguna venta coincide con la búsqueda." : "No hay ventas recientes."}
