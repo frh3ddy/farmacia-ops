@@ -148,12 +148,28 @@ describe('recent sales to return from', () => {
     });
   });
 
+  test('more sales than the limit', async () => {
+    const sales = (count: number) => Array.from({ length: count }, (_, i) => ({ id: `s-${i}` }));
+    const run = async (count: number) => {
+      const controller = new SaleReturnsController({ sale: { findMany: vi.fn(async () => sales(count)) } } as any, {} as any);
+      const req = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] } as any;
+      const { data, truncated } = (await controller.recent(req, 'centro', '14')) as any;
+      return [data.length, truncated];
+    };
+    assert({
+      given: '200 sales and 201 sales in the period',
+      should: 'return at most 200 and flag that more exist only when there are more than 200',
+      actual: [await run(200), await run(201)],
+      expected: [[200, false], [200, true]],
+    });
+  });
+
   test('the window and the limit', async () => {
     assert({
       given: 'no days, 7, 30, zero and a negative number',
       should: 'look back 3 days by default and at most 14, newest first and at most 200 sales',
       actual: [await recent(), await recent('7'), await recent('30'), await recent('0'), await recent('-5')],
-      expected: [3, 7, 14, 3, 3].map((days) => ({ days, take: 200, orderBy: { createdAt: 'desc' } })),
+      expected: [3, 7, 14, 3, 3].map((days) => ({ days, take: 201, orderBy: { createdAt: 'desc' } })),
     });
   });
 });

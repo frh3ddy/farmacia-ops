@@ -123,6 +123,15 @@ describe("ReturnsScreen filters", () => {
     expect(screen.queryByRole("button", { name: /Oriente/ })).toBeNull();
   });
 
+  it("warns when the list was cut at the limit, so a sale may be missing", async () => {
+    render(<ReturnsScreen />);
+    await screen.findByRole("button", { name: /Oriente/ });
+    expect(screen.queryByText(/Hay más ventas/)).toBeNull();
+    vi.mocked(apiFetch).mockImplementationOnce(async () => ({ data: [], truncated: true }) as never);
+    fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "7" } });
+    expect(await screen.findByText(/Hay más ventas de las que se muestran/)).toBeTruthy();
+  });
+
   it("says no sale matches when a product search finds nothing", async () => {
     render(<ReturnsScreen />);
     await screen.findByRole("button", { name: /Oriente/ });
