@@ -118,6 +118,36 @@ describe('recent sales to return from', () => {
     });
   });
 
+  test('a product search that is too long or repeated', async () => {
+    const findMany = vi.fn(async () => []);
+    const controller = new SaleReturnsController({ sale: { findMany } } as any, {} as any);
+    const req = { currentLocation: { locationId: 'centro', role: 'OWNER' }, accessibleLocations: [] } as any;
+    const attempt = async (product: unknown) => {
+      try {
+        await controller.recent(req, 'centro', '14', product as string);
+        return 'accepted';
+      } catch (error) {
+        return [(error as HttpException).getStatus(), (error as Error).message];
+      }
+    };
+    assert({
+      given: 'a search of 101 characters, a repeated search, and one of 100 characters',
+      should: 'refuse the first two in Spanish with a 400 and accept the third',
+      actual: [await attempt('a'.repeat(101)), await attempt(['a', 'b']), await attempt('a'.repeat(100))],
+      expected: [
+        [400, 'La búsqueda debe ser texto de hasta 100 caracteres'],
+        [400, 'La búsqueda debe ser texto de hasta 100 caracteres'],
+        'accepted',
+      ],
+    });
+    assert({
+      given: 'the two refused searches',
+      should: 'not query sales',
+      actual: findMany.mock.calls.length,
+      expected: 1,
+    });
+  });
+
   test('the window and the limit', async () => {
     assert({
       given: 'no days, 7, 30, zero and a negative number',
