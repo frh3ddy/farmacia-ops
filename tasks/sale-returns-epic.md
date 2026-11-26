@@ -81,5 +81,6 @@ Follow-up: a "Devoluciones" row on the iOS dashboard's P&L card from `netProfit.
 - Given a search of more than 100 characters, or one repeated in the address, should answer 400 in Spanish and not query sales
 - Given filters changed while a list is loading, should clear the old list at once and ignore an answer to an older choice
 - Given a search that finds nothing, should say no sale matches, not that there are no recent sales
+- Given more than 200 sales in the period, should show the newest 200 and say there are more, so a missing sale is not read as absent
 
-Done: `GET /api/sales/recent` takes `product` next to `days` (still at most 14) and `locationId`; `ReturnsScreen.tsx` has the period, store and product filters (search waits 300 ms after typing). Still at most 200 sales, so a busy store over 14 days can be cut off; the search does not match the sale's receipt or `manualName`.
+Done: `GET /api/sales/recent` takes `product` next to `days` (still at most 14) and `locationId`; `ReturnsScreen.tsx` has the period, store and product filters (search waits 300 ms after typing). Still at most 200 sales, now with `truncated` and a warning on the screen; the search does not match the sale's receipt or `manualName`.
