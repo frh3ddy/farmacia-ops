@@ -21,6 +21,7 @@ vi.mock("../../lib/apiFetch", () => ({
           },
         ],
       };
+    if (path === "/locations") return { success: true, data: [{ id: "loc-oriente", name: "Oriente" }, { id: "loc-centro", name: "Centro" }] };
     if (path === "/api/sales/returns")
       return {
         data: [
@@ -45,7 +46,7 @@ vi.mock("../../lib/apiFetch", () => ({
 describe("ReturnsScreen", () => {
   it("returns the chosen units of a recent sale with a reason, once", async () => {
     render(<ReturnsScreen />);
-    fireEvent.click(await screen.findByText(/Oriente/));
+    fireEvent.click(await screen.findByRole("button", { name: /Oriente/ }));
     // One jarabe was already returned, so only one is left.
     expect(screen.getByLabelText("Jarabe (quedan 1)")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Jarabe (quedan 1)"), { target: { value: "1" } });
@@ -65,7 +66,7 @@ describe("ReturnsScreen", () => {
 describe("ReturnsScreen search", () => {
   it("searches sales by period and store, and says which period it covers", async () => {
     render(<ReturnsScreen />);
-    await screen.findByText(/Oriente/);
+    await screen.findByRole("button", { name: /Oriente/ });
     fireEvent.change(screen.getByLabelText("Periodo"), { target: { value: "14" } });
     await waitFor(() =>
       expect(vi.mocked(apiFetch).mock.calls.some(([path]) => String(path) === "/api/sales/recent?days=14")).toBe(true),

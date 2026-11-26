@@ -23,24 +23,39 @@ type History = {
 const left = (item: SaleItem) => item.quantity - item.returns.reduce((n, r) => n + r.quantity, 0);
 const dateTime = (iso: string) => new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" });
 
-/** Customer returns by hand: pick a sale from the last 3 days, the units coming back, and why. */
+type LocationOption = { id: string; name: string };
+
+// Periods the API accepts (it caps the window at 14 days).
+const PERIODS = [3, 7, 14] as const;
+
+/** Customer returns by hand: pick a sale from a chosen period and store, the units coming back, and why. */
 export function ReturnsScreen() {
   const [sales, setSales] = useState<RecentSale[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [days, setDays] = useState<number>(3);
+  const [locationId, setLocationId] = useState("");
+  const [locations, setLocations] = useState<LocationOption[]>([]);
 
   useEffect(() => {
-    apiFetch<{ data: RecentSale[] }>("/api/sales/recent")
-      .then(body => setSales(body.data))
-      .catch(err => setError(err instanceof ApiError ? err.message : "No se pudieron cargar las ventas"));
+    apiFetch<{ data: LocationOption[] }>("/locations")
+      .then(body => setLocations(body.data ?? []))
+      .catch(() => {});
   }, []);
 
-  if (error) return <p className="text-sm text-(--color-destructive)">{error}</p>;
-  if (!sales) return <p className="text-sm text-(--color-ink-tertiary)">Cargando…</p>;
+  useEffect(() => {
+    setError(null);
+    setOpenId(null);
+    const params = new URLSearchParams({ days: String(days) });
+    if (locationId) params.set("locationId", locationId);
+    apiFetch<{ data: RecentSale[] }>(`/api/sales/recent?${params}`)
+      .then(body => setSales(body.data))
+      .catch(err => setError(err instanceof ApiError ? err.message : "No se pudieron cargar las ventas"));
+  }, [days, locationId]);
 
   // The worker records the return in a moment; count it here right away.
   const returned = (saleId: string, items: Record<string, number>) =>
-    setSales(sales.map(s => (s.id !== saleId ? s : {
+    sales && setSales(sales.map(s => (s.id !== saleId ? s : {
       ...s,
       items: s.items.map(i => (items[i.id] ? { ...i, returns: [...i.returns, { quantity: items[i.id] }] } : i)),
     })));
@@ -49,9 +64,46 @@ export function ReturnsScreen() {
     <div className="max-w-3xl">
       <h1 className="mb-1 text-xl font-semibold text-(--color-ink)">Devoluciones</h1>
       <p className="mb-4 text-sm text-(--color-ink-secondary)">
-        Ventas de los últimos 3 días. Lo devuelto regresa a la existencia y cuenta como devolución del día; se
+        Ventas de los últimos {days} días. Lo devuelto regresa a la existencia y cuenta como devolución del día; se
         paga en efectivo.
       </p>
+      <div className="mb-4 flex flex-wrap gap-4 text-sm">
+        <label className="text-(--color-ink-secondary)">
+          Periodo
+          <select
+            value={days}
+            onChange={e => setDays(Number(e.target.value))}
+            className="ml-2 rounded-sm border border-(--color-border-standard) px-2 py-1"
+          >
+            {PERIODS.map(p => (
+              <option key={p} value={p}>
+                Últimos {p} días
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-(--color-ink-secondary)">
+          Sucursal
+          <select
+            value={locationId}
+            onChange={e => setLocationId(e.target.value)}
+            className="ml-2 rounded-sm border border-(--color-border-standard) px-2 py-1"
+          >
+            <option value="">Todas</option>
+            {locations.map(l => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {error ? (
+        <p className="text-sm text-(--color-destructive)">{error}</p>
+      ) : !sales ? (
+        <p className="text-sm text-(--color-ink-tertiary)">Cargando…</p>
+      ) : (
+      <>
       <h2 id="recent-sales" className="mb-2 text-sm font-semibold text-(--color-ink)">Ventas recientes</h2>
       {sales.length === 0 ? (
         <p className="text-sm text-(--color-ink-tertiary)">No hay ventas recientes.</p>
@@ -74,6 +126,8 @@ export function ReturnsScreen() {
             </li>
           ))}
         </ul>
+      )}
+      </>
       )}
     </div>
   );
